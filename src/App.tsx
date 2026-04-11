@@ -129,6 +129,90 @@ const humanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
   'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
 
+const humanRestoreSuccessPath = '/human-restore/success'
+
+const humanRestoreSteps = [
+  {
+    title: '1. Pay for one photo',
+    description: 'Complete secure checkout for one important old photo.',
+  },
+  {
+    title: '2. Upload only after checkout',
+    description:
+      'After payment, you will land on a thank-you page with upload instructions.',
+  },
+  {
+    title: '3. Get delivery by email',
+    description:
+      'Delivered within 48 hours during beta. Limited beta capacity.',
+  },
+]
+
+const humanRestoreSuccessSteps = [
+  {
+    title: '1. Reply to your order email',
+    description:
+      'Attach the photo you want restored so we can match it to your payment.',
+  },
+  {
+    title: '2. Add any repair notes',
+    description:
+      'Tell us about scratches, missing areas, color issues, or anything that matters to your family.',
+  },
+  {
+    title: '3. Watch for delivery',
+    description:
+      'We complete AI restoration plus manual touch-up and deliver by email within 48 hours during beta.',
+  },
+]
+
+const humanRestoreUploadChecklist = [
+  'The original scan or the highest-resolution copy you have',
+  'A short note about the damage or what you want improved',
+  'Any deadline or family context that matters for this restoration',
+]
+
+const siteUrl = 'https://artgen.site'
+const homePageTitle = 'MemoryFix AI - Private Old Photo Repair'
+const homePageDescription =
+  'Repair scratches and upscale old family photos privately in your browser. Advanced cloud restoration is available only as an opt-in future workflow.'
+const humanRestoreSuccessTitle =
+  'Thank You - MemoryFix AI Human-assisted Restore'
+const humanRestoreSuccessDescription =
+  'Thank you for booking MemoryFix AI Human-assisted Restore. Reply to your order email with your photo and any repair notes to begin.'
+
+function upsertMetaTag(
+  attribute: 'name' | 'property',
+  key: string,
+  content: string
+) {
+  let metaTag = document.head.querySelector<HTMLMetaElement>(
+    `meta[${attribute}="${key}"]`
+  )
+
+  if (!metaTag) {
+    metaTag = document.createElement('meta')
+    metaTag.setAttribute(attribute, key)
+    document.head.appendChild(metaTag)
+  }
+
+  metaTag.setAttribute('content', content)
+}
+
+function upsertCanonicalLink(href: string) {
+  let canonicalLink = document.head.querySelector<HTMLLinkElement>(
+    'link[rel="canonical"]'
+  )
+
+  if (!canonicalLink) {
+    canonicalLink = document.createElement('link')
+    canonicalLink.setAttribute('rel', 'canonical')
+    document.head.appendChild(canonicalLink)
+  }
+
+  canonicalLink.setAttribute('href', href)
+}
+
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
@@ -138,15 +222,57 @@ function App() {
 
   const [downloadProgress, setDownloadProgress] = useState(100)
 
+  const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
+  const isHumanRestoreSuccessPage = currentPath === humanRestoreSuccessPath
+
+  let mainView: 'editor' | 'success' | 'home' = 'home'
+
+  if (file) {
+    mainView = 'editor'
+  } else if (isHumanRestoreSuccessPage) {
+    mainView = 'success'
+  }
+
+  useEffect(() => {
+    const pageTitle = isHumanRestoreSuccessPage
+      ? humanRestoreSuccessTitle
+      : homePageTitle
+    const pageDescription = isHumanRestoreSuccessPage
+      ? humanRestoreSuccessDescription
+      : homePageDescription
+    const pageRobots = isHumanRestoreSuccessPage
+      ? 'noindex, nofollow'
+      : 'index, follow'
+    const pageUrl = new URL(
+      isHumanRestoreSuccessPage ? humanRestoreSuccessPath : '/',
+      siteUrl
+    ).toString()
+
+    document.title = pageTitle
+    upsertCanonicalLink(pageUrl)
+    upsertMetaTag('name', 'description', pageDescription)
+    upsertMetaTag('name', 'robots', pageRobots)
+    upsertMetaTag('property', 'og:title', pageTitle)
+    upsertMetaTag('property', 'og:description', pageDescription)
+    upsertMetaTag('property', 'og:type', 'website')
+    upsertMetaTag('property', 'og:url', pageUrl)
+    upsertMetaTag('name', 'twitter:card', 'summary_large_image')
+    upsertMetaTag('name', 'twitter:title', pageTitle)
+    upsertMetaTag('name', 'twitter:description', pageDescription)
+    upsertMetaTag('name', 'twitter:url', pageUrl)
+  }, [isHumanRestoreSuccessPage])
+
   useEffect(() => {
     const unsubscribe = onSetLanguageTag(() =>
       setStateLanguageTag(languageTag())
     )
-    trackProductEvent('visit_home')
+    trackProductEvent(
+      isHumanRestoreSuccessPage ? 'view_human_restore_success' : 'visit_home'
+    )
     return () => {
       unsubscribe()
     }
-  }, [])
+  }, [isHumanRestoreSuccessPage])
 
   useEffect(() => {
     let isActive = true
@@ -223,17 +349,24 @@ function App() {
       <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
         <Button
           className={[
-            file ? '' : 'opacity-50 pointer-events-none',
+            file || isHumanRestoreSuccessPage
+              ? ''
+              : 'opacity-50 pointer-events-none',
             'pl-1 pr-1',
           ].join(' ')}
           icon={<ArrowLeftIcon className="h-6 w-6" />}
           onClick={() => {
+            if (isHumanRestoreSuccessPage) {
+              window.location.assign('/')
+              return
+            }
+
             setFile(undefined)
           }}
         >
           <div className="md:w-[180px]">
             <span className="hidden select-none sm:inline">
-              {m.start_new()}
+              {isHumanRestoreSuccessPage ? 'Back home' : m.start_new()}
             </span>
           </div>
         </Button>
@@ -251,7 +384,7 @@ function App() {
           </div>
         </div>
         <div className="hidden items-center justify-end gap-3 md:flex">
-          {!file && (
+          {!file && !isHumanRestoreSuccessPage && (
             <>
               <a
                 href="#privacy"
@@ -307,9 +440,101 @@ function App() {
         style={file ? { height: 'calc(100vh - 72px)' } : undefined}
         className={file ? 'relative' : 'relative'}
       >
-        {file ? (
-          <Editor file={file} />
-        ) : (
+        {mainView === 'editor' && file && <Editor file={file} />}
+        {mainView === 'success' && (
+          <div className="mx-auto flex max-w-5xl flex-col px-4 py-10 md:px-8">
+            <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-12">
+              <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                Payment received
+              </p>
+              <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
+                Thank you for booking Human-assisted Restore.
+              </h1>
+              <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
+                Your checkout is complete. The next step is simple: reply to
+                your order confirmation email and attach the photo you want
+                restored. That keeps the upload tied to your payment record
+                without asking you to create an account.
+              </p>
+              <div className="mt-8 rounded-[2rem] bg-[#211915] p-6 text-white md:p-8">
+                <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#f3c16f]">
+                  Important privacy boundary
+                </p>
+                <h2 className="mt-3 text-2xl font-black sm:text-3xl">
+                  Upload is required only for this paid service.
+                </h2>
+                <p className="mt-4 max-w-3xl leading-7 text-[#e8dfd5]">
+                  The free local repair tool still runs in your browser and does
+                  not upload photos. Only Human-assisted Restore asks you to
+                  send a file after you explicitly choose and pay for it.
+                </p>
+              </div>
+            </section>
+
+            <section className="mt-10 grid gap-5 md:grid-cols-3">
+              {humanRestoreSuccessSteps.map(step => (
+                <article
+                  key={step.title}
+                  className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10"
+                >
+                  <h2 className="text-xl font-black text-[#211915]">
+                    {step.title}
+                  </h2>
+                  <p className="mt-4 leading-7 text-[#66574d]">
+                    {step.description}
+                  </p>
+                </article>
+              ))}
+            </section>
+
+            <section className="mt-10 grid gap-6 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1fr_auto] md:items-center md:p-10">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                  What to send
+                </p>
+                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                  Send the best file you have, plus a short note.
+                </h2>
+                <ul className="mt-6 space-y-3 text-[#66574d]">
+                  {humanRestoreUploadChecklist.map(item => (
+                    <li key={item} className="flex gap-3 leading-7">
+                      <span className="text-[#9b6b3c]">*</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-6 leading-7 text-[#66574d]">
+                  If you opened this page directly and do not see an order email
+                  yet, check your inbox and spam folder for the Lemon Squeezy
+                  confirmation first.
+                </p>
+              </div>
+              <div className="flex flex-col items-stretch gap-3 md:w-[220px]">
+                <a
+                  href="/"
+                  className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
+                >
+                  Back to homepage
+                </a>
+                <a
+                  href={humanRestoreUrl}
+                  target={
+                    humanRestoreUrl.startsWith('http') ? '_blank' : undefined
+                  }
+                  rel={
+                    humanRestoreUrl.startsWith('http')
+                      ? 'noreferrer'
+                      : undefined
+                  }
+                  className="inline-flex justify-center rounded-full border border-[#211915] px-7 py-4 text-center font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
+                >
+                  Book another photo
+                </a>
+              </div>
+            </section>
+          </div>
+        )}
+        {mainView === 'home' && (
           <div className="mx-auto flex max-w-7xl flex-col px-4 py-10 md:px-8">
             <section className="grid items-center gap-10 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
               <div>
@@ -402,32 +627,60 @@ function App() {
                 <h2 className="mt-3 text-3xl font-black sm:text-4xl">
                   Restore one important photo with human help.
                 </h2>
+                <p className="mt-4 text-lg font-black text-[#211915]">
+                  MemoryFix AI Human-assisted Restore - $19/photo
+                </p>
                 <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
-                  Local repair stays free and private. If a photo is worth extra
-                  care, choose Human-assisted Restore: upload only with explicit
-                  consent, then get AI base restoration plus manual review and
+                  For one important old photo that deserves extra care. Local
+                  repair stays free and private. If you choose Human-assisted
+                  Restore, upload happens only after explicit checkout, then we
+                  combine AI base restoration with human review and manual
                   touch-up.
                 </p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  {humanRestoreSteps.map(step => (
+                    <div
+                      key={step.title}
+                      className="rounded-2xl border border-[#e6d2b7] bg-[#f8f1e7] p-4"
+                    >
+                      <h3 className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
+                        {step.title}
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-[#66574d]">
+                        {step.description}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <a
-                href={humanRestoreUrl}
-                target={
-                  humanRestoreUrl.startsWith('http') ? '_blank' : undefined
-                }
-                rel={
-                  humanRestoreUrl.startsWith('http') ? 'noreferrer' : undefined
-                }
-                onClick={() => {
-                  trackProductEvent('click_human_restore', {
-                    destination: humanRestoreUrl.startsWith('http')
-                      ? 'checkout'
-                      : 'mailto',
-                  })
-                }}
-                className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
-              >
-                Book Human Restore
-              </a>
+              <div className="flex flex-col items-stretch gap-3 md:w-[260px]">
+                <a
+                  href={humanRestoreUrl}
+                  target={
+                    humanRestoreUrl.startsWith('http') ? '_blank' : undefined
+                  }
+                  rel={
+                    humanRestoreUrl.startsWith('http')
+                      ? 'noreferrer'
+                      : undefined
+                  }
+                  onClick={() => {
+                    trackProductEvent('click_human_restore', {
+                      destination: humanRestoreUrl.startsWith('http')
+                        ? 'checkout'
+                        : 'mailto',
+                    })
+                  }}
+                  className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
+                >
+                  Book Human Restore
+                </a>
+                <p className="text-sm leading-6 text-[#66574d] md:text-right">
+                  Important: the free local repair tool does not upload photos.
+                  This paid service requires upload only after you explicitly
+                  choose Human-assisted Restore.
+                </p>
+              </div>
             </section>
 
             <section className="py-10">

@@ -27,6 +27,7 @@ No upload. No account. No cloud processing.
 - Vercel Web Analytics page view tracking and product funnel events
 - Pricing validation section for Free Local, Family Pack, and Album Pack
 - Human-assisted Restore CTA for opt-in upload and manual review
+- Human Restore success page with post-payment upload instructions
 - GPL-3.0 open-source attribution
 
 ## Product Boundary
@@ -118,6 +119,7 @@ identifiers. The current funnel events cover:
 - `download_result`
 - `toggle_original_compare`
 - `click_human_restore`
+- `view_human_restore_success`
 
 ## Deployment
 
@@ -133,11 +135,18 @@ Use these settings for the first launch:
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
 - Paid validation URL: `Book Human Restore` points to the Lemon Squeezy checkout URL by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
+- Success page path: `/human-restore/success`
 
 Current checkout:
 
 ```text
 https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268
+```
+
+Recommended success redirect:
+
+```text
+https://artgen.site/human-restore/success
 ```
 
 ## Validation Notes

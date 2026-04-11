@@ -20,6 +20,13 @@
 - 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
 - 接入 Vercel Web Analytics，并增加首批产品漏斗事件
 
+当前线上状态：
+
+- 正式站点：`https://artgen.site`
+- 部署平台：Vercel
+- 代码主分支：`main`
+- 已推送关键提交：`700458a Connect human restore checkout`
+
 推荐首发部署参数：
 
 ```text
@@ -28,37 +35,41 @@ Output directory: dist
 Install command: npm install --ignore-scripts
 ```
 
-## 首发平台建议
+## 当前商业验证优先级
 
-优先选择 Cloudflare Pages 或 Vercel 的其中一个，不要两个平台同时正式推广，避免数据分散。
+当前已经完成公开访问、基础分析和付款入口接入。接下来不要再分散到多平台部署优化，优先做真实收款闭环验证：
 
-建议先用 Cloudflare Pages：
-
-- 海外访问速度通常更友好
-- 静态站部署路径简单
-- `public/_headers` 和 `public/_redirects` 已经准备好
-
-Vercel 也可以：
-
-- `vercel.json` 已经准备好
-- 后续如果增加 Next.js、API route 或服务端能力，迁移成本低
+1. 激活 Lemon Squeezy 店铺
+2. 做一次端到端付款测试
+3. 配置付款成功后的 thank-you 页面或邮件说明
+4. 明确用户付款后如何上传照片
+5. 小规模获客验证文案与价格
 
 ## 首个付费用户路径
 
 当前最短路径：
 
-1. 创建一个 `$19/photo Human-assisted Restore` 托管付款链接
-2. 把付款链接配置成环境变量 `VITE_EARLY_ACCESS_URL`
-3. 重新部署站点
-4. 用户点击 `Book Human Restore`
-5. 用户完成付款
-6. 付款成功后人工发送邮件，请用户上传照片或回复确认交付细节
+1. 用户进入首页，先理解 `Free Local` 是浏览器本地修复，不上传照片
+2. 用户在 `Human-assisted Restore - $19/photo` 区域看到独立付费 CTA
+3. 用户点击 `Book Human Restore`
+4. 打开 Lemon Squeezy checkout 并完成付款
+5. 付款成功页或订单邮件告知上传方式与交付说明
+6. 用户只在此时主动上传照片或回复邮件
+7. 人工完成 review / touch-up，并在 beta 期间 `48 小时内` 邮件交付
 
 当前 checkout：
 
 ```text
 https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268
 ```
+
+当前代码逻辑：
+
+- 优先读取 `import.meta.env.VITE_EARLY_ACCESS_URL`
+- 如果未配置环境变量，则使用上述 Lemon Squeezy checkout 作为默认链接
+- 因此只有在你显式设置了新的 `VITE_EARLY_ACCESS_URL` 时，首页按钮才会覆盖默认 checkout
+- 已实现付款成功说明页路径：`/human-restore/success`
+- 该页面用于说明上传方式、隐私边界和 beta 交付承诺
 
 可以使用的付款工具：
 
@@ -73,9 +84,43 @@ Human-assisted Restore 产品建议文案：
 MemoryFix AI Human-assisted Restore - $19/photo
 
 For one important old photo that deserves extra care. We combine AI base restoration with human review and manual touch-up, then deliver a cleaner result by email.
+
+Important: The free local repair tool does not upload photos. This paid service requires upload only after you explicitly choose Human-assisted Restore.
+
+Delivered by email within 48 hours during beta.
+Limited beta capacity.
 ```
 
 注意：当前本地免费工具仍可直接使用。Human-assisted Restore 必须强调“用户主动选择并同意上传”，不能混淆为本地免费修复也会上传。
+
+## 付款成功后的引导建议
+
+优先选择以下任一方式，减少用户付款后的迷茫感：
+
+1. Lemon Squeezy success URL 跳转到 thank-you 页面
+2. Lemon Squeezy 订单确认邮件中写明上传和交付流程
+3. 两者同时存在
+
+当前建议直接把 Lemon Squeezy 成功跳转配置到：
+
+```text
+https://artgen.site/human-restore/success
+```
+
+建议 success / 邮件文案至少包含：
+
+```text
+Thank you for booking MemoryFix AI Human-assisted Restore.
+
+Next step: reply to your order email and attach the photo you want restored.
+
+What happens next:
+1. We review the photo and confirm whether it fits the beta workflow.
+2. We complete AI restoration plus manual touch-up.
+3. We deliver the final result by email within 48 hours during beta.
+
+Important: the free local tool does not upload your photos. Upload is required only for this paid service after you explicitly choose it.
+```
 
 ## Pricing 页面结构
 
@@ -112,8 +157,9 @@ Best for scanning and restoring a small collection.
 7. `4x-upscaling` 能触发模型下载和处理
 8. `Download` 能导出结果
 9. `Privacy / Terms / Open Source` 锚点可跳转
-10. `Book Human Restore` 在未配置环境变量时打开邮件，在配置后打开付款链接
-11. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
+10. `Book Human Restore` 在未配置环境变量时打开默认 Lemon Squeezy checkout，在配置环境变量后打开你指定的新链接
+11. 直接访问 `/human-restore/success` 可以看到 thank-you 与上传说明页面
+12. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
 
 ## 重要边界
 
@@ -140,12 +186,11 @@ No third-party network requests at all.
 
 ## 下一步
 
-1. 选择并创建 GitHub 仓库
-2. 连接 Cloudflare Pages 或 Vercel
-3. 完成线上冒烟测试
-4. 创建早鸟付款链接
-5. 配置 `VITE_EARLY_ACCESS_URL`
-6. 加入基础访问分析和转化事件
+1. 激活 Lemon Squeezy 店铺，确认可以真实收款
+2. 用真实流程完成一次测试付款，检查 checkout、订单、邮件、后台记录
+3. 配置付款成功页面或订单邮件，告诉用户如何上传照片
+4. 小范围找 `20-50` 个目标用户做首轮获客测试
+5. 根据访问量、`click_human_restore` 点击率、checkout 转化率继续调整文案与价格
 
 ## 当前埋点
 
@@ -167,6 +212,7 @@ No third-party network requests at all.
 - `download_result`
 - `toggle_original_compare`
 - `click_human_restore`
+- `view_human_restore_success`
 
 ## Lemon Squeezy 产品建议
 
