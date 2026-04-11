@@ -45,6 +45,22 @@ function drawLines(
 }
 
 const BRUSH_HIDE_ON_SLIDER_CHANGE_TIMEOUT = 2000
+
+const editorGuideSteps = [
+  {
+    label: '1. Brush',
+    text: 'Paint only over scratches, stains, or small damaged areas.',
+  },
+  {
+    label: '2. Release',
+    text: 'Lift your mouse or finger to run the local repair model.',
+  },
+  {
+    label: '3. Compare',
+    text: 'Use Original to compare, 4x-upscaling for small scans, then Download.',
+  },
+]
+
 export default function Editor(props: EditorProps) {
   const { file } = props
   const [brushSize, setBrushSize] = useState(40)
@@ -315,7 +331,7 @@ export default function Editor(props: EditorProps) {
   }, [separator, context])
 
   function download() {
-    const currRender = renders.at(-1) ?? original
+    const currRender = renders[renders.length - 1] ?? original
     downloadImage(currRender.currentSrc, 'IMG')
   }
 
@@ -466,7 +482,7 @@ export default function Editor(props: EditorProps) {
       const start = Date.now()
       console.log('superResolution_start')
       // each time based on the last result, the first is the original
-      const newFile = renders.at(-1) ?? file
+      const newFile = renders[renders.length - 1] ?? file
       const res = await superResolution(newFile, setGenerateProgress)
       if (!res) {
         throw new Error('empty response')
@@ -512,7 +528,24 @@ export default function Editor(props: EditorProps) {
           'scrollbar-thin scrollbar-thumb-black scrollbar-track-primary overflow-x-scroll',
         ].join(' ')}
       >
-        {History}
+        {renders.length > 0 ? (
+          History
+        ) : (
+          <div className="flex w-full items-center justify-center rounded-xl border border-dashed border-[#d7b98c] bg-[#fff8ed] px-4 text-center text-sm font-bold text-[#8a4f1d]">
+            Your repaired versions will appear here. Start by brushing over one
+            small damaged area.
+          </div>
+        )}
+      </div>
+      <div className="grid w-full max-w-4xl flex-shrink-0 gap-3 rounded-2xl border border-[#e6d2b7] bg-[#fff8ed] px-4 py-3 text-sm shadow-sm md:grid-cols-3">
+        {editorGuideSteps.map(step => (
+          <div key={step.label}>
+            <div className="font-black uppercase tracking-[0.16em] text-[#9b6b3c]">
+              {step.label}
+            </div>
+            <p className="mt-1 leading-6 text-[#5b4a40]">{step.text}</p>
+          </div>
+        ))}
       </div>
       {/* 画图 */}
       <div

@@ -1,5 +1,5 @@
 {
-  "name": "inpaint-web",
+  "name": "memoryfix-ai",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -18,14 +18,16 @@
     "vite-tsconfig-paths": "^4.2.1"
   },
   "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174",
     "start": "vite --host",
     "fast-build": "vite build",
     "build": "tsc && vite build",
     "serve": "vite preview",
+    "preview:local": "vite preview --host 127.0.0.1 --port 4173",
+    "deploy:check": "npm run build",
     "prepare": "husky install",
     "format": "prettier --write .",
-    "postinstall": "paraglide-js compile --project ./project.inlang",
-    "paraglide": "paraglide-js compile --project ./project.inlang"
+    "paraglide": "echo \"Paraglide generation is disabled; static i18n shims live in src/paraglide.\""
   },
   "lint-staged": {
     "*.{vue,js,ts,jsx,tsx,css,sass,scss,md}": [

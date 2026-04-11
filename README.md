@@ -1,111 +1,111 @@
-![Inpaint-web](./media/cover.png)
-<div align="center">
-  
-# Inpaint-web
+# MemoryFix AI
 
+MemoryFix AI is a privacy-first old photo repair product experiment built on
+top of the open-source [inpaint-web](https://github.com/lxfater/inpaint-web)
+project.
 
-A free and open-source inpainting & image-upscaling tool powered by webgpu and wasm on the browser.
+The goal is to help users repair small damaged areas and upscale old family
+photos inside the browser, without uploading private memories to a cloud AI
+service.
 
-基于 Webgpu 技术和 wasm 技术的免费开源 inpainting & image-upscaling 工具, 纯浏览器端实现。
+## Product Positioning
 
-</div>
+```text
+Repair scratches and upscale old photos privately in your browser.
+No upload. No account. No cloud processing.
+```
 
-## Inpaint（图片修复）
+## Current MVP Scope
 
-https://github.com/lxfater/inpaint-web/assets/22794120/bcad4812-02ae-48bb-9e84-94dfeb7234f5
+- Browser-side image selection
+- Local inpainting for scratched or damaged areas
+- Local 4x super-resolution workflow
+- Before/after editor inherited from `inpaint-web`
+- Editor onboarding guide for first-time users
+- Privacy-first landing page
+- Privacy / Terms / Open Source launch trust notes
+- Pricing validation section for future Pro workflows
+- Advanced Cloud Restore waitlist concept for stronger opt-in restoration
+- GPL-3.0 open-source attribution
 
-## Super-Resolution（图片高清化）
+## Product Boundary
 
-https://github.com/lxfater/inpaint-web/assets/22794120/3a8d894f-9749-4685-b947-8b5f15c9cf38
+The current local model is useful but not magical. Position it as a
+privacy-first repair toolkit, not a one-click perfect restoration engine.
 
-## Demo link
+Best fit:
 
-Demo link:https://inpaintweb.lxfater.com/
+- Small scratches
+- Stains and fold marks
+- Small damaged areas
+- Low-resolution scans that need upscaling
 
-## Project Roadmap
+Not the current best fit:
 
-### en
+- Severely damaged faces
+- Large missing facial regions
+- Perfect historical reconstruction
+- Fully automatic one-click restoration
 
-- [x] Image Modification History
-- [x] Optimize Model
-- [x] Integrate Post-Processing into the Model
-- [x] Image-upscaling
-- [ ] Integrate Segment Anything for Quick Selection and Removal in Images
-- [ ] Integrate Stable Diffusion for Image Replacement
-- [ ] Better UI
+For stronger results, the product direction is an opt-in `Advanced Cloud Restore` workflow where users explicitly consent before any upload happens.
 
-### cn
+## Technical Notes
 
-- [x] 图像修改历史
-- [x] 优化模型
-- [x] 后处理集成于模型中
-- [x] 超分辨率
-- [ ] 接入 Segment Anything，实现快速选择和去除图像
-- [ ] 接入 stable diffusion，实现图像替换
-- [ ] 更好的界面
+Photos are processed locally in the browser. The first run still needs network
+access to download ONNX Runtime and model files. Model files are cached locally
+with `localforage` after download.
 
-## Setup
+Do not claim that the app is fully offline on first load. The accurate promise
+is:
 
-`npm install`
+```text
+Your photos are processed locally in your browser.
+Your photos are not uploaded.
+```
 
-## Development
+## Open Source Attribution
 
-`npm run start`
+This project is a modified version of
+[lxfater/inpaint-web](https://github.com/lxfater/inpaint-web), which is licensed
+under GPL-3.0. The browser-side core should remain open source under GPL-3.0.
 
-## Contributors
+Original acknowledgements from `inpaint-web` include:
 
-<a href="https://github.com/lxfater/inpaint-web/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=lxfater/inpaint-web" />
-</a>
+- Frontend foundation from [cleanup.pictures](https://github.com/initml/cleanup.pictures)
+- Inpainting model from [Picsart-AI-Research/MI-GAN](https://github.com/Picsart-AI-Research/MI-GAN)
 
-## Translations via [fink editor](https://inlang.com/m/tdozzpar/app-inlang-editor)
+## Local Development
 
-[![inlang status badge](https://inlang.com/badge?url=github.com/lxfater/inpaint-web)](https://inlang.com/editor/github.com/lxfater/inpaint-web?ref=badge)
+```bash
+npm install --ignore-scripts
+npm run dev
+npm run build
+npm run preview:local
+```
 
-## About me
+The original `paraglide` remote plugin generation has been replaced by local
+static i18n shims in `src/paraglide` to avoid install-time CDN failures.
 
-### Wechat
+## Deployment
 
-<div align="left">
-    <p>联系我之前说明来意，我创业了，时间很宝贵。</p>
-    <img src="https://tinyeraserblog.lxfater.com/G7yayw4aMAgN_Zs.jpeg" style="width: 200px; display: inline-block;">
-</div>
+The app is a static Vite build.
 
-### English Content
+```bash
+npm run deploy:check
+```
 
-For updates and discussions in English, follow me on Twitter:
-[![Twitter Follow](https://img.shields.io/twitter/follow/rules4thing?style=social)](https://twitter.com/rules4thing)
+Use these settings for the first launch:
 
-### 中文内容
+- Build command: `npm run build`
+- Output directory: `dist`
+- Optional paid validation URL: set `VITE_EARLY_ACCESS_URL` to a Stripe Payment Link, Lemon Squeezy checkout URL, or other hosted checkout page
 
-获取中文更新和讨论，请关注我的 Twitter:
-[![Twitter Follow](https://img.shields.io/twitter/follow/lxfater?style=social)](https://twitter.com/lxfater)
+If `VITE_EARLY_ACCESS_URL` is not set, the early access button falls back to a
+mailto waitlist link.
 
-## Acknowledgements
+## Validation Notes
 
-Frontend code are modified from [cleanup.pictures](https://github.com/initml/cleanup.pictures), You can experience their
-great online services [here](https://cleanup.pictures/).
-
-Model: https://github.com/Picsart-AI-Research/MI-GAN
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=lxfater/inpaint-web&type=Date)](https://star-history.com/#lxfater/inpaint-web&Date)
-
-
-## Other Projects by the Author (作者的其他项目)
-
-### 中文
-
-查看我的其他项目：
-
-- [Demoget](https://www.demoget.com/zh)：免费的自动放大，鼠标轨迹优化的录屏软件。
-- [tinyeraser](https://www.tinyeraser.com/zh)：免费，批量，快速，一键换背景。
-
-### English
-
-Check out my other projects:
-
-- [Demoget](https://www.demoget.com/en): Free screen recording software with auto-zoom and mouse trajectory optimization.
-- [tinyeraser](https://www.tinyeraser.com/en): Free, batch, fast, one-click background replacement.
-
+See [`docs/phase-1-tech-validation.md`](docs/phase-1-tech-validation.md) for the
+initial technical validation.
+See [`docs/phase-3-launch-prep.md`](docs/phase-3-launch-prep.md) for the launch
+preparation checklist.

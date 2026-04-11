@@ -193,7 +193,7 @@ const resizeMark = (
     resizedImage.src = resizedImageUrl
   })
 }
-let model: ArrayBuffer | null = null
+let model: ort.InferenceSession | null = null
 export default async function inpaint(
   imageFile: File | HTMLImageElement,
   maskBase64: string
@@ -238,9 +238,7 @@ export default async function inpaint(
     originalImg.width,
   ])
 
-  const Feed: {
-    [key: string]: any
-  } = {
+  const Feed: Record<string, ort.Tensor> = {
     [model.inputNames[0]]: imageTensor,
     [model.inputNames[1]]: maskTensor,
   }

@@ -101,11 +101,13 @@ export default function FileSelect(props: FileSelectProps) {
     >
       <div
         className={[
-          'w-full h-full flex items-center justify-center px-6 pt-5 pb-6 text-xl',
-          'border-4 border-dashed rounded-md',
-          'hover:border-black hover:bg-primary',
+          'w-full h-full flex items-center justify-center px-6 pt-5 pb-6 text-xl font-black',
+          'border-4 border-dashed rounded-[1.5rem]',
+          'hover:border-[#211915] hover:bg-[#fff7ea]',
           'text-center',
-          dragHover ? 'border-black bg-primary' : 'bg-gray-100 border-gray-300',
+          dragHover
+            ? 'border-[#211915] bg-[#fff7ea]'
+            : 'border-[#d7b98c] bg-[#f8f1e7]',
         ].join(' ')}
         onDrop={handleDrop}
         onDragOver={ev => {
