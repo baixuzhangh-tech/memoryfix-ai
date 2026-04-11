@@ -17,6 +17,7 @@
 - `.env.example`：早鸟付费链接环境变量模板
 - `VITE_EARLY_ACCESS_URL`：可替换首页 `Join Early Access` 按钮
 - 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
+- 接入 Vercel Web Analytics，并增加首批产品漏斗事件
 
 推荐首发部署参数：
 
@@ -116,3 +117,24 @@ No third-party network requests at all.
 4. 创建早鸟付款链接
 5. 配置 `VITE_EARLY_ACCESS_URL`
 6. 加入基础访问分析和转化事件
+
+## 当前埋点
+
+不采集用户照片内容、私有文件名或用户身份。当前只记录产品漏斗行为：
+
+- `visit_home`
+- `click_sample_photo`
+- `upload_photo`
+- `model_cache_hit`
+- `model_download_started`
+- `model_download_completed`
+- `model_download_failed`
+- `repair_started`
+- `repair_completed`
+- `repair_failed`
+- `upscale_started`
+- `upscale_completed`
+- `upscale_failed`
+- `download_result`
+- `toggle_original_compare`
+- `click_early_access`

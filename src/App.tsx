@@ -9,7 +9,8 @@ import Modal from './components/Modal'
 import Editor from './Editor'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
-import { downloadModel } from './adapters/cache'
+import { downloadModel, modelExists } from './adapters/cache'
+import trackProductEvent from './analytics'
 import * as m from './paraglide/messages'
 import {
   languageTag,
@@ -141,6 +142,7 @@ function App() {
     const unsubscribe = onSetLanguageTag(() =>
       setStateLanguageTag(languageTag())
     )
+    trackProductEvent('visit_home')
     return () => {
       unsubscribe()
     }
@@ -156,15 +158,39 @@ function App() {
       }
     }
 
+    modelExists('inpaint')
+      .then(exists => {
+        trackProductEvent(
+          exists ? 'model_cache_hit' : 'model_download_started',
+          {
+            model: 'inpaint',
+          }
+        )
+      })
+      .catch(() => {
+        trackProductEvent('model_download_started', {
+          model: 'inpaint',
+        })
+      })
+
     downloadModel('inpaint', progress => {
       if (isActive) {
         setDownloadProgress(progress)
       }
-    }).catch(() => {
-      if (isActive) {
-        setDownloadProgress(100)
-      }
     })
+      .then(() => {
+        trackProductEvent('model_download_completed', {
+          model: 'inpaint',
+        })
+      })
+      .catch(() => {
+        trackProductEvent('model_download_failed', {
+          model: 'inpaint',
+        })
+        if (isActive) {
+          setDownloadProgress(100)
+        }
+      })
 
     return () => {
       isActive = false
@@ -178,11 +204,17 @@ function App() {
   async function startWithDemoImage(path: string) {
     const imgBlob = await fetch(path).then(r => r.blob())
     const filename = path.split('/').pop() ?? 'old-photo-sample.jpg'
+    trackProductEvent('click_sample_photo', {
+      sample: filename,
+    })
     setFile(new File([imgBlob], filename, { type: imgBlob.type }))
   }
 
   async function handleFileSelection(nextFile: File) {
     const { file: resizedFile } = await resizeImageFile(nextFile, 1024 * 4)
+    trackProductEvent('upload_photo', {
+      size_bucket: resizedFile.size > 2 * 1024 * 1024 ? 'large' : 'small',
+    })
     setFile(resizedFile)
   }
 
@@ -385,6 +417,13 @@ function App() {
                 rel={
                   earlyAccessUrl.startsWith('http') ? 'noreferrer' : undefined
                 }
+                onClick={() => {
+                  trackProductEvent('click_early_access', {
+                    destination: earlyAccessUrl.startsWith('http')
+                      ? 'checkout'
+                      : 'mailto',
+                  })
+                }}
                 className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
               >
                 Join Early Access

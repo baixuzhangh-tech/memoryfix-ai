@@ -12,6 +12,7 @@ import Progress from './components/Progress'
 import { modelExists, downloadModel } from './adapters/cache'
 import Modal from './components/Modal'
 import * as m from './paraglide/messages'
+import trackProductEvent from './analytics'
 
 interface EditorProps {
   file: File
@@ -199,6 +200,10 @@ export default function Editor(props: EditorProps) {
       try {
         const start = Date.now()
         console.log('inpaint_start')
+        trackProductEvent('repair_started', {
+          brush_size: brushSize,
+          previous_results: renders.length,
+        })
         // each time based on the last result, the first is the original
         const newFile = renders.slice(-1)[0] ?? file
         const res = await inpaint(newFile, maskCanvas.toDataURL())
@@ -213,10 +218,15 @@ export default function Editor(props: EditorProps) {
         lines.push({ pts: [], src: '' } as Line)
         setRenders([...renders])
         setLines([...lines])
+        trackProductEvent('repair_completed', {
+          duration_ms: Date.now() - start,
+          result_count: renders.length,
+        })
         console.log('inpaint_processed', {
           duration: Date.now() - start,
         })
       } catch (e: any) {
+        trackProductEvent('repair_failed')
         console.log('inpaint_failed', {
           error: e,
         })
@@ -332,6 +342,9 @@ export default function Editor(props: EditorProps) {
 
   function download() {
     const currRender = renders[renders.length - 1] ?? original
+    trackProductEvent('download_result', {
+      has_repairs: renders.length > 0,
+    })
     downloadImage(currRender.currentSrc, 'IMG')
   }
 
@@ -473,14 +486,30 @@ export default function Editor(props: EditorProps) {
   const onSuperResolution = useCallback(async () => {
     if (!(await modelExists('superResolution'))) {
       setDownloaded(false)
-      await downloadModel('superResolution', setDownloadProgress)
-      setDownloaded(true)
+      trackProductEvent('model_download_started', {
+        model: 'superResolution',
+      })
+      try {
+        await downloadModel('superResolution', setDownloadProgress)
+        trackProductEvent('model_download_completed', {
+          model: 'superResolution',
+        })
+      } catch {
+        trackProductEvent('model_download_failed', {
+          model: 'superResolution',
+        })
+      } finally {
+        setDownloaded(true)
+      }
     }
     setIsProcessingLoading(true)
     try {
       // 运行
       const start = Date.now()
       console.log('superResolution_start')
+      trackProductEvent('upscale_started', {
+        previous_results: renders.length,
+      })
       // each time based on the last result, the first is the original
       const newFile = renders[renders.length - 1] ?? file
       const res = await superResolution(newFile, setGenerateProgress)
@@ -495,12 +524,17 @@ export default function Editor(props: EditorProps) {
       lines.push({ pts: [], src: '' } as Line)
       setRenders([...renders])
       setLines([...lines])
+      trackProductEvent('upscale_completed', {
+        duration_ms: Date.now() - start,
+        result_count: renders.length,
+      })
       console.log('superResolution_processed', {
         duration: Date.now() - start,
       })
 
       // 替换当前图片
     } catch (error) {
+      trackProductEvent('upscale_failed')
       console.error('superResolution', error)
     } finally {
       setIsProcessingLoading(false)
@@ -717,6 +751,9 @@ export default function Editor(props: EditorProps) {
           primary={showOriginal}
           icon={<EyeIcon className="w-6 h-6" />}
           onUp={() => {
+            trackProductEvent('toggle_original_compare', {
+              enabled: !showOriginal,
+            })
             setShowOriginal(!showOriginal)
             setTimeout(() => setSeparatorLeft(0), 300)
           }}

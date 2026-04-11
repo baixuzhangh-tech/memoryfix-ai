@@ -24,6 +24,7 @@ No upload. No account. No cloud processing.
 - Editor onboarding guide for first-time users
 - Privacy-first landing page
 - Privacy / Terms / Open Source launch trust notes
+- Vercel Web Analytics page view tracking and product funnel events
 - Pricing validation section for future Pro workflows
 - Advanced Cloud Restore waitlist concept for stronger opt-in restoration
 - GPL-3.0 open-source attribution
@@ -85,6 +86,30 @@ npm run preview:local
 
 The original `paraglide` remote plugin generation has been replaced by local
 static i18n shims in `src/paraglide` to avoid install-time CDN failures.
+
+## Analytics
+
+Vercel Web Analytics is wired through `@vercel/analytics`.
+
+Tracked product events do not include image content, private filenames, or user
+identifiers. The current funnel events cover:
+
+- `visit_home`
+- `click_sample_photo`
+- `upload_photo`
+- `model_cache_hit`
+- `model_download_started`
+- `model_download_completed`
+- `model_download_failed`
+- `repair_started`
+- `repair_completed`
+- `repair_failed`
+- `upscale_started`
+- `upscale_completed`
+- `upscale_failed`
+- `download_result`
+- `toggle_original_compare`
+- `click_early_access`
 
 ## Deployment
 
