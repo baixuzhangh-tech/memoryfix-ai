@@ -1,0 +1,422 @@
+import { FormEvent, useEffect, useState } from 'react'
+import trackProductEvent from '../analytics'
+
+type HumanRestoreUploadFormProps = {
+  defaultEmail: string
+  defaultOrderReference: string
+  secureOrderSummary?: {
+    checkoutEmailMasked: string
+    orderNumber?: string
+    productName?: string
+  } | null
+  secureUploadToken?: string
+}
+
+type SubmissionStatus = 'idle' | 'submitting' | 'success' | 'error'
+
+type SubmitResponse = {
+  confirmationEmailSent?: boolean
+  error?: string
+  orderBound?: boolean
+  submissionReference?: string
+  supportEmail?: string
+}
+
+const maxUploadSizeBytes = 15 * 1024 * 1024
+const allowedImageTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+])
+
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return `${Math.max(1, Math.round(size / 1024))} KB`
+}
+
+export default function HumanRestoreUploadForm(
+  props: HumanRestoreUploadFormProps
+) {
+  const {
+    defaultEmail,
+    defaultOrderReference,
+    secureOrderSummary,
+    secureUploadToken,
+  } = props
+  const isSecureUpload = Boolean(secureUploadToken)
+
+  const [checkoutEmail, setCheckoutEmail] = useState(defaultEmail)
+  const [orderReference, setOrderReference] = useState(defaultOrderReference)
+  const [notes, setNotes] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [status, setStatus] = useState<SubmissionStatus>('idle')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [fileInputKey, setFileInputKey] = useState(0)
+  const [submissionReference, setSubmissionReference] = useState('')
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState(true)
+  const [supportEmail, setSupportEmail] = useState('')
+  const checkoutEmailFieldId = 'human-restore-checkout-email'
+  const orderReferenceFieldId = 'human-restore-order-reference'
+  const notesFieldId = 'human-restore-notes'
+  const photoFieldId = 'human-restore-photo'
+
+  useEffect(() => {
+    setCheckoutEmail(currentValue => currentValue || defaultEmail)
+  }, [defaultEmail])
+
+  useEffect(() => {
+    setOrderReference(currentValue => currentValue || defaultOrderReference)
+  }, [defaultOrderReference])
+
+  function onSelectFile(file: File | null) {
+    setStatus('idle')
+    setErrorMessage('')
+
+    if (!file) {
+      setSelectedFile(null)
+      return
+    }
+
+    if (!allowedImageTypes.has(file.type)) {
+      setSelectedFile(null)
+      setErrorMessage('Please upload a JPG, PNG, WebP, HEIC, or HEIF image.')
+      return
+    }
+
+    if (file.size > maxUploadSizeBytes) {
+      setSelectedFile(null)
+      setErrorMessage('Please keep the upload under 15 MB for this beta form.')
+      return
+    }
+
+    setSelectedFile(file)
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!isSecureUpload && !checkoutEmail.trim()) {
+      setStatus('error')
+      setErrorMessage('Please enter the email you used at checkout.')
+      return
+    }
+
+    if (!selectedFile) {
+      setStatus('error')
+      setErrorMessage('Please choose the photo you want us to restore.')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('checkoutEmail', checkoutEmail.trim())
+    formData.append('orderReference', orderReference.trim())
+    formData.append('notes', notes.trim())
+    formData.append('photo', selectedFile)
+    if (secureUploadToken) {
+      formData.append('token', secureUploadToken)
+    }
+
+    setStatus('submitting')
+    setErrorMessage('')
+    setSubmissionReference('')
+    setConfirmationEmailSent(true)
+    setSupportEmail('')
+
+    trackProductEvent('submit_human_restore_upload_started', {
+      has_order_reference: Boolean(orderReference.trim()),
+      has_notes: Boolean(notes.trim()),
+      file_size_bucket: selectedFile.size > 5 * 1024 * 1024 ? 'large' : 'small',
+      secure_upload: isSecureUpload,
+    })
+
+    try {
+      const response = await fetch('/api/human-restore-upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const responseBody = (await response
+        .json()
+        .catch(() => null)) as SubmitResponse | null
+
+      if (!response.ok) {
+        throw new Error(
+          responseBody?.error ||
+            'Upload failed. Please try again in a moment or use your order email as fallback.'
+        )
+      }
+
+      setStatus('success')
+      setSelectedFile(null)
+      setNotes('')
+      setFileInputKey(currentValue => currentValue + 1)
+      setSubmissionReference(responseBody?.submissionReference || '')
+      setConfirmationEmailSent(responseBody?.confirmationEmailSent !== false)
+      setSupportEmail(responseBody?.supportEmail || '')
+
+      trackProductEvent('submit_human_restore_upload_completed', {
+        has_order_reference: Boolean(orderReference.trim()),
+        confirmation_email_sent: responseBody?.confirmationEmailSent !== false,
+        secure_upload: isSecureUpload,
+      })
+    } catch (error) {
+      const nextErrorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Upload failed. Please try again in a moment.'
+
+      setStatus('error')
+      setErrorMessage(nextErrorMessage)
+
+      trackProductEvent('submit_human_restore_upload_failed', {
+        has_order_reference: Boolean(orderReference.trim()),
+        secure_upload: isSecureUpload,
+      })
+    }
+  }
+
+  return (
+    <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
+      <div className="max-w-3xl">
+        <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+          Upload your paid order
+        </p>
+        <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+          {isSecureUpload
+            ? 'Use your secure upload link to submit the photo.'
+            : 'Submit your photo here instead of replying by email.'}
+        </h2>
+        <p className="mt-4 leading-7 text-[#66574d]">
+          {isSecureUpload
+            ? 'This page is already tied to your paid order. Add your photo and notes below, then submit once.'
+            : 'Use the same email you entered at checkout. If you can find your order number, add it too. That helps us match your payment and start work faster.'}
+        </p>
+      </div>
+
+      {isSecureUpload && secureOrderSummary && (
+        <div className="mt-8 rounded-[1.75rem] border border-[#e6d2b7] bg-[#fffaf3] p-6">
+          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
+            Secure order details
+          </p>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                Checkout email
+              </p>
+              <p className="mt-2 font-bold text-[#211915]">
+                {secureOrderSummary.checkoutEmailMasked}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                Order number
+              </p>
+              <p className="mt-2 font-bold text-[#211915]">
+                {secureOrderSummary.orderNumber || 'Paid order'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                Product
+              </p>
+              <p className="mt-2 font-bold text-[#211915]">
+                {secureOrderSummary.productName || 'Human-assisted Restore'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-8 grid gap-4 md:grid-cols-3">
+        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
+          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
+            Privacy
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[#66574d]">
+            This upload is used only for your paid Human-assisted Restore order.
+            It is not used to train public models.
+          </p>
+        </article>
+        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
+          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
+            Retention
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[#66574d]">
+            During beta, uploaded files are kept only as long as needed to
+            complete delivery and follow-up adjustments.
+          </p>
+        </article>
+        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
+          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
+            Support
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[#66574d]">
+            After submission, we send a confirmation email whenever possible. If
+            anything looks wrong, contact support without paying again.
+          </p>
+        </article>
+      </div>
+
+      <form className="mt-8 grid gap-6" onSubmit={handleSubmit}>
+        {!isSecureUpload && (
+          <div className="grid gap-6 md:grid-cols-2">
+            <label className="grid gap-2" htmlFor={checkoutEmailFieldId}>
+              <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
+                Checkout email
+              </span>
+              <input
+                id={checkoutEmailFieldId}
+                type="email"
+                value={checkoutEmail}
+                onChange={event => {
+                  setCheckoutEmail(event.currentTarget.value)
+                }}
+                className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] outline-none transition focus:border-[#211915]"
+                placeholder="you@example.com"
+                autoComplete="email"
+                disabled={status === 'submitting'}
+                required
+              />
+            </label>
+
+            <label className="grid gap-2" htmlFor={orderReferenceFieldId}>
+              <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
+                Order number
+              </span>
+              <input
+                id={orderReferenceFieldId}
+                type="text"
+                value={orderReference}
+                onChange={event => {
+                  setOrderReference(event.currentTarget.value)
+                }}
+                className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] outline-none transition focus:border-[#211915]"
+                placeholder="Optional, but recommended"
+                autoComplete="off"
+                disabled={status === 'submitting'}
+              />
+            </label>
+          </div>
+        )}
+
+        <label className="grid gap-2" htmlFor={notesFieldId}>
+          <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
+            Repair notes
+          </span>
+          <textarea
+            id={notesFieldId}
+            value={notes}
+            onChange={event => {
+              setNotes(event.currentTarget.value)
+            }}
+            className="min-h-[140px] rounded-[1.5rem] border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base leading-7 text-[#211915] outline-none transition focus:border-[#211915]"
+            placeholder="Tell us what matters most: scratches, missing details, color fading, cleanup around faces, delivery deadline, or any family context that will help."
+            disabled={status === 'submitting'}
+          />
+        </label>
+
+        <label className="grid gap-2" htmlFor={photoFieldId}>
+          <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
+            Photo to restore
+          </span>
+          <input
+            id={photoFieldId}
+            key={fileInputKey}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+            onChange={event => {
+              onSelectFile(event.currentTarget.files?.[0] ?? null)
+            }}
+            className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] file:mr-4 file:rounded-full file:border-0 file:bg-[#211915] file:px-5 file:py-3 file:font-black file:text-white"
+            disabled={status === 'submitting'}
+            required
+          />
+          <p className="text-sm leading-6 text-[#66574d]">
+            Accepted: JPG, PNG, WebP, HEIC, HEIF. Beta upload limit: 15 MB.
+          </p>
+          {selectedFile && (
+            <p className="text-sm font-bold text-[#5b4a40]">
+              Selected: {selectedFile.name} ({formatFileSize(selectedFile.size)}
+              )
+            </p>
+          )}
+        </label>
+
+        {status === 'success' && (
+          <div className="grid gap-4 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.14em]">
+                Upload received
+              </p>
+              <p className="mt-2 leading-7">
+                Your photo was received and queued for order matching. We will
+                deliver the restored result by email within 48 hours during
+                beta.
+              </p>
+            </div>
+            {submissionReference && (
+              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
+                <p className="text-sm font-black uppercase tracking-[0.14em]">
+                  Submission reference
+                </p>
+                <p className="mt-2 text-base font-black text-[#211915]">
+                  {submissionReference}
+                </p>
+              </div>
+            )}
+            <div className="text-sm leading-6">
+              {confirmationEmailSent ? (
+                <p>
+                  {isSecureUpload
+                    ? 'A confirmation email has been sent for this upload. Keep it for your records and reply there if you need to add more details.'
+                    : 'A confirmation email has been sent to your checkout email. Keep it for your records and reply there if you need to add more details.'}
+                </p>
+              ) : (
+                <p>
+                  Your upload was received, but the confirmation email could not
+                  be sent automatically. Do not pay again. Keep this page and
+                  your submission reference. If needed, contact{' '}
+                  {supportEmail || 'support'}.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="grid gap-3 rounded-[1.5rem] border border-[#f0b5a9] bg-[#fff1ed] px-5 py-5 text-[#8a2f1d]">
+            <p className="font-black">Submission not completed</p>
+            <p>{errorMessage}</p>
+            <p className="text-sm leading-6">
+              {isSecureUpload
+                ? 'Please retry once using the same secure link. If it still fails, do not pay again. Reply to your secure upload email and mention that the form did not complete.'
+                : 'Please retry once. If it still fails, do not pay again. Reply to your order confirmation email and mention that the upload form did not complete.'}
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <p className="max-w-2xl text-sm leading-6 text-[#66574d]">
+            This form is only for paid Human-assisted Restore orders. The free
+            local repair tool still keeps photos in your browser and does not
+            upload them. Please submit only once per paid order unless support
+            asks you to upload again.
+          </p>
+          <button
+            type="submit"
+            disabled={status === 'submitting'}
+            className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820] disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {status === 'submitting'
+              ? 'Uploading photo securely...'
+              : 'Submit photo for restoration'}
+          </button>
+        </div>
+      </form>
+    </section>
+  )
+}

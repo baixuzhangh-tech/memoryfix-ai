@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
+import HumanRestoreUploadForm from './components/HumanRestoreUploadForm'
 import Modal from './components/Modal'
+import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
@@ -129,6 +131,7 @@ const humanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
   'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
 
+const humanRestoreSecureUploadPath = '/human-restore/upload'
 const humanRestoreSuccessPath = '/human-restore/success'
 
 const humanRestoreSteps = [
@@ -139,7 +142,7 @@ const humanRestoreSteps = [
   {
     title: '2. Upload only after checkout',
     description:
-      'After payment, you will land on a thank-you page with upload instructions.',
+      'After payment, we send a secure upload link by email. If the message is delayed, you can still use the fallback upload form on the thank-you page.',
   },
   {
     title: '3. Get delivery by email',
@@ -150,19 +153,19 @@ const humanRestoreSteps = [
 
 const humanRestoreSuccessSteps = [
   {
-    title: '1. Reply to your order email',
+    title: '1. Check your checkout email',
     description:
-      'Attach the photo you want restored so we can match it to your payment.',
+      'We send a secure upload link to the same email you used during checkout so your upload stays tied to the paid order.',
   },
   {
-    title: '2. Add any repair notes',
+    title: '2. Use the secure link first',
     description:
-      'Tell us about scratches, missing areas, color issues, or anything that matters to your family.',
+      'Open the secure upload page from your email and add the best photo you have plus notes about scratches, missing areas, color issues, or anything that matters to your family.',
   },
   {
-    title: '3. Watch for delivery',
+    title: '3. Use fallback only if needed',
     description:
-      'We complete AI restoration plus manual touch-up and deliver by email within 48 hours during beta.',
+      'If the secure email is delayed, the fallback upload form below is still available. We complete AI restoration plus manual touch-up and deliver by email within 48 hours during beta.',
   },
 ]
 
@@ -179,7 +182,11 @@ const homePageDescription =
 const humanRestoreSuccessTitle =
   'Thank You - MemoryFix AI Human-assisted Restore'
 const humanRestoreSuccessDescription =
-  'Thank you for booking MemoryFix AI Human-assisted Restore. Reply to your order email with your photo and any repair notes to begin.'
+  'Thank you for booking MemoryFix AI Human-assisted Restore. Use the upload form on this page to send your photo and repair notes.'
+const humanRestoreSecureUploadTitle =
+  'Secure Upload - MemoryFix AI Human-assisted Restore'
+const humanRestoreSecureUploadDescription =
+  'Use your secure upload link to send the photo and notes for your paid MemoryFix AI Human-assisted Restore order.'
 
 function upsertMetaTag(
   attribute: 'name' | 'property',
@@ -223,30 +230,53 @@ function App() {
   const [downloadProgress, setDownloadProgress] = useState(100)
 
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
+  const currentSearchParams = new URLSearchParams(window.location.search)
   const isHumanRestoreSuccessPage = currentPath === humanRestoreSuccessPath
+  const isHumanRestoreSecureUploadPage =
+    currentPath === humanRestoreSecureUploadPath
+  const secureUploadToken = currentSearchParams.get('token') || ''
+  const defaultCheckoutEmail =
+    currentSearchParams.get('checkout_email') ||
+    currentSearchParams.get('customer_email') ||
+    currentSearchParams.get('email') ||
+    ''
+  const defaultOrderReference =
+    currentSearchParams.get('order_id') ||
+    currentSearchParams.get('order') ||
+    currentSearchParams.get('checkout_id') ||
+    ''
 
-  let mainView: 'editor' | 'success' | 'home' = 'home'
+  let mainView: 'editor' | 'success' | 'secure-upload' | 'home' = 'home'
 
   if (file) {
     mainView = 'editor'
+  } else if (isHumanRestoreSecureUploadPage) {
+    mainView = 'secure-upload'
   } else if (isHumanRestoreSuccessPage) {
     mainView = 'success'
   }
 
   useEffect(() => {
-    const pageTitle = isHumanRestoreSuccessPage
-      ? humanRestoreSuccessTitle
-      : homePageTitle
-    const pageDescription = isHumanRestoreSuccessPage
-      ? humanRestoreSuccessDescription
-      : homePageDescription
-    const pageRobots = isHumanRestoreSuccessPage
+    const isHumanRestoreOrderPage =
+      isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
+    let pageTitle = homePageTitle
+    let pageDescription = homePageDescription
+    let pagePath = '/'
+
+    if (isHumanRestoreSecureUploadPage) {
+      pageTitle = humanRestoreSecureUploadTitle
+      pageDescription = humanRestoreSecureUploadDescription
+      pagePath = humanRestoreSecureUploadPath
+    } else if (isHumanRestoreSuccessPage) {
+      pageTitle = humanRestoreSuccessTitle
+      pageDescription = humanRestoreSuccessDescription
+      pagePath = humanRestoreSuccessPath
+    }
+
+    const pageRobots = isHumanRestoreOrderPage
       ? 'noindex, nofollow'
       : 'index, follow'
-    const pageUrl = new URL(
-      isHumanRestoreSuccessPage ? humanRestoreSuccessPath : '/',
-      siteUrl
-    ).toString()
+    const pageUrl = new URL(pagePath, siteUrl).toString()
 
     document.title = pageTitle
     upsertCanonicalLink(pageUrl)
@@ -260,19 +290,26 @@ function App() {
     upsertMetaTag('name', 'twitter:title', pageTitle)
     upsertMetaTag('name', 'twitter:description', pageDescription)
     upsertMetaTag('name', 'twitter:url', pageUrl)
-  }, [isHumanRestoreSuccessPage])
+  }, [isHumanRestoreSecureUploadPage, isHumanRestoreSuccessPage])
 
   useEffect(() => {
     const unsubscribe = onSetLanguageTag(() =>
       setStateLanguageTag(languageTag())
     )
-    trackProductEvent(
-      isHumanRestoreSuccessPage ? 'view_human_restore_success' : 'visit_home'
-    )
+    let pageViewEvent = 'visit_home'
+
+    if (isHumanRestoreSecureUploadPage) {
+      pageViewEvent = 'view_human_restore_secure_upload'
+    } else if (isHumanRestoreSuccessPage) {
+      pageViewEvent = 'view_human_restore_success'
+    }
+
+    trackProductEvent(pageViewEvent)
+
     return () => {
       unsubscribe()
     }
-  }, [isHumanRestoreSuccessPage])
+  }, [isHumanRestoreSecureUploadPage, isHumanRestoreSuccessPage])
 
   useEffect(() => {
     let isActive = true
@@ -349,14 +386,14 @@ function App() {
       <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
         <Button
           className={[
-            file || isHumanRestoreSuccessPage
+            file || isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
               ? ''
               : 'opacity-50 pointer-events-none',
             'pl-1 pr-1',
           ].join(' ')}
           icon={<ArrowLeftIcon className="h-6 w-6" />}
           onClick={() => {
-            if (isHumanRestoreSuccessPage) {
+            if (isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage) {
               window.location.assign('/')
               return
             }
@@ -366,7 +403,9 @@ function App() {
         >
           <div className="md:w-[180px]">
             <span className="hidden select-none sm:inline">
-              {isHumanRestoreSuccessPage ? 'Back home' : m.start_new()}
+              {isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
+                ? 'Back home'
+                : m.start_new()}
             </span>
           </div>
         </Button>
@@ -384,34 +423,36 @@ function App() {
           </div>
         </div>
         <div className="hidden items-center justify-end gap-3 md:flex">
-          {!file && !isHumanRestoreSuccessPage && (
-            <>
-              <a
-                href="#privacy"
-                className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-              >
-                Privacy
-              </a>
-              <a
-                href="#pricing"
-                className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-              >
-                Pricing
-              </a>
-              <a
-                href="#terms"
-                className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-              >
-                Terms
-              </a>
-              <a
-                href="#open-source"
-                className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-              >
-                Open Source
-              </a>
-            </>
-          )}
+          {!file &&
+            !isHumanRestoreSuccessPage &&
+            !isHumanRestoreSecureUploadPage && (
+              <>
+                <a
+                  href="#privacy"
+                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+                >
+                  Privacy
+                </a>
+                <a
+                  href="#pricing"
+                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+                >
+                  Pricing
+                </a>
+                <a
+                  href="#terms"
+                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+                >
+                  Terms
+                </a>
+                <a
+                  href="#open-source"
+                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+                >
+                  Open Source
+                </a>
+              </>
+            )}
           <Button
             className="flex"
             onClick={() => {
@@ -441,6 +482,9 @@ function App() {
         className={file ? 'relative' : 'relative'}
       >
         {mainView === 'editor' && file && <Editor file={file} />}
+        {mainView === 'secure-upload' && (
+          <SecureHumanRestoreUploadPage token={secureUploadToken} />
+        )}
         {mainView === 'success' && (
           <div className="mx-auto flex max-w-5xl flex-col px-4 py-10 md:px-8">
             <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-12">
@@ -451,10 +495,10 @@ function App() {
                 Thank you for booking Human-assisted Restore.
               </h1>
               <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
-                Your checkout is complete. The next step is simple: reply to
-                your order confirmation email and attach the photo you want
-                restored. That keeps the upload tied to your payment record
-                without asking you to create an account.
+                Your checkout is complete. We will send a secure upload link to
+                your checkout email so your photo stays tied to this paid order.
+                If that email is delayed, you can still use the fallback upload
+                form below.
               </p>
               <div className="mt-8 rounded-[2rem] bg-[#211915] p-6 text-white md:p-8">
                 <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#f3c16f]">
@@ -466,7 +510,7 @@ function App() {
                 <p className="mt-4 max-w-3xl leading-7 text-[#e8dfd5]">
                   The free local repair tool still runs in your browser and does
                   not upload photos. Only Human-assisted Restore asks you to
-                  send a file after you explicitly choose and pay for it.
+                  upload a file after you explicitly choose and pay for it.
                 </p>
               </div>
             </section>
@@ -493,7 +537,7 @@ function App() {
                   What to send
                 </p>
                 <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  Send the best file you have, plus a short note.
+                  Secure email first. Fallback form below if needed.
                 </h2>
                 <ul className="mt-6 space-y-3 text-[#66574d]">
                   {humanRestoreUploadChecklist.map(item => (
@@ -504,9 +548,10 @@ function App() {
                   ))}
                 </ul>
                 <p className="mt-6 leading-7 text-[#66574d]">
-                  If you opened this page directly and do not see an order email
-                  yet, check your inbox and spam folder for the Lemon Squeezy
-                  confirmation first.
+                  First check your inbox and spam folder for the secure upload
+                  email. If it has not arrived yet, you can still use the
+                  fallback form below. Using the same checkout email here helps
+                  us match the submission.
                 </p>
               </div>
               <div className="flex flex-col items-stretch gap-3 md:w-[220px]">
@@ -532,6 +577,26 @@ function App() {
                 </a>
               </div>
             </section>
+
+            <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
+              <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                Recommended path
+              </p>
+              <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                Use the secure upload link from your email whenever possible.
+              </h2>
+              <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
+                The secure link is tied to your paid order automatically, so you
+                do not need to type your order details again. The fallback form
+                below is only for cases where the secure email is delayed or you
+                need manual help right away.
+              </p>
+            </section>
+
+            <HumanRestoreUploadForm
+              defaultEmail={defaultCheckoutEmail}
+              defaultOrderReference={defaultOrderReference}
+            />
           </div>
         )}
         {mainView === 'home' && (
