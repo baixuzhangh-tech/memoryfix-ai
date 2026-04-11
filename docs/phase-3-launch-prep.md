@@ -16,6 +16,7 @@
 - `vercel.json`：Vercel 构建、输出目录、header、SPA rewrite
 - `.env.example`：早鸟付费链接环境变量模板
 - `VITE_EARLY_ACCESS_URL`：可替换首页 `Join Early Access` 按钮
+- 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
 
 推荐首发部署参数：
 
@@ -74,14 +75,15 @@ Support a privacy-first old photo repair tool and get priority access to stronge
 
 1. 首页可打开，标题为 `MemoryFix AI - Private Old Photo Repair`
 2. 点击示例老照片能进入编辑器
-3. 首次进入会下载 local repair model
-4. 刷一点小划痕区域，松开鼠标后能生成一次修复结果
-5. `Original` 对比按钮可用
-6. `4x-upscaling` 能触发模型下载和处理
-7. `Download` 能导出结果
-8. `Privacy / Terms / Open Source` 锚点可跳转
-9. `Join Early Access` 在未配置环境变量时打开邮件，在配置后打开付款链接
-10. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
+3. 首页首屏不应被模型下载弹窗遮挡
+4. 点击示例老照片或上传照片后，才下载 local repair model
+5. 刷一点小划痕区域，松开鼠标后能生成一次修复结果
+6. `Original` 对比按钮可用
+7. `4x-upscaling` 能触发模型下载和处理
+8. `Download` 能导出结果
+9. `Privacy / Terms / Open Source` 锚点可跳转
+10. `Join Early Access` 在未配置环境变量时打开邮件，在配置后打开付款链接
+11. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
 
 ## 重要边界
 

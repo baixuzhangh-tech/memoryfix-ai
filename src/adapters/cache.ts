@@ -76,6 +76,7 @@ export async function downloadModel(
   setDownloadProgress: (arg0: number) => void
 ) {
   if (await modelExists(modelType)) {
+    setDownloadProgress(100)
     return
   }
 
@@ -83,8 +84,14 @@ export async function downloadModel(
     console.log('start download from', url)
     setDownloadProgress(0)
     const response = await fetch(url)
-    const fullSize = response.headers.get('content-length')
-    const reader = response.body!.getReader()
+    if (!response.ok) {
+      throw new Error(`failed to download model: ${response.status}`)
+    }
+    if (!response.body) {
+      throw new Error('model response body is empty')
+    }
+    const fullSize = Number(response.headers.get('content-length')) || 0
+    const reader = response.body.getReader()
     const total: Uint8Array[] = []
     let downloaded = 0
 
@@ -101,7 +108,11 @@ export async function downloadModel(
         total.push(value)
       }
 
-      setDownloadProgress((downloaded / Number(fullSize)) * 100)
+      if (fullSize > 0) {
+        setDownloadProgress(Math.min((downloaded / fullSize) * 100, 99))
+      } else {
+        setDownloadProgress(Math.min(downloaded / 1024 / 1024, 95))
+      }
     }
 
     const buffer = new Uint8Array(downloaded)

@@ -147,8 +147,29 @@ function App() {
   }, [])
 
   useEffect(() => {
-    downloadModel('inpaint', setDownloadProgress)
-  }, [])
+    let isActive = true
+
+    if (!file) {
+      setDownloadProgress(100)
+      return () => {
+        isActive = false
+      }
+    }
+
+    downloadModel('inpaint', progress => {
+      if (isActive) {
+        setDownloadProgress(progress)
+      }
+    }).catch(() => {
+      if (isActive) {
+        setDownloadProgress(100)
+      }
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [file])
 
   useClickAway(modalRef, () => {
     setShowAbout(false)
