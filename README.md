@@ -98,6 +98,7 @@ Use these settings for the first launch:
 
 - Build command: `npm run build`
 - Output directory: `dist`
+- Install command: `npm install --ignore-scripts`
 - Optional paid validation URL: set `VITE_EARLY_ACCESS_URL` to a Stripe Payment Link, Lemon Squeezy checkout URL, or other hosted checkout page
 
 If `VITE_EARLY_ACCESS_URL` is not set, the early access button falls back to a
