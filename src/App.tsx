@@ -127,7 +127,7 @@ const oldPhotoSamples = [
 
 const humanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
-  'mailto:hello@memoryfix.ai?subject=MemoryFix%20AI%20Human-assisted%20Restore&body=I%20want%20a%20human-assisted%20restore%20for%20one%20important%20photo.'
+  'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
 
 function App() {
   const [file, setFile] = useState<File>()

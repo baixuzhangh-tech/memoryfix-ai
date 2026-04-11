@@ -16,6 +16,7 @@
 - `vercel.json`：Vercel 构建、输出目录、header、SPA rewrite
 - `.env.example`：早鸟付费链接环境变量模板
 - `VITE_EARLY_ACCESS_URL`：可替换首页 `Book Human Restore` 按钮
+- `Book Human Restore` 默认链接已接入 Lemon Squeezy checkout
 - 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
 - 接入 Vercel Web Analytics，并增加首批产品漏斗事件
 
@@ -52,6 +53,12 @@ Vercel 也可以：
 4. 用户点击 `Book Human Restore`
 5. 用户完成付款
 6. 付款成功后人工发送邮件，请用户上传照片或回复确认交付细节
+
+当前 checkout：
+
+```text
+https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268
+```
 
 可以使用的付款工具：
 

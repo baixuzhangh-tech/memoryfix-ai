@@ -132,10 +132,13 @@ Use these settings for the first launch:
 - Build command: `npm run build`
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
-- Optional paid validation URL: set `VITE_EARLY_ACCESS_URL` to a Lemon Squeezy checkout URL, Stripe Payment Link, or other hosted checkout page
+- Paid validation URL: `Book Human Restore` points to the Lemon Squeezy checkout URL by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
 
-If `VITE_EARLY_ACCESS_URL` is not set, the Human-assisted Restore button falls
-back to a mailto inquiry link.
+Current checkout:
+
+```text
+https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268
+```
 
 ## Validation Notes
 
