@@ -47,32 +47,32 @@ const pricingCards = [
   {
     name: 'Free Local',
     price: '$0',
-    description: 'Repair small damaged areas and upscale individual photos.',
+    description: 'Private browser repair for small damage.',
     features: [
-      'Local image processing',
-      'Manual repair brush',
-      '4x upscale tool',
-    ],
-  },
-  {
-    name: 'Human-assisted Restore',
-    price: '$19/photo',
-    description:
-      'For one important photo that deserves a more careful AI plus manual review workflow.',
-    features: [
-      'Upload only with explicit consent',
-      'AI base restoration',
-      'Human review and manual touch-up',
+      'No upload for local repair',
+      'Manual scratch and stain repair',
+      'Private 4x upscaling',
     ],
   },
   {
     name: 'Family Pack',
     price: '$9',
     description:
-      'A future credit pack for users restoring several family memories.',
+      '10 restore credits for HD / Pro workflows. Best for trying a few important memories.',
     features: [
-      '10 Pro restore credits',
-      'HD export priority',
+      '10 restore credits',
+      'HD / Pro workflow access',
+      'Credits do not expire',
+    ],
+  },
+  {
+    name: 'Album Pack',
+    price: '$19',
+    description:
+      '30 restore credits for family albums. Best for scanning and restoring a small collection.',
+    features: [
+      '30 restore credits',
+      'Batch album workflow priority',
       'Credits do not expire',
     ],
   },
@@ -473,12 +473,12 @@ function App() {
                   Paid validation path
                 </p>
                 <h2 className="mt-3 text-4xl font-black sm:text-5xl">
-                  Free local repair first. Stronger Pro workflows later.
+                  Free local repair first. Credits for stronger workflows.
                 </h2>
                 <p className="mx-auto mt-5 max-w-2xl leading-7 text-[#66574d]">
-                  Start privately in the browser. Pay only when a photo is
-                  important enough for human-assisted work or future Pro restore
-                  credits.
+                  Start privately in the browser. Pay only when you want HD /
+                  Pro restore credits or human-assisted work for an important
+                  photo.
                 </p>
               </div>
               <div className="mt-8 grid gap-5 lg:grid-cols-3">

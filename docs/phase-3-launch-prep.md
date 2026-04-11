@@ -70,6 +70,28 @@ For one important old photo that deserves extra care. We combine AI base restora
 
 注意：当前本地免费工具仍可直接使用。Human-assisted Restore 必须强调“用户主动选择并同意上传”，不能混淆为本地免费修复也会上传。
 
+## Pricing 页面结构
+
+首页 Pricing 保留三档更容易理解的 credits 策略：
+
+```text
+Free Local
+$0
+Private browser repair for small damage.
+
+Family Pack
+$9
+10 restore credits for HD / Pro workflows.
+Best for trying a few important memories.
+
+Album Pack
+$19
+30 restore credits for family albums.
+Best for scanning and restoring a small collection.
+```
+
+`Human-assisted Restore $19/photo` 不放入三档 credits 套餐中，而是作为独立高意向 CTA，用来验证用户是否愿意为一张重要照片购买人工辅助交付。
+
 ## 发布前冒烟测试
 
 上线后逐项检查：

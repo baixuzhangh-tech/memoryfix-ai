@@ -25,7 +25,7 @@ No upload. No account. No cloud processing.
 - Privacy-first landing page
 - Privacy / Terms / Open Source launch trust notes
 - Vercel Web Analytics page view tracking and product funnel events
-- Pricing validation section for Human-assisted Restore and future Pro credits
+- Pricing validation section for Free Local, Family Pack, and Album Pack
 - Human-assisted Restore CTA for opt-in upload and manual review
 - GPL-3.0 open-source attribution
 
@@ -50,6 +50,13 @@ Not the current best fit:
 
 For stronger results, the product direction is an opt-in `Human-assisted Restore`
 workflow where users explicitly consent before any upload happens.
+
+Pricing validation structure:
+
+- `Free Local` - `$0`, private browser repair for small damage
+- `Family Pack` - `$9`, 10 restore credits for HD / Pro workflows
+- `Album Pack` - `$19`, 30 restore credits for family albums
+- `Human-assisted Restore` - `$19/photo`, separate high-intent CTA for one important photo
 
 ## Technical Notes
 

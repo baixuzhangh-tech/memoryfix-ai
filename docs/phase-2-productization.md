@@ -16,6 +16,7 @@
 - 增加 5 张公有领域/CC0 老照片示例图
 - 增加 `Advanced Cloud Restore` 等待名单/早鸟入口，后续已调整为 `Human-assisted Restore` 付费验证入口
 - 增加 Pricing 验证区，用于后续早鸟付费验证
+- Pricing 已调整为 `Free Local`、`Family Pack`、`Album Pack` 三档 credits 结构
 - 增加开源/GPL-3.0 归属说明
 - 增加 Privacy / Terms / Open Source 发布前信任说明区
 - 增加编辑器 3 步新手引导与空历史提示
