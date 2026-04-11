@@ -15,7 +15,7 @@
 - `public/_redirects`：Cloudflare Pages SPA 回退
 - `vercel.json`：Vercel 构建、输出目录、header、SPA rewrite
 - `.env.example`：早鸟付费链接环境变量模板
-- `VITE_EARLY_ACCESS_URL`：可替换首页 `Join Early Access` 按钮
+- `VITE_EARLY_ACCESS_URL`：可替换首页 `Book Human Restore` 按钮
 - 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
 - 接入 Vercel Web Analytics，并增加首批产品漏斗事件
 
@@ -46,12 +46,12 @@ Vercel 也可以：
 
 当前最短路径：
 
-1. 创建一个 `$9 Early Access` 托管付款链接
+1. 创建一个 `$19/photo Human-assisted Restore` 托管付款链接
 2. 把付款链接配置成环境变量 `VITE_EARLY_ACCESS_URL`
 3. 重新部署站点
-4. 用户点击 `Join Early Access`
+4. 用户点击 `Book Human Restore`
 5. 用户完成付款
-6. 付款成功后人工发送邮件，邀请用户加入产品访谈或优先体验名单
+6. 付款成功后人工发送邮件，请用户上传照片或回复确认交付细节
 
 可以使用的付款工具：
 
@@ -60,15 +60,15 @@ Vercel 也可以：
 - Gumroad Product
 - Paddle Checkout
 
-早鸟产品建议文案：
+Human-assisted Restore 产品建议文案：
 
 ```text
-MemoryFix AI Early Access - $9
+MemoryFix AI Human-assisted Restore - $19/photo
 
-Support a privacy-first old photo repair tool and get priority access to stronger restoration workflows, HD export experiments, and batch album features as they become available.
+For one important old photo that deserves extra care. We combine AI base restoration with human review and manual touch-up, then deliver a cleaner result by email.
 ```
 
-注意：当前本地免费工具仍可直接使用。早鸟付费卖的是“优先权、支持项目、未来 Pro 工作流资格”，不是承诺当前模型一定能修好所有照片。
+注意：当前本地免费工具仍可直接使用。Human-assisted Restore 必须强调“用户主动选择并同意上传”，不能混淆为本地免费修复也会上传。
 
 ## 发布前冒烟测试
 
@@ -83,7 +83,7 @@ Support a privacy-first old photo repair tool and get priority access to stronge
 7. `4x-upscaling` 能触发模型下载和处理
 8. `Download` 能导出结果
 9. `Privacy / Terms / Open Source` 锚点可跳转
-10. `Join Early Access` 在未配置环境变量时打开邮件，在配置后打开付款链接
+10. `Book Human Restore` 在未配置环境变量时打开邮件，在配置后打开付款链接
 11. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
 
 ## 重要边界
@@ -137,4 +137,35 @@ No third-party network requests at all.
 - `upscale_failed`
 - `download_result`
 - `toggle_original_compare`
-- `click_early_access`
+- `click_human_restore`
+
+## Lemon Squeezy 产品建议
+
+产品名称：
+
+```text
+MemoryFix AI Human-assisted Restore
+```
+
+价格：
+
+```text
+$19 / photo
+```
+
+产品描述：
+
+```text
+For one important old photo that deserves extra care.
+
+We combine AI base restoration with human review and manual touch-up, then deliver a cleaner result by email.
+
+Important: The free local repair tool does not upload photos. This paid service requires upload only after you explicitly choose Human-assisted Restore.
+```
+
+交付承诺：
+
+```text
+Delivered by email within 48 hours during beta.
+Limited beta capacity.
+```

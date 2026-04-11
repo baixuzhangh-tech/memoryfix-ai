@@ -14,7 +14,7 @@
 - 增加模型下载说明：首次使用需要下载模型，之后缓存到浏览器
 - 增加功能说明：小损伤修复、老照片高清化、隐私优先
 - 增加 5 张公有领域/CC0 老照片示例图
-- 增加 `Advanced Cloud Restore` 等待名单/早鸟入口
+- 增加 `Advanced Cloud Restore` 等待名单/早鸟入口，后续已调整为 `Human-assisted Restore` 付费验证入口
 - 增加 Pricing 验证区，用于后续早鸟付费验证
 - 增加开源/GPL-3.0 归属说明
 - 增加 Privacy / Terms / Open Source 发布前信任说明区
@@ -45,7 +45,7 @@ Automatically restores every old photo perfectly.
 
 ```text
 Local mode = free, private, best for scratches/small damage/upscaling.
-Advanced Cloud Restore = future opt-in Pro workflow for stronger results.
+Human-assisted Restore = future opt-in workflow for stronger results.
 ```
 
 ## 待做
@@ -54,6 +54,6 @@ Advanced Cloud Restore = future opt-in Pro workflow for stronger results.
 
 1. 将项目推送到 GitHub，并连接 Vercel 或 Cloudflare Pages
 2. 接入 Plausible / Umami / Google Analytics 事件追踪
-3. 创建 $9 Early Access 付款链接并配置 `VITE_EARLY_ACCESS_URL`
-4. 调研 Advanced Cloud Restore 的云端模型方案
+3. 创建 $19/photo Human-assisted Restore 付款链接并配置 `VITE_EARLY_ACCESS_URL`
+4. 调研 Human-assisted Restore 的人工交付和云端模型方案
 5. 将当前 trust notes 升级为律师审核后的正式 Privacy / Terms 页面

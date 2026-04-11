@@ -55,25 +55,25 @@ const pricingCards = [
     ],
   },
   {
-    name: 'Early Access',
-    price: '$9',
+    name: 'Human-assisted Restore',
+    price: '$19/photo',
     description:
-      'Support the project and get priority access to stronger restoration workflows.',
+      'For one important photo that deserves a more careful AI plus manual review workflow.',
     features: [
-      'Batch processing roadmap',
-      'HD export workflow',
-      'Advanced Cloud Restore waitlist',
+      'Upload only with explicit consent',
+      'AI base restoration',
+      'Human review and manual touch-up',
     ],
   },
   {
-    name: 'Family Archive',
-    price: '$19',
+    name: 'Family Pack',
+    price: '$9',
     description:
-      'For users who want to restore scanned albums and family collections.',
+      'A future credit pack for users restoring several family memories.',
     features: [
-      'Album workflow roadmap',
-      'Bulk download roadmap',
-      'Optional Cloud Pro Restore later',
+      '10 Pro restore credits',
+      'HD export priority',
+      'Credits do not expire',
     ],
   },
 ]
@@ -125,9 +125,9 @@ const oldPhotoSamples = [
   },
 ]
 
-const earlyAccessUrl =
+const humanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
-  'mailto:hello@memoryfix.ai?subject=MemoryFix%20AI%20Advanced%20Restore%20Waitlist&body=I%20want%20early%20access%20to%20Advanced%20Cloud%20Restore.'
+  'mailto:hello@memoryfix.ai?subject=MemoryFix%20AI%20Human-assisted%20Restore&body=I%20want%20a%20human-assisted%20restore%20for%20one%20important%20photo.'
 
 function App() {
   const [file, setFile] = useState<File>()
@@ -400,33 +400,33 @@ function App() {
                   Need stronger results?
                 </p>
                 <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  Join the Advanced Cloud Restore waitlist.
+                  Restore one important photo with human help.
                 </h2>
                 <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
-                  Local repair is best for scratches, small damaged areas, and
-                  upscaling. For heavily damaged faces or photos that need a
-                  bigger quality jump, we are preparing an opt-in cloud restore
-                  mode that only uploads after explicit consent.
+                  Local repair stays free and private. If a photo is worth extra
+                  care, choose Human-assisted Restore: upload only with explicit
+                  consent, then get AI base restoration plus manual review and
+                  touch-up.
                 </p>
               </div>
               <a
-                href={earlyAccessUrl}
+                href={humanRestoreUrl}
                 target={
-                  earlyAccessUrl.startsWith('http') ? '_blank' : undefined
+                  humanRestoreUrl.startsWith('http') ? '_blank' : undefined
                 }
                 rel={
-                  earlyAccessUrl.startsWith('http') ? 'noreferrer' : undefined
+                  humanRestoreUrl.startsWith('http') ? 'noreferrer' : undefined
                 }
                 onClick={() => {
-                  trackProductEvent('click_early_access', {
-                    destination: earlyAccessUrl.startsWith('http')
+                  trackProductEvent('click_human_restore', {
+                    destination: humanRestoreUrl.startsWith('http')
                       ? 'checkout'
                       : 'mailto',
                   })
                 }}
                 className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
               >
-                Join Early Access
+                Book Human Restore
               </a>
             </section>
 
@@ -476,9 +476,9 @@ function App() {
                   Free local repair first. Stronger Pro workflows later.
                 </h2>
                 <p className="mx-auto mt-5 max-w-2xl leading-7 text-[#66574d]">
-                  Payments are not connected yet. This pricing block is here to
-                  validate demand for HD exports, batch workflows, and Advanced
-                  Cloud Restore with explicit upload consent.
+                  Start privately in the browser. Pay only when a photo is
+                  important enough for human-assisted work or future Pro restore
+                  credits.
                 </p>
               </div>
               <div className="mt-8 grid gap-5 lg:grid-cols-3">

@@ -25,8 +25,8 @@ No upload. No account. No cloud processing.
 - Privacy-first landing page
 - Privacy / Terms / Open Source launch trust notes
 - Vercel Web Analytics page view tracking and product funnel events
-- Pricing validation section for future Pro workflows
-- Advanced Cloud Restore waitlist concept for stronger opt-in restoration
+- Pricing validation section for Human-assisted Restore and future Pro credits
+- Human-assisted Restore CTA for opt-in upload and manual review
 - GPL-3.0 open-source attribution
 
 ## Product Boundary
@@ -48,7 +48,8 @@ Not the current best fit:
 - Perfect historical reconstruction
 - Fully automatic one-click restoration
 
-For stronger results, the product direction is an opt-in `Advanced Cloud Restore` workflow where users explicitly consent before any upload happens.
+For stronger results, the product direction is an opt-in `Human-assisted Restore`
+workflow where users explicitly consent before any upload happens.
 
 ## Technical Notes
 
@@ -109,7 +110,7 @@ identifiers. The current funnel events cover:
 - `upscale_failed`
 - `download_result`
 - `toggle_original_compare`
-- `click_early_access`
+- `click_human_restore`
 
 ## Deployment
 
@@ -124,10 +125,10 @@ Use these settings for the first launch:
 - Build command: `npm run build`
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
-- Optional paid validation URL: set `VITE_EARLY_ACCESS_URL` to a Stripe Payment Link, Lemon Squeezy checkout URL, or other hosted checkout page
+- Optional paid validation URL: set `VITE_EARLY_ACCESS_URL` to a Lemon Squeezy checkout URL, Stripe Payment Link, or other hosted checkout page
 
-If `VITE_EARLY_ACCESS_URL` is not set, the early access button falls back to a
-mailto waitlist link.
+If `VITE_EARLY_ACCESS_URL` is not set, the Human-assisted Restore button falls
+back to a mailto inquiry link.
 
 ## Validation Notes
 
