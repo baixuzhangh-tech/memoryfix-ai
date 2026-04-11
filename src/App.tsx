@@ -151,24 +151,6 @@ const humanRestoreSteps = [
   },
 ]
 
-const humanRestoreSuccessSteps = [
-  {
-    title: '1. Check your checkout email',
-    description:
-      'We send a secure upload link to the same email you used during checkout so your upload stays tied to the paid order.',
-  },
-  {
-    title: '2. Use the secure link first',
-    description:
-      'Open the secure upload page from your email and add the best photo you have plus notes about scratches, missing areas, color issues, or anything that matters to your family.',
-  },
-  {
-    title: '3. Use fallback only if needed',
-    description:
-      'If the secure email is delayed, the fallback upload form below is still available. We complete AI restoration plus manual touch-up and deliver by email within 48 hours during beta.',
-  },
-]
-
 const humanRestoreUploadChecklist = [
   'The original scan or the highest-resolution copy you have',
   'A short note about the damage or what you want improved',
@@ -187,6 +169,53 @@ const humanRestoreSecureUploadTitle =
   'Secure Upload - MemoryFix AI Human-assisted Restore'
 const humanRestoreSecureUploadDescription =
   'Use your secure upload link to send the photo and notes for your paid MemoryFix AI Human-assisted Restore order.'
+
+type DirectSecureAccessResponse = {
+  error?: string
+  ok?: boolean
+  uploadUrl?: string
+}
+
+function maskEmailAddress(email: string) {
+  const normalizedEmail = email.trim()
+
+  if (!normalizedEmail.includes('@')) {
+    return ''
+  }
+
+  const [localPart, domainPart] = normalizedEmail.split('@')
+
+  if (!localPart || !domainPart) {
+    return ''
+  }
+
+  const visibleLocalStart = localPart.slice(0, 2)
+  const visibleLocalEnd = localPart.length > 4 ? localPart.slice(-1) : ''
+  const hiddenLocalLength = Math.max(
+    1,
+    localPart.length - visibleLocalStart.length - visibleLocalEnd.length
+  )
+  const maskedLocalPart = `${visibleLocalStart}${'*'.repeat(
+    hiddenLocalLength
+  )}${visibleLocalEnd}`
+
+  const domainSegments = domainPart.split('.')
+  const domainName = domainSegments[0] || ''
+  const domainSuffix = domainSegments.slice(1).join('.')
+  const visibleDomainStart = domainName.slice(0, 1)
+  const visibleDomainEnd = domainName.length > 2 ? domainName.slice(-1) : ''
+  const hiddenDomainLength = Math.max(
+    1,
+    domainName.length - visibleDomainStart.length - visibleDomainEnd.length
+  )
+  const maskedDomainName = `${visibleDomainStart}${'*'.repeat(
+    hiddenDomainLength
+  )}${visibleDomainEnd}`
+
+  return domainSuffix
+    ? `${maskedLocalPart}@${maskedDomainName}.${domainSuffix}`
+    : `${maskedLocalPart}@${maskedDomainName}`
+}
 
 function upsertMetaTag(
   attribute: 'name' | 'property',
@@ -228,6 +257,10 @@ function App() {
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
+  const [directUploadUrl, setDirectUploadUrl] = useState('')
+  const [directUploadStatus, setDirectUploadStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'unavailable'
+  >('idle')
 
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
   const currentSearchParams = new URLSearchParams(window.location.search)
@@ -240,6 +273,8 @@ function App() {
     currentSearchParams.get('customer_email') ||
     currentSearchParams.get('email') ||
     ''
+  const maskedCheckoutEmail = maskEmailAddress(defaultCheckoutEmail)
+  const directAccessOrderId = currentSearchParams.get('order_id') || ''
   const defaultOrderReference =
     currentSearchParams.get('order_id') ||
     currentSearchParams.get('order') ||
@@ -310,6 +345,110 @@ function App() {
       unsubscribe()
     }
   }, [isHumanRestoreSecureUploadPage, isHumanRestoreSuccessPage])
+
+  useEffect(() => {
+    let isActive = true
+
+    if (!isHumanRestoreSuccessPage) {
+      setDirectUploadStatus('idle')
+      setDirectUploadUrl('')
+      return () => {
+        isActive = false
+      }
+    }
+
+    if (secureUploadToken) {
+      const uploadUrl = new URL(
+        humanRestoreSecureUploadPath,
+        window.location.origin
+      )
+      uploadUrl.searchParams.set('token', secureUploadToken)
+      setDirectUploadUrl(uploadUrl.toString())
+      setDirectUploadStatus('ready')
+      return () => {
+        isActive = false
+      }
+    }
+
+    if (!directAccessOrderId || !defaultCheckoutEmail) {
+      setDirectUploadStatus('unavailable')
+      setDirectUploadUrl('')
+      return () => {
+        isActive = false
+      }
+    }
+
+    setDirectUploadStatus('loading')
+    setDirectUploadUrl('')
+
+    const requestUrl = new URL(
+      '/api/human-restore-secure-access',
+      window.location.origin
+    )
+    requestUrl.searchParams.set('orderId', directAccessOrderId)
+    requestUrl.searchParams.set('checkoutEmail', defaultCheckoutEmail)
+
+    fetch(requestUrl.toString())
+      .then(async response => {
+        const responseBody = (await response
+          .json()
+          .catch(() => null)) as DirectSecureAccessResponse | null
+
+        if (!isActive) {
+          return
+        }
+
+        if (response.ok && responseBody?.uploadUrl) {
+          setDirectUploadUrl(responseBody.uploadUrl)
+          setDirectUploadStatus('ready')
+          return
+        }
+
+        setDirectUploadStatus('unavailable')
+      })
+      .catch(() => {
+        if (!isActive) {
+          return
+        }
+
+        setDirectUploadStatus('unavailable')
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [
+    defaultCheckoutEmail,
+    directAccessOrderId,
+    isHumanRestoreSuccessPage,
+    secureUploadToken,
+  ])
+
+  let directUploadCta: JSX.Element
+
+  if (directUploadStatus === 'ready' && directUploadUrl) {
+    directUploadCta = (
+      <a
+        href={directUploadUrl}
+        className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
+      >
+        Open secure upload now
+      </a>
+    )
+  } else if (directUploadStatus === 'loading') {
+    directUploadCta = (
+      <span className="inline-flex justify-center rounded-full bg-[#d8c6b2] px-7 py-4 text-center font-black text-[#5b4a40]">
+        Preparing secure upload...
+      </span>
+    )
+  } else {
+    directUploadCta = (
+      <span className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/70 px-5 py-4 text-sm leading-6 text-[#66574d]">
+        Check your email first. If direct access is unavailable here, the secure
+        email link and the backup form below still work.
+      </span>
+    )
+  }
 
   useEffect(() => {
     let isActive = true
@@ -492,52 +631,159 @@ function App() {
                 Payment received
               </p>
               <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
-                Thank you for booking Human-assisted Restore.
+                Your secure upload link is on the way.
               </h1>
               <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
-                Your checkout is complete. We will send a secure upload link to
-                your checkout email so your photo stays tied to this paid order.
-                If that email is delayed, you can still use the fallback upload
-                form below.
+                {maskedCheckoutEmail
+                  ? `We sent your order-bound upload email to ${maskedCheckoutEmail}. Open that message first whenever possible so your photo stays tied to this paid order automatically.`
+                  : 'Your checkout is complete. We send a secure upload link to your checkout email so your photo stays tied to this paid order automatically.'}
               </p>
-              <div className="mt-8 rounded-[2rem] bg-[#211915] p-6 text-white md:p-8">
-                <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#f3c16f]">
-                  Important privacy boundary
-                </p>
-                <h2 className="mt-3 text-2xl font-black sm:text-3xl">
-                  Upload is required only for this paid service.
-                </h2>
-                <p className="mt-4 max-w-3xl leading-7 text-[#e8dfd5]">
-                  The free local repair tool still runs in your browser and does
-                  not upload photos. Only Human-assisted Restore asks you to
-                  upload a file after you explicitly choose and pay for it.
-                </p>
+
+              <div className="mt-8 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-[2rem] border border-[#cfe6bc] bg-[#f4ffe8] p-6 text-[#355322] md:p-8">
+                  <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#5c8b32]">
+                    Next step
+                  </p>
+                  <h2 className="mt-3 text-2xl font-black text-[#1f3413] sm:text-3xl">
+                    Use the secure email link first.
+                  </h2>
+                  <ul className="mt-5 grid gap-3 text-sm leading-6 md:text-base">
+                    <li className="flex gap-3">
+                      <span className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5c8b32]" />
+                      <span>
+                        Open the email we just sent to your checkout inbox.
+                      </span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5c8b32]" />
+                      <span>
+                        Tap the private upload link to skip re-entering order
+                        details.
+                      </span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5c8b32]" />
+                      <span>
+                        If the email is delayed, use the backup upload form
+                        lower on this page.
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-6 md:p-8">
+                  <p className="text-sm font-bold uppercase tracking-[0.22em] text-[#9b6b3c]">
+                    Order summary
+                  </p>
+                  <dl className="mt-5 grid gap-4 text-sm text-[#5b4a40]">
+                    <div>
+                      <dt className="font-black uppercase tracking-[0.14em] text-[#211915]">
+                        Upload email
+                      </dt>
+                      <dd className="mt-2 text-base font-bold text-[#211915]">
+                        {maskedCheckoutEmail || 'Your checkout email'}
+                      </dd>
+                    </div>
+                    {defaultOrderReference && (
+                      <div>
+                        <dt className="font-black uppercase tracking-[0.14em] text-[#211915]">
+                          Reference
+                        </dt>
+                        <dd className="mt-2 text-base font-bold text-[#211915]">
+                          {defaultOrderReference}
+                        </dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt className="font-black uppercase tracking-[0.14em] text-[#211915]">
+                        If you do not see the email
+                      </dt>
+                      <dd className="mt-2 leading-6">
+                        Wait 1-2 minutes, check spam or promotions, then use the
+                        backup upload form below or reply to your receipt email.
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
               </div>
             </section>
 
             <section className="mt-10 grid gap-5 md:grid-cols-3">
-              {humanRestoreSuccessSteps.map(step => (
-                <article
-                  key={step.title}
-                  className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10"
+              <article className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10">
+                <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#9b6b3c]">
+                  Step 1
+                </p>
+                <h2 className="mt-3 text-xl font-black text-[#211915]">
+                  Check the secure upload email
+                </h2>
+                <p className="mt-4 leading-7 text-[#66574d]">
+                  {maskedCheckoutEmail
+                    ? `Look for a new message sent to ${maskedCheckoutEmail}.`
+                    : 'Look for a new secure upload message in the same inbox you used at checkout.'}
+                </p>
+              </article>
+              <article className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10">
+                <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#9b6b3c]">
+                  Step 2
+                </p>
+                <h2 className="mt-3 text-xl font-black text-[#211915]">
+                  Upload the best source photo you have
+                </h2>
+                <p className="mt-4 leading-7 text-[#66574d]">
+                  Use the private link from the email to upload the
+                  highest-quality scan or original photo, then add notes about
+                  scratches, missing areas, color issues, or family priorities.
+                </p>
+              </article>
+              <article className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10">
+                <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#9b6b3c]">
+                  Step 3
+                </p>
+                <h2 className="mt-3 text-xl font-black text-[#211915]">
+                  Receive confirmation, then delivery by email
+                </h2>
+                <p className="mt-4 leading-7 text-[#66574d]">
+                  After upload, we send a confirmation email. During beta, final
+                  restoration delivery is usually sent within 48 hours.
+                </p>
+              </article>
+            </section>
+
+            <section className="mt-10 grid gap-6 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1fr_auto] md:items-center md:p-10">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                  Continue now
+                </p>
+                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                  Open the current order&apos;s upload flow immediately when
+                  available.
+                </h2>
+                <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
+                  We still send the secure upload email for cross-device access
+                  and support records. When we can verify this checkout
+                  directly, you can also jump straight into the private upload
+                  page from here.
+                </p>
+              </div>
+              <div className="flex flex-col items-stretch gap-3 md:w-[260px]">
+                {directUploadCta}
+                <a
+                  href="#backup-upload-form"
+                  className="inline-flex justify-center rounded-full border border-[#211915] px-7 py-4 text-center font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
                 >
-                  <h2 className="text-xl font-black text-[#211915]">
-                    {step.title}
-                  </h2>
-                  <p className="mt-4 leading-7 text-[#66574d]">
-                    {step.description}
-                  </p>
-                </article>
-              ))}
+                  Open backup upload form
+                </a>
+              </div>
             </section>
 
             <section className="mt-10 grid gap-6 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1fr_auto] md:items-center md:p-10">
               <div>
                 <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                  What to send
+                  Backup path
                 </p>
                 <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  Secure email first. Fallback form below if needed.
+                  If the email is delayed, the backup upload form is ready
+                  below.
                 </h2>
                 <ul className="mt-6 space-y-3 text-[#66574d]">
                   {humanRestoreUploadChecklist.map(item => (
@@ -548,55 +794,50 @@ function App() {
                   ))}
                 </ul>
                 <p className="mt-6 leading-7 text-[#66574d]">
-                  First check your inbox and spam folder for the secure upload
-                  email. If it has not arrived yet, you can still use the
-                  fallback form below. Using the same checkout email here helps
-                  us match the submission.
+                  The secure link is still the best path because it binds your
+                  upload to the order automatically. If you need help right now,
+                  the backup form below still works. Using the same checkout
+                  email helps us match the submission quickly.
                 </p>
               </div>
               <div className="flex flex-col items-stretch gap-3 md:w-[220px]">
                 <a
-                  href="/"
+                  href="#backup-upload-form"
                   className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
                 >
-                  Back to homepage
+                  Open backup upload form
                 </a>
                 <a
-                  href={humanRestoreUrl}
-                  target={
-                    humanRestoreUrl.startsWith('http') ? '_blank' : undefined
-                  }
-                  rel={
-                    humanRestoreUrl.startsWith('http')
-                      ? 'noreferrer'
-                      : undefined
-                  }
+                  href="/"
                   className="inline-flex justify-center rounded-full border border-[#211915] px-7 py-4 text-center font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
                 >
-                  Book another photo
+                  Back to homepage
                 </a>
               </div>
             </section>
 
             <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
               <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                Recommended path
+                Reassurance
               </p>
               <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                Use the secure upload link from your email whenever possible.
+                You do not need to pay again if the email is delayed.
               </h2>
               <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
-                The secure link is tied to your paid order automatically, so you
-                do not need to type your order details again. The fallback form
-                below is only for cases where the secure email is delayed or you
-                need manual help right away.
+                Your order is already recorded. The secure upload email and the
+                backup form both route to the same restoration workflow. If the
+                message has not arrived yet, wait a minute, check spam or
+                promotions, then use the backup form below or reply to your
+                receipt email for help.
               </p>
             </section>
 
-            <HumanRestoreUploadForm
-              defaultEmail={defaultCheckoutEmail}
-              defaultOrderReference={defaultOrderReference}
-            />
+            <section id="backup-upload-form" className="scroll-mt-28">
+              <HumanRestoreUploadForm
+                defaultEmail={defaultCheckoutEmail}
+                defaultOrderReference={defaultOrderReference}
+              />
+            </section>
           </div>
         )}
         {mainView === 'home' && (

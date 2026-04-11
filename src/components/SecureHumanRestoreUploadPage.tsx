@@ -2,6 +2,23 @@ import { useEffect, useState } from 'react'
 import trackProductEvent from '../analytics'
 import HumanRestoreUploadForm from './HumanRestoreUploadForm'
 
+function formatOrderDate(value: string) {
+  if (!value) {
+    return ''
+  }
+
+  const parsedDate = new Date(value)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return ''
+  }
+
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsedDate)
+}
+
 type SecureOrderResponse = {
   error?: string
   ok?: boolean
@@ -27,6 +44,7 @@ export default function SecureHumanRestoreUploadPage(
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [order, setOrder] = useState<SecureOrderResponse['order'] | null>(null)
+  const formattedOrderDate = order ? formatOrderDate(order.createdAt) : ''
 
   useEffect(() => {
     let isActive = true
@@ -90,12 +108,51 @@ export default function SecureHumanRestoreUploadPage(
           Secure upload
         </p>
         <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
-          Upload the photo for your paid restoration order.
+          Your paid order is verified and ready for upload.
         </h1>
         <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
-          This secure link is tied to a paid Human-assisted Restore order. Add
-          your photo and repair notes below. No account is required.
+          This private link is already tied to your paid Human-assisted Restore
+          order. Upload your photo and notes below to start restoration. No
+          account or extra payment is required.
         </p>
+
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
+              Status
+            </p>
+            <p className="mt-3 text-lg font-black text-[#1f3413]">
+              Paid order confirmed
+            </p>
+            <p className="mt-2 text-sm leading-6">
+              Your payment already matches this upload link.
+            </p>
+          </article>
+          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
+              Step 2
+            </p>
+            <p className="mt-3 text-lg font-black text-[#1f3413]">
+              Upload your best source photo
+            </p>
+            <p className="mt-2 text-sm leading-6">
+              Add the cleanest scan or original image you have, plus repair
+              notes.
+            </p>
+          </article>
+          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
+              Step 3
+            </p>
+            <p className="mt-3 text-lg font-black text-[#1f3413]">
+              Receive confirmation and delivery by email
+            </p>
+            <p className="mt-2 text-sm leading-6">
+              We send a confirmation after upload, then final delivery during
+              beta is usually within 48 hours.
+            </p>
+          </article>
+        </div>
       </section>
 
       {status === 'loading' && (
@@ -122,16 +179,72 @@ export default function SecureHumanRestoreUploadPage(
       )}
 
       {status === 'ready' && order && (
-        <HumanRestoreUploadForm
-          defaultEmail=""
-          defaultOrderReference=""
-          secureOrderSummary={{
-            checkoutEmailMasked: order.checkoutEmailMasked,
-            orderNumber: order.orderNumber,
-            productName: order.productName,
-          }}
-          secureUploadToken={token}
-        />
+        <>
+          <section className="mt-10 grid gap-4 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1.1fr_0.9fr] md:p-10">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                Order summary
+              </p>
+              <h2 className="mt-3 text-3xl font-black text-[#211915] sm:text-4xl">
+                Everything below is already linked to your paid order.
+              </h2>
+              <p className="mt-4 max-w-2xl leading-7 text-[#66574d]">
+                Use this page once, upload the photo you want restored, and keep
+                the confirmation email we send after submission.
+              </p>
+            </div>
+
+            <div className="grid gap-4 rounded-[1.75rem] border border-[#e6d2b7] bg-white/70 p-6">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                  Checkout email
+                </p>
+                <p className="mt-2 text-base font-black text-[#211915]">
+                  {order.checkoutEmailMasked}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                  Order number
+                </p>
+                <p className="mt-2 text-base font-black text-[#211915]">
+                  {order.orderNumber || order.orderId}
+                </p>
+              </div>
+              {formattedOrderDate && (
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
+                    Purchased
+                  </p>
+                  <p className="mt-2 text-base font-bold text-[#211915]">
+                    {formattedOrderDate}
+                  </p>
+                </div>
+              )}
+              {order.receiptUrl && (
+                <a
+                  href={order.receiptUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex justify-center rounded-full border border-[#211915] px-5 py-3 text-center text-sm font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
+                >
+                  View receipt
+                </a>
+              )}
+            </div>
+          </section>
+
+          <HumanRestoreUploadForm
+            defaultEmail=""
+            defaultOrderReference=""
+            secureOrderSummary={{
+              checkoutEmailMasked: order.checkoutEmailMasked,
+              orderNumber: order.orderNumber,
+              productName: order.productName,
+            }}
+            secureUploadToken={token}
+          />
+        </>
       )}
     </div>
   )

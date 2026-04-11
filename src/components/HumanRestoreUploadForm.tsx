@@ -232,6 +232,16 @@ export default function HumanRestoreUploadForm(
       )}
 
       <div className="mt-8 grid gap-4 md:grid-cols-3">
+        <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
+          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#5c8b32]">
+            Status
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[#355322]">
+            {isSecureUpload
+              ? 'Payment confirmed. This upload will attach directly to your paid order.'
+              : 'Use this backup form only for a paid Human-assisted Restore order.'}
+          </p>
+        </article>
         <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
           <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
             Privacy
@@ -348,14 +358,40 @@ export default function HumanRestoreUploadForm(
 
         {status === 'success' && (
           <div className="grid gap-4 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
+                <p className="text-sm font-black uppercase tracking-[0.14em]">
+                  Status
+                </p>
+                <p className="mt-2 text-base font-black text-[#1f3413]">
+                  Upload received
+                </p>
+              </div>
+              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
+                <p className="text-sm font-black uppercase tracking-[0.14em]">
+                  Next step
+                </p>
+                <p className="mt-2 text-base font-black text-[#1f3413]">
+                  Confirmation email sent
+                </p>
+              </div>
+              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
+                <p className="text-sm font-black uppercase tracking-[0.14em]">
+                  Delivery target
+                </p>
+                <p className="mt-2 text-base font-black text-[#1f3413]">
+                  Usually within 48 hours
+                </p>
+              </div>
+            </div>
             <div>
               <p className="text-sm font-black uppercase tracking-[0.14em]">
-                Upload received
+                Restoration workflow started
               </p>
               <p className="mt-2 leading-7">
-                Your photo was received and queued for order matching. We will
-                deliver the restored result by email within 48 hours during
-                beta.
+                {isSecureUpload
+                  ? 'Your photo is now attached to the paid order behind this secure link. Keep the confirmation email for your records and reply there if you need to add details.'
+                  : 'Your photo was received and queued for paid order matching. Keep the confirmation email for your records and reply there if you need to add more details.'}
               </p>
             </div>
             {submissionReference && (
@@ -372,8 +408,8 @@ export default function HumanRestoreUploadForm(
               {confirmationEmailSent ? (
                 <p>
                   {isSecureUpload
-                    ? 'A confirmation email has been sent for this upload. Keep it for your records and reply there if you need to add more details.'
-                    : 'A confirmation email has been sent to your checkout email. Keep it for your records and reply there if you need to add more details.'}
+                    ? 'A confirmation email has been sent for this upload. You do not need to submit again unless support asks you to.'
+                    : 'A confirmation email has been sent to your checkout email. You do not need to submit again unless support asks you to.'}
                 </p>
               ) : (
                 <p>
