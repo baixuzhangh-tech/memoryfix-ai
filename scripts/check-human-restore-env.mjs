@@ -92,18 +92,23 @@ for (const key of requiredVariables) {
 const provider = env.AI_RESTORE_PROVIDER || ''
 const hasFal = Boolean(env.FAL_KEY)
 const hasOpenAI = Boolean(env.OPENAI_API_KEY)
+const hasReplicate = Boolean(env.REPLICATE_API_TOKEN)
 const aiProblems = []
 
-if (provider === 'fal' && !hasFal && !hasOpenAI) {
+if (provider === 'fal' && !hasFal && !hasOpenAI && !hasReplicate) {
   aiProblems.push(
-    'AI_RESTORE_PROVIDER=fal but neither FAL_KEY nor OPENAI_API_KEY is set.'
+    'AI_RESTORE_PROVIDER=fal but neither FAL_KEY nor OPENAI_API_KEY nor REPLICATE_API_TOKEN is set.'
   )
-} else if (provider === 'openai' && !hasOpenAI && !hasFal) {
+} else if (provider === 'openai' && !hasOpenAI && !hasFal && !hasReplicate) {
   aiProblems.push(
-    'AI_RESTORE_PROVIDER=openai but neither OPENAI_API_KEY nor FAL_KEY is set.'
+    'AI_RESTORE_PROVIDER=openai but neither OPENAI_API_KEY nor FAL_KEY nor REPLICATE_API_TOKEN is set.'
   )
-} else if (!provider && !hasFal && !hasOpenAI) {
-  aiProblems.push('Set FAL_KEY or OPENAI_API_KEY for cloud restoration.')
+} else if (provider === 'replicate' && !hasReplicate && !hasFal && !hasOpenAI) {
+  aiProblems.push(
+    'AI_RESTORE_PROVIDER=replicate but neither REPLICATE_API_TOKEN nor FAL_KEY nor OPENAI_API_KEY is set.'
+  )
+} else if (!provider && !hasFal && !hasOpenAI && !hasReplicate) {
+  aiProblems.push('Set FAL_KEY, OPENAI_API_KEY, or REPLICATE_API_TOKEN for cloud restoration.')
 }
 
 if (missing.length || placeholders.length || aiProblems.length) {

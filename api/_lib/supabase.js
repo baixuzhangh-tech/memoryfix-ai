@@ -274,7 +274,13 @@ export async function createSignedUrl({
     return ''
   }
 
-  return signedUrl.startsWith('http') ? signedUrl : `${url}${signedUrl}`
+  if (signedUrl.startsWith('http')) {
+    return signedUrl
+  }
+
+  const prefix = signedUrl.startsWith('/storage/v1/') ? '' : '/storage/v1'
+
+  return `${url}${prefix}${signedUrl}`
 }
 
 export async function createJobSignedUrls(job) {

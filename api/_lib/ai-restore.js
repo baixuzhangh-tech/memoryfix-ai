@@ -9,6 +9,7 @@ import {
 
 const defaultFalModel = 'fal-ai/image-editing/photo-restoration'
 const defaultOpenAIImageModel = 'gpt-image-1.5'
+const defaultReplicateModel = 'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
 
 function wait(ms) {
   return new Promise(resolve => {
@@ -47,12 +48,20 @@ function getProvider(requestedProvider) {
     return 'openai'
   }
 
+  if (configuredProvider === 'replicate' && process.env.REPLICATE_API_TOKEN) {
+    return 'replicate'
+  }
+
   if (process.env.FAL_KEY) {
     return 'fal'
   }
 
   if (process.env.OPENAI_API_KEY) {
     return 'openai'
+  }
+
+  if (process.env.REPLICATE_API_TOKEN) {
+    return 'replicate'
   }
 
   return ''
@@ -288,6 +297,101 @@ async function pollFalRequest({ model, requestId }) {
   }
 }
 
+async function callReplicate({ job, prompt }) {
+  const apiToken = process.env.REPLICATE_API_TOKEN
+
+  if (!apiToken) {
+    throw new Error('REPLICATE_API_TOKEN is not configured.')
+  }
+
+  const imageUrl = await createSignedUrl({
+    bucket: job.original_storage_bucket,
+    expiresIn: 60 * 30,
+    path: job.original_storage_path,
+  })
+  const model = process.env.REPLICATE_RESTORE_MODEL || defaultReplicateModel
+  const [owner, rest] = model.split('/')
+  const [name, version] = (rest || '').split(':')
+
+  const createBody = version
+    ? { version, input: { img: imageUrl } }
+    : { input: { img: imageUrl } }
+  const createUrl = version
+    ? 'https://api.replicate.com/v1/predictions'
+    : `https://api.replicate.com/v1/models/${owner}/${name}/predictions`
+
+  const createResponse = await fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      'Content-Type': 'application/json',
+      Prefer: 'wait',
+    },
+    body: JSON.stringify(createBody),
+  })
+  const payload = await createResponse.json().catch(() => null)
+
+  if (!createResponse.ok) {
+    throw new Error(
+      payload?.detail || payload?.error || 'Replicate prediction request failed.'
+    )
+  }
+
+  if (payload?.status === 'failed' || payload?.status === 'canceled') {
+    throw new Error(payload?.error || 'Replicate prediction failed.')
+  }
+
+  let output = payload?.output
+
+  if (payload?.status === 'processing' || payload?.status === 'starting') {
+    const pollUrl = payload?.urls?.get || payload?.id
+      ? `https://api.replicate.com/v1/predictions/${payload.id}`
+      : null
+
+    if (pollUrl) {
+      const maxPolls = 15
+      const pollInterval = 2000
+
+      for (let i = 0; i < maxPolls; i += 1) {
+        await wait(pollInterval)
+        const pollRes = await fetch(pollUrl, {
+          headers: { Authorization: `Bearer ${apiToken}` },
+        })
+        const pollData = await pollRes.json().catch(() => null)
+
+        if (pollData?.status === 'succeeded') {
+          output = pollData.output
+          break
+        }
+
+        if (pollData?.status === 'failed' || pollData?.status === 'canceled') {
+          throw new Error(pollData?.error || 'Replicate prediction failed.')
+        }
+      }
+    }
+  }
+
+  const resultImageUrl =
+    typeof output === 'string'
+      ? output
+      : Array.isArray(output)
+        ? output[0]
+        : output?.image || output?.url || ''
+
+  if (!resultImageUrl) {
+    throw new Error('Replicate did not return a restored image.')
+  }
+
+  const fetched = await fetchImageBuffer(resultImageUrl)
+
+  return {
+    ...fetched,
+    model,
+    provider: 'replicate',
+    providerPayload: { prediction_id: payload?.id, source: 'prediction' },
+  }
+}
+
 async function callFal({ job, prompt }) {
   const imageUrl = await createSignedUrl({
     bucket: job.original_storage_bucket,
@@ -413,7 +517,9 @@ export async function runRestoreJob({ job, provider: requestedProvider }) {
             job,
             prompt,
           })
-        : await callFal({ job, prompt })
+        : provider === 'replicate'
+          ? await callReplicate({ job, prompt })
+          : await callFal({ job, prompt })
 
     if (result.status === 'pending') {
       return updateJob(job.id, {
