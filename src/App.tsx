@@ -161,6 +161,7 @@ type DirectSecureAccessResponse = {
 }
 
 type CreateCheckoutResponse = {
+  checkoutRef?: string
   checkoutUrl?: string
   error?: string
   ok?: boolean
@@ -336,11 +337,17 @@ function App() {
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('orderIdentifier') ||
     ''
+  const directAccessCheckoutRef =
+    currentSearchParams.get('checkout_ref') ||
+    (isHumanRestoreSuccessPage
+      ? sessionStorage.getItem('pending_checkout_ref') || ''
+      : '')
   const defaultOrderReference =
     currentSearchParams.get('order_id') ||
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('order') ||
     currentSearchParams.get('checkout_id') ||
+    directAccessCheckoutRef ||
     ''
 
   let mainView: 'editor' | 'success' | 'secure-upload' | 'home' = 'home'
@@ -435,8 +442,9 @@ function App() {
     }
 
     if (
-      (!directAccessOrderId && !directAccessOrderIdentifier) ||
-      !defaultCheckoutEmail
+      !directAccessOrderId &&
+      !directAccessOrderIdentifier &&
+      !directAccessCheckoutRef
     ) {
       setDirectUploadStatus('unavailable')
       setDirectUploadUrl('')
@@ -465,7 +473,13 @@ function App() {
       )
     }
 
-    requestUrl.searchParams.set('checkoutEmail', defaultCheckoutEmail)
+    if (directAccessCheckoutRef) {
+      requestUrl.searchParams.set('checkoutRef', directAccessCheckoutRef)
+    }
+
+    if (defaultCheckoutEmail) {
+      requestUrl.searchParams.set('checkoutEmail', defaultCheckoutEmail)
+    }
 
     fetch(requestUrl.toString())
       .then(async response => {
@@ -510,6 +524,7 @@ function App() {
     }
   }, [
     defaultCheckoutEmail,
+    directAccessCheckoutRef,
     directAccessOrderId,
     directAccessOrderIdentifier,
     isHumanRestoreSuccessPage,
@@ -690,6 +705,17 @@ function App() {
           responseBody?.error ||
             'Secure checkout could not be opened right now. Please try again.'
         )
+      }
+
+      if (responseBody.checkoutRef) {
+        try {
+          sessionStorage.setItem(
+            'pending_checkout_ref',
+            responseBody.checkoutRef
+          )
+        } catch {
+          // sessionStorage may be unavailable
+        }
       }
 
       if (ensureLemonSqueezySetup()) {

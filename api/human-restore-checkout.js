@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { json } from './_lib/human-restore.js'
 
 const defaultSiteUrl = 'https://artgen.site'
@@ -23,8 +24,9 @@ export default async function handler(req, res) {
   const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const variantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
   const parsedVariantId = Number(variantId)
+  const checkoutRef = randomUUID()
   const successBase = new URL('/human-restore/success', siteUrl).toString()
-  const redirectUrl = `${successBase}?order_id=[order_id]&email=[email]`
+  const redirectUrl = `${successBase}?checkout_ref=${checkoutRef}`
 
   if (!apiKey || !storeId || !variantId) {
     json(res, 503, {
@@ -54,6 +56,7 @@ export default async function handler(req, res) {
             checkout_data: {
               custom: {
                 flow: 'human_restore_inline_upload',
+                checkout_ref: checkoutRef,
               },
             },
           },
@@ -95,6 +98,7 @@ export default async function handler(req, res) {
     json(res, 200, {
       ok: true,
       checkoutUrl,
+      checkoutRef,
     })
   } catch {
     json(res, 500, {

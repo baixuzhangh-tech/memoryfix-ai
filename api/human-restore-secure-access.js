@@ -37,6 +37,7 @@ function getOrderDetails(payload) {
     testMode: Boolean(attributes.test_mode),
     variantId: firstOrderItem?.variant_id,
     identifier: attributes.identifier || '',
+    customData: attributes.meta?.custom_data || null,
   }
 }
 
@@ -64,6 +65,9 @@ export default async function handler(req, res) {
   const orderIdentifier = Array.isArray(req.query.orderIdentifier)
     ? req.query.orderIdentifier[0]
     : req.query.orderIdentifier
+  const checkoutRef = Array.isArray(req.query.checkoutRef)
+    ? req.query.checkoutRef[0]
+    : req.query.checkoutRef
   const checkoutEmail = Array.isArray(req.query.checkoutEmail)
     ? req.query.checkoutEmail[0]
     : req.query.checkoutEmail
@@ -73,10 +77,10 @@ export default async function handler(req, res) {
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
   const configuredVariantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
 
-  if ((!orderId && !orderIdentifier) || !checkoutEmail) {
+  if (!orderId && !orderIdentifier && !checkoutRef) {
     json(res, 400, {
       error:
-        'Order reference and checkout email are required for secure upload access.',
+        'Order reference is required for secure upload access.',
     })
     return
   }
@@ -117,11 +121,16 @@ export default async function handler(req, res) {
     } else {
       const requestUrl = new URL('https://api.lemonsqueezy.com/v1/orders')
 
-      requestUrl.searchParams.set('filter[user_email]', checkoutEmail)
+      if (checkoutEmail) {
+        requestUrl.searchParams.set('filter[user_email]', checkoutEmail)
+      }
 
       if (storeId) {
         requestUrl.searchParams.set('filter[store_id]', storeId)
       }
+
+      requestUrl.searchParams.set('sort', '-createdAt')
+      requestUrl.searchParams.set('page[size]', '10')
 
       const response = await fetch(requestUrl.toString(), {
         headers: requestHeaders,
@@ -135,14 +144,25 @@ export default async function handler(req, res) {
       }
 
       const payload = await response.json().catch(() => null)
-      const matchedOrder = getListOrderDetails(payload).find(candidate => {
-        return (
-          normalizeIdentifier(candidate?.identifier) ===
-          normalizeIdentifier(orderIdentifier)
-        )
-      })
+      const candidates = getListOrderDetails(payload)
 
-      order = matchedOrder || null
+      let matchedOrder = null
+
+      if (checkoutRef) {
+        matchedOrder =
+          candidates.find(
+            candidate => candidate?.customData?.checkout_ref === checkoutRef
+          ) || null
+      } else if (orderIdentifier) {
+        matchedOrder =
+          candidates.find(
+            candidate =>
+              normalizeIdentifier(candidate?.identifier) ===
+              normalizeIdentifier(orderIdentifier)
+          ) || null
+      }
+
+      order = matchedOrder
     }
 
     if (!order || !order.checkoutEmail || order.status !== 'paid') {
@@ -152,7 +172,10 @@ export default async function handler(req, res) {
       return
     }
 
-    if (normalizeEmail(order.checkoutEmail) !== normalizeEmail(checkoutEmail)) {
+    if (
+      checkoutEmail &&
+      normalizeEmail(order.checkoutEmail) !== normalizeEmail(checkoutEmail)
+    ) {
       json(res, 403, {
         error: 'Checkout email does not match this paid order.',
       })
