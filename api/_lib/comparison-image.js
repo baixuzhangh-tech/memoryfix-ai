@@ -1,8 +1,8 @@
 import sharp from 'sharp'
 
-const labelHeight = 40
-const dividerWidth = 4
-const maxDimension = 1200
+const labelHeight = 28
+const dividerWidth = 3
+const maxDimension = 560
 const bgColor = { r: 34, g: 25, b: 21 }
 const dividerColor = { r: 230, g: 210, b: 183 }
 
@@ -16,7 +16,7 @@ function createLabelSvg(text, width) {
         text-anchor="middle"
         dominant-baseline="central"
         font-family="Arial, Helvetica, sans-serif"
-        font-size="16"
+        font-size="13"
         font-weight="bold"
         letter-spacing="3"
         fill="rgb(${dividerColor.r},${dividerColor.g},${dividerColor.b})"
@@ -42,12 +42,12 @@ export async function buildComparisonImage({
 
   const originalResized = await sharp(originalBuffer)
     .resize(targetW, targetH, { fit: 'cover' })
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: 82 })
     .toBuffer()
 
   const resultResized = await sharp(resultBuffer)
     .resize(targetW, targetH, { fit: 'cover' })
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: 82 })
     .toBuffer()
 
   if (isLandscape) {
@@ -91,7 +91,7 @@ export async function buildComparisonImage({
           left: targetW + dividerWidth,
         },
       ])
-      .jpeg({ quality: 88 })
+      .jpeg({ quality: 82 })
       .toBuffer()
   }
 
@@ -135,6 +135,6 @@ export async function buildComparisonImage({
         left: 0,
       },
     ])
-    .jpeg({ quality: 88 })
+    .jpeg({ quality: 82 })
     .toBuffer()
 }
