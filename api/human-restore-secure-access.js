@@ -71,13 +71,16 @@ export default async function handler(req, res) {
   const checkoutEmail = Array.isArray(req.query.checkoutEmail)
     ? req.query.checkoutEmail[0]
     : req.query.checkoutEmail
+  const mode = Array.isArray(req.query.mode)
+    ? req.query.mode[0]
+    : req.query.mode
   const apiKey = process.env.LEMON_SQUEEZY_API_KEY
   const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const uploadTokenSecret = process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
   const configuredVariantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
 
-  if (!orderId && !orderIdentifier && !checkoutRef) {
+  if (!orderId && !orderIdentifier && !checkoutRef && mode !== 'recent') {
     json(res, 400, {
       error:
         'Order reference is required for secure upload access.',
@@ -160,6 +163,9 @@ export default async function handler(req, res) {
               normalizeIdentifier(candidate?.identifier) ===
               normalizeIdentifier(orderIdentifier)
           ) || null
+      } else if (mode === 'recent') {
+        matchedOrder =
+          candidates.find(candidate => candidate?.status === 'paid') || null
       }
 
       order = matchedOrder

@@ -311,6 +311,7 @@ function App() {
     ''
   let storedCheckoutOrderId = ''
   let storedCheckoutEmail = ''
+  let hasPendingCheckout = false
 
   if (
     isHumanRestoreSuccessPage &&
@@ -318,19 +319,38 @@ function App() {
     !currentSearchParams.get('checkout_ref')
   ) {
     try {
-      const stored = JSON.parse(
+      const successData = JSON.parse(
         localStorage.getItem('ls_checkout_success') || '{}'
       )
-      const isRecent =
-        stored.timestamp && Date.now() - stored.timestamp < 30 * 60 * 1000
+      const isSuccessRecent =
+        successData.timestamp &&
+        Date.now() - successData.timestamp < 30 * 60 * 1000
 
-      if (isRecent && stored.orderId) {
-        storedCheckoutOrderId = String(stored.orderId)
-        storedCheckoutEmail = String(stored.email || '')
+      if (isSuccessRecent && successData.orderId) {
+        storedCheckoutOrderId = String(successData.orderId)
+        storedCheckoutEmail = String(successData.email || '')
         localStorage.removeItem('ls_checkout_success')
       }
     } catch {
       // localStorage may be unavailable
+    }
+
+    if (!storedCheckoutOrderId) {
+      try {
+        const pendingData = JSON.parse(
+          localStorage.getItem('pending_human_restore_checkout') || '{}'
+        )
+        const isPendingRecent =
+          pendingData.timestamp &&
+          Date.now() - pendingData.timestamp < 30 * 60 * 1000
+
+        if (isPendingRecent) {
+          hasPendingCheckout = true
+          localStorage.removeItem('pending_human_restore_checkout')
+        }
+      } catch {
+        // localStorage may be unavailable
+      }
     }
   }
 
@@ -449,11 +469,13 @@ function App() {
       }
     }
 
-    if (
-      !directAccessOrderId &&
-      !directAccessOrderIdentifier &&
-      !directAccessCheckoutRef
-    ) {
+    const hasAnyOrderRef =
+      directAccessOrderId ||
+      directAccessOrderIdentifier ||
+      directAccessCheckoutRef ||
+      hasPendingCheckout
+
+    if (!hasAnyOrderRef) {
       setDirectUploadStatus('unavailable')
       setDirectUploadUrl('')
       setDirectUploadToken('')
@@ -487,6 +509,15 @@ function App() {
 
     if (effectiveCheckoutEmail) {
       requestUrl.searchParams.set('checkoutEmail', effectiveCheckoutEmail)
+    }
+
+    if (
+      hasPendingCheckout &&
+      !directAccessOrderId &&
+      !directAccessOrderIdentifier &&
+      !directAccessCheckoutRef
+    ) {
+      requestUrl.searchParams.set('mode', 'recent')
     }
 
     fetch(requestUrl.toString())
@@ -535,6 +566,7 @@ function App() {
     directAccessCheckoutRef,
     directAccessOrderId,
     directAccessOrderIdentifier,
+    hasPendingCheckout,
     isHumanRestoreSuccessPage,
     secureUploadToken,
   ])
@@ -715,6 +747,15 @@ function App() {
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError('Checkout URL is not configured.')
       return
+    }
+
+    try {
+      localStorage.setItem(
+        'pending_human_restore_checkout',
+        JSON.stringify({ timestamp: Date.now() })
+      )
+    } catch {
+      // localStorage may be unavailable
     }
 
     if (ensureLemonSqueezySetup()) {
