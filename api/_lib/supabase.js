@@ -203,6 +203,27 @@ export async function getOrderByProviderOrderId(providerOrderId) {
   return Array.isArray(payload) ? payload[0] || null : null
 }
 
+export async function getRecentPaidOrderByEmail(email, hoursBack = 48) {
+  if (!email) {
+    return null
+  }
+
+  const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString()
+  const params = new URLSearchParams({
+    checkout_email: `eq.${email}`,
+    'payment_confirmed_at': 'not.is.null',
+    created_at: `gte.${since}`,
+    limit: '1',
+    order: 'payment_confirmed_at.desc',
+    select: '*',
+  })
+  const payload = await supabaseRest(
+    `/human_restore_orders?${params.toString()}`
+  )
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
 export async function countJobsByOrderId(orderId) {
   if (!orderId) {
     return 0

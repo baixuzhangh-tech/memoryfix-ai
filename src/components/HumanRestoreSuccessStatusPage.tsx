@@ -70,14 +70,14 @@ function getHeroDescription(order: HumanRestoreLocalOrder | null) {
   }
 
   if (order.status === 'pending_payment') {
-    return 'Lemon Squeezy can take a few seconds to notify us. Keep this page open; no second upload or second payment is needed.'
+    return 'Paddle can take a few seconds to notify us. Keep this page open; no second upload or second payment is needed.'
   }
 
   if (order.checkoutEmailMasked) {
     return `We will deliver the approved restoration to your checkout email ${order.checkoutEmailMasked}.`
   }
 
-  return 'We will deliver the approved restoration to the checkout email returned by Lemon Squeezy.'
+  return 'We will deliver the approved restoration to the checkout email from your Paddle receipt.'
 }
 
 function getStepState(order: HumanRestoreLocalOrder | null, step: string) {
@@ -166,7 +166,7 @@ export default function HumanRestoreSuccessStatusPage(
       id: 'payment',
       title: 'Payment confirmation',
       description:
-        'Lemon Squeezy confirms the order by webhook and returns the checkout email.',
+        'Paddle confirms the order by webhook and returns the checkout email.',
     },
     {
       id: 'ai',
@@ -206,7 +206,7 @@ export default function HumanRestoreSuccessStatusPage(
             <p className="mt-5 max-w-2xl text-base leading-8 text-[#f7eadb] md:text-lg">
               {isError
                 ? errorMessage ||
-                  'If you already paid, do not pay again. Use the Lemon Squeezy receipt email as your backup record and contact support if this page does not recover.'
+                  'If you already paid, do not pay again. Use the Paddle receipt email as your backup record and contact support if this page does not recover.'
                 : getHeroDescription(order)}
             </p>
 
@@ -288,7 +288,7 @@ export default function HumanRestoreSuccessStatusPage(
               rel="noreferrer"
               className="mt-6 inline-flex justify-center rounded-full border border-[#211915] px-5 py-3 text-center text-sm font-black text-[#211915] transition hover:-translate-y-1 hover:bg-[#fffaf3]"
             >
-              View Lemon Squeezy receipt
+              View payment receipt
             </a>
           )}
         </section>

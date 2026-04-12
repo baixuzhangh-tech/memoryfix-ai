@@ -3,7 +3,6 @@ import trackProductEvent from '../analytics'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
-  checkoutUrl?: string
   error?: string
   ok?: boolean
   orderId?: string
@@ -11,11 +10,7 @@ type HumanRestoreCheckoutResponse = {
 
 type HumanRestoreCheckoutFormProps = {
   onCancel: () => void
-  onCheckoutCreated: (payload: {
-    checkoutRef: string
-    checkoutUrl: string
-    orderId: string
-  }) => void
+  onCheckoutCreated: (payload: { checkoutRef: string; orderId: string }) => void
 }
 
 type SubmissionStatus = 'idle' | 'submitting' | 'error'
@@ -104,7 +99,7 @@ export default function HumanRestoreCheckoutForm(
         .json()
         .catch(() => null)) as HumanRestoreCheckoutResponse | null
 
-      if (!response.ok || !responseBody?.checkoutUrl || !responseBody.orderId) {
+      if (!response.ok || !responseBody?.orderId) {
         throw new Error(
           responseBody?.error ||
             'Checkout could not be prepared. Please try again in a moment.'
@@ -118,7 +113,6 @@ export default function HumanRestoreCheckoutForm(
 
       onCheckoutCreated({
         checkoutRef: responseBody.checkoutRef || '',
-        checkoutUrl: responseBody.checkoutUrl,
         orderId: responseBody.orderId,
       })
     } catch (error) {
@@ -146,9 +140,8 @@ export default function HumanRestoreCheckoutForm(
             Upload one photo before secure checkout.
           </h2>
           <p className="mt-4 max-w-2xl leading-7 text-[#66574d]">
-            No email is needed here. Lemon Squeezy collects your checkout email,
-            and we deliver the approved restoration to that address after human
-            review.
+            No email is needed here. Paddle collects your checkout email, and we
+            deliver the approved restoration to that address after human review.
           </p>
         </div>
         <button
@@ -235,8 +228,8 @@ export default function HumanRestoreCheckoutForm(
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <p className="max-w-2xl text-xs leading-6 text-[#66574d]">
-            After the upload is saved, Lemon Squeezy opens for secure payment.
-            You will not need to upload this photo again after payment.
+            After the upload is saved, Paddle opens for secure payment. You will
+            not need to upload this photo again after payment.
           </p>
           <button
             type="submit"

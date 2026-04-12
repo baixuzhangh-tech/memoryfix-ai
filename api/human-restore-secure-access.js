@@ -4,6 +4,12 @@ import {
   json,
   maskEmail,
 } from './_lib/human-restore.js'
+import {
+  getOrder,
+  getOrderByCheckoutRef,
+  getOrderByProviderOrderId,
+  getRecentPaidOrderByEmail,
+} from './_lib/supabase.js'
 
 const defaultSiteUrl = 'https://artgen.site'
 
@@ -13,79 +19,38 @@ function normalizeEmail(value) {
     .toLowerCase()
 }
 
-function normalizeIdentifier(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
+function isPaidStatus(status) {
+  const paidStatuses = new Set([
+    'paid',
+    'uploaded',
+    'processing',
+    'ai_queued',
+    'ai_failed',
+    'needs_review',
+    'manual_review',
+    'delivered',
+  ])
+
+  return paidStatuses.has(status)
 }
 
-function normalizeCustomData(payload, attributes) {
-  return (
-    payload?.meta?.custom_data ||
-    attributes?.meta?.custom_data ||
-    attributes?.custom_data ||
-    null
-  )
-}
-
-function isOrderCreatedAfterCheckoutStart(order, checkoutStartedAt) {
-  if (!checkoutStartedAt || !order?.createdAt) {
-    return false
-  }
-
-  const checkoutStartedAtMs = Date.parse(checkoutStartedAt)
-  const orderCreatedAtMs = Date.parse(order.createdAt)
-
-  if (
-    !Number.isFinite(checkoutStartedAtMs) ||
-    !Number.isFinite(orderCreatedAtMs)
-  ) {
-    return false
-  }
-
-  const fiveMinutesMs = 5 * 60 * 1000
-  const thirtyMinutesMs = 30 * 60 * 1000
-
-  return (
-    orderCreatedAtMs >= checkoutStartedAtMs - fiveMinutesMs &&
-    orderCreatedAtMs <= checkoutStartedAtMs + thirtyMinutesMs
-  )
-}
-
-function getOrderDetails(payload) {
-  const attributes = payload?.data?.attributes
-  const firstOrderItem = attributes?.first_order_item
-
-  if (!payload?.data?.id || !attributes) {
+function localOrderToOrderDetails(localOrder) {
+  if (!localOrder) {
     return null
   }
 
   return {
-    checkoutEmail: attributes.user_email || '',
-    createdAt: attributes.created_at || new Date().toISOString(),
-    customerName: attributes.user_name || '',
-    orderId: payload.data.id,
-    orderNumber: attributes.order_number,
-    productName: firstOrderItem?.product_name || 'Human-assisted Restore',
-    receiptUrl: attributes.urls?.receipt || '',
-    status: attributes.status || '',
-    testMode: Boolean(attributes.test_mode),
-    variantId: firstOrderItem?.variant_id,
-    identifier: attributes.identifier || '',
-    customData: normalizeCustomData(payload, attributes),
+    checkoutEmail: localOrder.checkout_email || '',
+    createdAt: localOrder.created_at || new Date().toISOString(),
+    customerName: localOrder.customer_name || '',
+    orderId: localOrder.payment_provider_order_id || localOrder.id,
+    orderNumber: localOrder.order_number || localOrder.payment_provider_order_id || localOrder.id,
+    productName: localOrder.product_name || 'Human-assisted Restore',
+    receiptUrl: localOrder.receipt_url || '',
+    status: isPaidStatus(localOrder.status) ? 'paid' : localOrder.status,
+    testMode: Boolean(localOrder.test_mode),
+    variantId: localOrder.variant_id || '',
   }
-}
-
-function getListOrderDetails(payload) {
-  const orderItems = Array.isArray(payload?.data) ? payload.data : []
-
-  return orderItems
-    .map(item =>
-      getOrderDetails({
-        data: item,
-      })
-    )
-    .filter(Boolean)
 }
 
 export default async function handler(req, res) {
@@ -109,14 +74,9 @@ export default async function handler(req, res) {
   const mode = Array.isArray(req.query.mode)
     ? req.query.mode[0]
     : req.query.mode
-  const checkoutStartedAt = Array.isArray(req.query.checkoutStartedAt)
-    ? req.query.checkoutStartedAt[0]
-    : req.query.checkoutStartedAt
-  const apiKey = process.env.LEMON_SQUEEZY_API_KEY
-  const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const uploadTokenSecret = process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
-  const configuredVariantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
+  const configuredPriceId = process.env.PADDLE_HUMAN_RESTORE_PRICE_ID
 
   if (!orderId && !orderIdentifier && !checkoutRef && mode !== 'recent') {
     json(res, 400, {
@@ -125,7 +85,7 @@ export default async function handler(req, res) {
     return
   }
 
-  if (!apiKey || !uploadTokenSecret) {
+  if (!uploadTokenSecret) {
     json(res, 503, {
       error: 'Direct secure upload access is not configured yet.',
     })
@@ -133,86 +93,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    const requestHeaders = {
-      Accept: 'application/vnd.api+json',
-      'Content-Type': 'application/vnd.api+json',
-      Authorization: `Bearer ${apiKey}`,
-    }
-
-    let order = null
+    let localOrder = null
 
     if (orderId) {
-      const response = await fetch(
-        `https://api.lemonsqueezy.com/v1/orders/${encodeURIComponent(orderId)}`,
-        {
-          headers: requestHeaders,
-        }
-      )
+      localOrder = await getOrder(orderId)
 
-      if (!response.ok) {
-        json(res, 404, {
-          error: 'We could not confirm this order for direct secure upload.',
-        })
-        return
+      if (!localOrder) {
+        localOrder = await getOrderByProviderOrderId(orderId)
       }
-
-      const payload = await response.json().catch(() => null)
-      order = getOrderDetails(payload)
-    } else {
-      const requestUrl = new URL('https://api.lemonsqueezy.com/v1/orders')
-
-      if (checkoutEmail) {
-        requestUrl.searchParams.set('filter[user_email]', checkoutEmail)
-      }
-
-      if (storeId) {
-        requestUrl.searchParams.set('filter[store_id]', storeId)
-      }
-
-      requestUrl.searchParams.set('sort', '-createdAt')
-      requestUrl.searchParams.set('page[size]', '10')
-
-      const response = await fetch(requestUrl.toString(), {
-        headers: requestHeaders,
-      })
-
-      if (!response.ok) {
-        json(res, 404, {
-          error: 'We could not confirm this order for direct secure upload.',
-        })
-        return
-      }
-
-      const payload = await response.json().catch(() => null)
-      const candidates = getListOrderDetails(payload)
-
-      let matchedOrder = null
-
-      if (checkoutRef) {
-        matchedOrder =
-          candidates.find(
-            candidate => candidate?.customData?.checkout_ref === checkoutRef
-          ) ||
-          candidates.find(candidate =>
-            isOrderCreatedAfterCheckoutStart(candidate, checkoutStartedAt)
-          ) ||
-          null
-      } else if (orderIdentifier) {
-        matchedOrder =
-          candidates.find(
-            candidate =>
-              normalizeIdentifier(candidate?.identifier) ===
-              normalizeIdentifier(orderIdentifier)
-          ) || null
-      } else if (mode === 'recent') {
-        matchedOrder =
-          candidates.find(candidate =>
-            isOrderCreatedAfterCheckoutStart(candidate, checkoutStartedAt)
-          ) || null
-      }
-
-      order = matchedOrder
     }
+
+    if (!localOrder && checkoutRef) {
+      localOrder = await getOrderByCheckoutRef(checkoutRef)
+    }
+
+    if (!localOrder && orderIdentifier) {
+      localOrder = await getOrderByProviderOrderId(orderIdentifier)
+    }
+
+    if (!localOrder && mode === 'recent' && checkoutEmail) {
+      localOrder = await getRecentPaidOrderByEmail(
+        normalizeEmail(checkoutEmail)
+      )
+    }
+
+    const order = localOrderToOrderDetails(localOrder)
 
     if (!order || !order.checkoutEmail || order.status !== 'paid') {
       json(res, 404, {
@@ -233,9 +138,9 @@ export default async function handler(req, res) {
     }
 
     if (
-      configuredVariantId &&
+      configuredPriceId &&
       order.variantId &&
-      String(order.variantId) !== String(configuredVariantId)
+      String(order.variantId) !== String(configuredPriceId)
     ) {
       json(res, 403, {
         error: 'This order is not eligible for Human-assisted Restore upload.',

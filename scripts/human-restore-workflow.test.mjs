@@ -8,9 +8,8 @@ import adminProcessHandler from '../api/admin/human-restore-process.js'
 import cleanupHandler from '../api/cron/human-restore-cleanup.js'
 import checkoutHandler from '../api/human-restore-checkout.js'
 import orderHandler from '../api/human-restore-order.js'
-import webhookHandler from '../api/lemonsqueezy-webhook.js'
+import webhookHandler from '../api/paddle-webhook.js'
 import {
-  appendHumanRestoreCheckoutRef,
   readHumanRestoreCheckoutContext,
   rememberHumanRestorePendingCheckout,
 } from '../src/humanRestoreCheckoutContext.js'
@@ -30,8 +29,6 @@ function createMockState() {
     events: [],
     falStatusCalls: 0,
     jobs: [],
-    lemonCheckouts: [],
-    lemonOrders: [],
     nextEmailId: 1,
     nextJobId: 1,
     orders: [],
@@ -336,53 +333,17 @@ function installMockFetch(state) {
       })
     }
 
-    if (url.hostname === 'api.lemonsqueezy.com') {
-      if (url.pathname === '/v1/variants') {
-        return makeJsonResponse({
-          data: [
-            {
-              attributes: {
-                product_id: 456,
-                slug: '092746e8-e559-4bca-96d0-abe3df4df268',
-              },
-              id: '123',
-              type: 'variants',
-            },
-          ],
-        })
-      }
-
-      if (url.pathname === '/v1/products/456') {
+    if (
+      url.hostname === 'api.paddle.com' ||
+      url.hostname === 'sandbox-api.paddle.com'
+    ) {
+      if (url.pathname === '/customers/ctm_test_buyer') {
         return makeJsonResponse({
           data: {
-            attributes: {
-              store_id: 789,
-            },
-            id: '456',
-            type: 'products',
+            email: 'buyer@example.com',
+            id: 'ctm_test_buyer',
+            name: 'Buyer',
           },
-        })
-      }
-
-      if (url.pathname === '/v1/checkouts' && method === 'POST') {
-        const body = JSON.parse(getBodyText(options))
-
-        state.lemonCheckouts.push(body)
-
-        return makeJsonResponse({
-          data: {
-            attributes: {
-              url: 'https://artgen.lemonsqueezy.com/checkout/buy/generated',
-            },
-            id: 'checkout-1',
-            type: 'checkouts',
-          },
-        })
-      }
-
-      if (url.pathname === '/v1/orders') {
-        return makeJsonResponse({
-          data: state.lemonOrders,
         })
       }
     }
@@ -475,14 +436,15 @@ async function invoke(handler, reqOptions = {}) {
   }
 }
 
-function createSignedWebhookBody(payload) {
+function createSignedPaddleWebhookBody(payload) {
   const body = Buffer.from(JSON.stringify(payload))
+  const timestamp = '1712345678'
   const signature = crypto
-    .createHmac('sha256', process.env.LEMON_SQUEEZY_WEBHOOK_SECRET)
-    .update(body)
+    .createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET)
+    .update(`${timestamp}:${body.toString('utf8')}`)
     .digest('hex')
 
-  return { body, signature }
+  return { body, signature: `ts=${timestamp};h1=${signature}` }
 }
 
 function installEnv() {
@@ -500,12 +462,13 @@ function installEnv() {
     HUMAN_RESTORE_INBOX: 'intake@example.com',
     HUMAN_RESTORE_SUPPORT_EMAIL: 'support@example.com',
     HUMAN_RESTORE_UPLOAD_TOKEN_SECRET: 'upload-secret',
-    LEMON_SQUEEZY_API_KEY: 'lemon-key',
-    LEMON_SQUEEZY_CHECKOUT_URL:
-      'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268',
-    LEMON_SQUEEZY_WEBHOOK_SECRET: 'webhook-secret',
     OPENAI_API_KEY: 'openai-key',
     OPENAI_IMAGE_EDIT_MODEL: 'gpt-image-1.5',
+    PADDLE_API_KEY: 'paddle-key',
+    PADDLE_ENVIRONMENT: 'sandbox',
+    PADDLE_HUMAN_RESTORE_PRICE_ID: 'pri_human_restore_1990',
+    PADDLE_LOCAL_PACK_PRICE_ID: 'pri_local_pack_990',
+    PADDLE_WEBHOOK_SECRET: 'webhook-secret',
     RESEND_API_KEY: 'resend-key',
     SITE_URL: 'https://artgen.site',
     SUPABASE_HUMAN_RESTORE_ORIGINALS_BUCKET: 'human-restore-originals',
@@ -553,13 +516,6 @@ async function main() {
 
   assert.equal(recoveredContext.hasPendingCheckout, true)
   assert.equal(recoveredContext.pendingCheckoutRef, checkoutRef)
-  assert.equal(
-    appendHumanRestoreCheckoutRef(
-      'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268',
-      checkoutRef
-    ),
-    'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268?checkout%5Bcustom%5D%5Bflow%5D=human_restore_inline_upload&checkout%5Bcustom%5D%5Bcheckout_ref%5D=checkout-ref-123'
-  )
 
   const checkoutMultipart = createMultipartBody(
     {
@@ -581,23 +537,21 @@ async function main() {
   assert.equal(checkoutResponse.statusCode, 200)
   assert.equal(checkoutResponse.body.ok, true)
   assert.ok(checkoutResponse.body.orderId)
-  assert.equal(state.lemonCheckouts.length, 1)
+  assert.ok(checkoutResponse.body.checkoutRef)
+  assert.ok(checkoutResponse.body.submissionReference)
   assert.equal(state.orders.length, 1)
   assert.equal(state.orders[0].status, 'pending_payment')
   assert.equal(
     state.orders[0].notes,
     'Please remove scratches while keeping faces natural.'
   )
-  assert.equal(state.lemonCheckouts[0].data.relationships.store.data.id, '789')
   assert.equal(
-    state.lemonCheckouts[0].data.relationships.variant.data.id,
-    '123'
+    state.orders[0].variant_id,
+    process.env.PADDLE_HUMAN_RESTORE_PRICE_ID
   )
 
-  const checkoutCustomData =
-    state.lemonCheckouts[0].data.attributes.checkout_data.custom
-  const serverCheckoutRef = checkoutCustomData.checkout_ref
-  const localOrderId = checkoutCustomData.human_restore_order_id
+  const serverCheckoutRef = checkoutResponse.body.checkoutRef
+  const localOrderId = checkoutResponse.body.orderId
 
   assert.equal(localOrderId, checkoutResponse.body.orderId)
   assert.equal(localOrderId, state.orders[0].id)
@@ -620,48 +574,36 @@ async function main() {
 
   const orderCreatedAt = new Date(startedAtMs + 5000).toISOString()
   const webhookPayload = {
+    event_type: 'transaction.completed',
     data: {
-      attributes: {
-        created_at: orderCreatedAt,
-        first_order_item: {
-          product_name: 'Human-assisted Restore',
-          variant_id: 123,
-        },
-        identifier: 'order-identifier-123',
-        meta: {
-          custom_data: {
-            checkout_ref: serverCheckoutRef,
-            flow: 'human_restore_preupload',
-            human_restore_order_id: localOrderId,
-            submission_reference: state.orders[0].submission_reference,
-          },
-        },
-        order_number: 1001,
-        status: 'paid',
-        test_mode: true,
-        urls: {
-          receipt: 'https://receipt.test/order-123',
-        },
-        user_email: 'buyer@example.com',
-        user_name: 'Buyer',
+      checkout: {
+        url: 'https://checkout.paddle.com/txn_test_paid',
       },
-      id: 'order-123',
-      type: 'orders',
-    },
-    meta: {
+      created_at: orderCreatedAt,
       custom_data: {
         checkout_ref: serverCheckoutRef,
         flow: 'human_restore_preupload',
         human_restore_order_id: localOrderId,
         submission_reference: state.orders[0].submission_reference,
       },
-      event_name: 'order_created',
+      customer_id: 'ctm_test_buyer',
+      id: 'txn_test_paid',
+      items: [
+        {
+          price: {
+            description: 'Human-assisted Restore',
+            id: process.env.PADDLE_HUMAN_RESTORE_PRICE_ID,
+            name: 'Human-assisted Restore',
+          },
+        },
+      ],
+      status: 'completed',
     },
   }
-  const signedWebhook = createSignedWebhookBody(webhookPayload)
+  const signedWebhook = createSignedPaddleWebhookBody(webhookPayload)
   const webhookResponse = await invoke(webhookHandler, {
     body: signedWebhook.body,
-    headers: { 'x-signature': signedWebhook.signature },
+    headers: { 'paddle-signature': signedWebhook.signature },
     method: 'POST',
   })
 
@@ -674,6 +616,8 @@ async function main() {
   assert.equal(state.orders[0].status, 'needs_review')
   assert.equal(state.orders[0].checkout_email, 'buyer@example.com')
   assert.equal(state.orders[0].job_id, state.jobs[0].id)
+  assert.equal(state.orders[0].payment_provider, 'paddle')
+  assert.equal(state.orders[0].payment_provider_order_id, 'txn_test_paid')
   assert.equal(state.emails.length, 2)
 
   const orderStatusResponse = await invoke(orderHandler, {

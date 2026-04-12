@@ -301,3 +301,37 @@ export function verifyWebhookSignature({ rawBody, secret, signature }) {
     crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
   )
 }
+
+export function verifyPaddleWebhookSignature({ rawBody, secret, signatureHeader }) {
+  if (!secret || !signatureHeader) {
+    return false
+  }
+
+  const parts = String(signatureHeader).split(';')
+  const tsEntry = parts.find(p => p.startsWith('ts='))
+  const h1Entry = parts.find(p => p.startsWith('h1='))
+
+  if (!tsEntry || !h1Entry) {
+    return false
+  }
+
+  const ts = tsEntry.slice(3)
+  const h1 = h1Entry.slice(3)
+
+  if (!ts || !h1) {
+    return false
+  }
+
+  const signedPayload = `${ts}:${rawBody.toString('utf8')}`
+  const expectedSignature = crypto
+    .createHmac('sha256', secret)
+    .update(signedPayload)
+    .digest('hex')
+  const providedBuffer = Buffer.from(h1)
+  const expectedBuffer = Buffer.from(expectedSignature)
+
+  return (
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  )
+}

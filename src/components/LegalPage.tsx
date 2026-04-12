@@ -45,7 +45,7 @@ function PrivacyContent() {
         </p>
         <ul className="list-disc space-y-1 pl-6">
           <li>The photo you explicitly upload for restoration</li>
-          <li>Your checkout email address and name (from Lemon Squeezy)</li>
+          <li>Your checkout email address and name (from Paddle)</li>
           <li>Your repair notes and preferences</li>
           <li>Order and payment reference information</li>
         </ul>
@@ -60,23 +60,23 @@ function PrivacyContent() {
         <p>
           Payments are processed by{' '}
           <a
-            href="https://www.lemonsqueezy.com"
+            href="https://www.paddle.com"
             target="_blank"
             rel="noreferrer"
             className="font-bold text-[#211915] underline"
           >
-            Lemon Squeezy
+            Paddle
           </a>{' '}
           (Merchant of Record). We do not store credit card numbers or banking
-          details. Lemon Squeezy handles tax collection, receipts, and payment
+          details. Paddle handles tax collection, receipts, and payment
           security. Please review{' '}
           <a
-            href="https://www.lemonsqueezy.com/privacy"
+            href="https://www.paddle.com/legal/privacy"
             target="_blank"
             rel="noreferrer"
             className="font-bold text-[#211915] underline"
           >
-            Lemon Squeezy&apos;s Privacy Policy
+            Paddle&apos;s Privacy Policy
           </a>{' '}
           for details on their data handling.
         </p>
@@ -101,7 +101,7 @@ function PrivacyContent() {
         <p>We do not sell your personal data. We share data only with:</p>
         <ul className="list-disc space-y-1 pl-6">
           <li>
-            <strong>Lemon Squeezy</strong> &mdash; for payment processing
+            <strong>Paddle</strong> &mdash; for payment processing
           </li>
           <li>
             <strong>Resend</strong> &mdash; for transactional email delivery
@@ -289,8 +289,8 @@ function RefundContent() {
             {supportEmail}
           </a>{' '}
           with your order reference or submission reference. We aim to respond
-          within 2 business days. Approved refunds are processed through Lemon
-          Squeezy and typically appear within 5&ndash;10 business days.
+          within 2 business days. Approved refunds are processed through Paddle
+          and typically appear within 5&ndash;10 business days.
         </p>
       </Section>
     </>

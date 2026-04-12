@@ -25,7 +25,7 @@ No upload. No account. No cloud processing.
 - Privacy-first landing page
 - Privacy / Terms / Open Source launch trust notes
 - Vercel Web Analytics page view tracking and product funnel events
-- Pricing validation section for Free Local, Family Pack, and Album Pack
+- Pricing validation section for Free Local, Local Pack, and Human-assisted Restore
 - Human-assisted Restore CTA for opt-in upload and manual review
 - Human Restore success page with secure post-payment upload
 - Supabase-backed paid restore job queue
@@ -58,8 +58,8 @@ workflow where users explicitly consent before any upload happens.
 Paid restore workflow:
 
 ```text
-Lemon Squeezy checkout
--> secure upload page
+pre-checkout photo upload
+-> Paddle checkout webhook
 -> Supabase Storage + restore job record
 -> cloud AI restoration
 -> admin before/after review
@@ -69,10 +69,9 @@ Lemon Squeezy checkout
 
 Pricing validation structure:
 
-- `Free Local` - `$0`, private browser repair for small damage
-- `Family Pack` - `$9`, 10 restore credits for HD / Pro workflows
-- `Album Pack` - `$19`, 30 restore credits for family albums
-- `Human-assisted Restore` - `$19/photo`, separate high-intent CTA for one important photo
+- `Free Local` - `$0`, 3 private browser-local repairs
+- `Local Pack` - `$9.90`, 10 extra browser-local repair credits
+- `Human-assisted Restore` - `$19.90/photo`, cloud AI draft plus human review for one important photo
 
 ## Technical Notes
 
@@ -158,19 +157,13 @@ Use these settings for the first launch:
 - Build command: `npm run build`
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
-- Human Restore checkout URL: the $19.90/photo flow points to Lemon Squeezy by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
-- Local Pack checkout URL: set `VITE_LOCAL_REPAIR_PACK_URL` to the $9.90 / 10 local repair credits Lemon Squeezy checkout URL
+- Paddle checkout: set `VITE_PADDLE_SELLER_ID`, `VITE_PADDLE_HUMAN_RESTORE_PRICE_ID`, and `VITE_PADDLE_LOCAL_PACK_PRICE_ID` after Paddle onboarding is approved
+- Paid CTA fallback: set `VITE_HUMAN_RESTORE_CONTACT_EMAIL` so customers see a safe early-access contact while Paddle is pending
 - Local repair quota: the browser-local MVP uses `localStorage` for 3 free starts and purchased local credits on the same device
 - Success page path: `/human-restore/success`
 - Secure upload path: `/human-restore/upload`
 - Admin review path: `/admin/review`
 - Supabase setup SQL: `supabase/human-restore.sql`
-
-Current checkout:
-
-```text
-https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268
-```
 
 Recommended success redirect:
 
@@ -180,7 +173,7 @@ https://artgen.site/human-restore/success
 
 Required production services for the paid workflow:
 
-- Lemon Squeezy for checkout and webhooks
+- Paddle for checkout and webhooks
 - Supabase Database + Storage for private originals, AI results, and job state
 - OpenAI or fal.ai for cloud restoration
 - Resend for secure upload, confirmation, and delivery emails
