@@ -165,6 +165,13 @@ type DirectSecureAccessResponse = {
   uploadUrl?: string
 }
 
+type HumanRestoreCheckoutResponse = {
+  checkoutRef?: string
+  checkoutUrl?: string
+  error?: string
+  ok?: boolean
+}
+
 type LemonSqueezyEvent = {
   data?: Record<string, unknown>
   event: string
@@ -708,6 +715,8 @@ function App() {
           const paidCheckoutEmail = normalizeCheckoutEmail(
             orderAttributes.user_email
           )
+          const pendingCheckoutRef =
+            sessionStorage.getItem('pending_checkout_ref') || ''
 
           try {
             localStorage.setItem(
@@ -740,8 +749,13 @@ function App() {
             successUrl.searchParams.set('email', paidCheckoutEmail)
           }
 
+          if (!paidOrderId && pendingCheckoutRef) {
+            successUrl.searchParams.set('checkout_ref', pendingCheckoutRef)
+          }
+
           trackProductEvent('complete_human_restore_checkout', {
             has_checkout_email: Boolean(paidCheckoutEmail),
+            has_checkout_ref: Boolean(pendingCheckoutRef),
             has_order_id: Boolean(paidOrderId),
             has_order_identifier: Boolean(paidOrderIdentifier),
           })
@@ -763,7 +777,40 @@ function App() {
     setCheckoutLaunchStatus('loading')
     setCheckoutLaunchError('')
 
-    const checkoutUrl = legacyHumanRestoreUrl
+    let checkoutUrl = ''
+    let checkoutRef = ''
+
+    try {
+      const response = await fetch('/api/human-restore-checkout', {
+        method: 'POST',
+      })
+      const responseBody = (await response
+        .json()
+        .catch(() => null)) as HumanRestoreCheckoutResponse | null
+
+      if (response.ok && responseBody?.checkoutUrl) {
+        checkoutUrl = responseBody.checkoutUrl
+        checkoutRef = responseBody.checkoutRef || ''
+      } else if (legacyHumanRestoreUrl) {
+        checkoutUrl = legacyHumanRestoreUrl
+      } else {
+        throw new Error(
+          responseBody?.error || 'Secure checkout could not be created.'
+        )
+      }
+    } catch (error) {
+      if (legacyHumanRestoreUrl) {
+        checkoutUrl = legacyHumanRestoreUrl
+      } else {
+        setCheckoutLaunchStatus('error')
+        setCheckoutLaunchError(
+          error instanceof Error
+            ? error.message
+            : 'Secure checkout could not be created.'
+        )
+        return
+      }
+    }
 
     if (!checkoutUrl) {
       setCheckoutLaunchStatus('error')
@@ -772,9 +819,19 @@ function App() {
     }
 
     try {
+      if (checkoutRef) {
+        sessionStorage.setItem('pending_checkout_ref', checkoutRef)
+      } else {
+        sessionStorage.removeItem('pending_checkout_ref')
+      }
+    } catch {
+      // sessionStorage may be unavailable
+    }
+
+    try {
       localStorage.setItem(
         'pending_human_restore_checkout',
-        JSON.stringify({ timestamp: Date.now() })
+        JSON.stringify({ checkoutRef, timestamp: Date.now() })
       )
     } catch {
       // localStorage may be unavailable
@@ -782,6 +839,7 @@ function App() {
 
     if (ensureLemonSqueezySetup()) {
       trackProductEvent('click_human_restore', {
+        checkout_ref_created: Boolean(checkoutRef),
         destination: 'lemonjs_overlay',
       })
       window.LemonSqueezy?.Url.Open(checkoutUrl)
@@ -790,6 +848,7 @@ function App() {
     }
 
     trackProductEvent('click_human_restore', {
+      checkout_ref_created: Boolean(checkoutRef),
       destination: 'direct_redirect',
     })
     window.location.assign(checkoutUrl)

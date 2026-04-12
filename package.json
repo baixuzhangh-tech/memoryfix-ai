@@ -25,6 +25,7 @@
     "build": "tsc && vite build",
     "serve": "vite preview",
     "preview:local": "vite preview --host 127.0.0.1 --port 4173",
+    "check:human-restore-env": "node --no-warnings scripts/check-human-restore-env.mjs",
     "test:human-restore": "node --no-warnings scripts/human-restore-workflow.test.mjs",
     "deploy:check": "npm run build",
     "prepare": "husky install",

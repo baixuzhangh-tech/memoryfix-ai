@@ -104,6 +104,7 @@ Original acknowledgements from `inpaint-web` include:
 ```bash
 npm install --ignore-scripts
 npm run dev
+npm run check:human-restore-env
 npm run test:human-restore
 npm run build
 npm run preview:local
@@ -148,6 +149,7 @@ The app is a static Vite build.
 
 ```bash
 npm run deploy:check
+npm run check:human-restore-env
 npm run test:human-restore
 ```
 
