@@ -14,7 +14,8 @@ function toBase64Url(input) {
 
 function fromBase64Url(input) {
   const normalized = input.replace(/-/g, '+').replace(/_/g, '/')
-  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4))
+  const padding =
+    normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4))
 
   return Buffer.from(`${normalized}${padding}`, 'base64')
 }
@@ -166,6 +167,8 @@ export async function sendEmail({ resendApiKey, payload }) {
     const errorText = await response.text()
     throw new Error(errorText || 'Resend request failed')
   }
+
+  return response.json().catch(() => null)
 }
 
 export function createOrderUploadToken({ tokenSecret, order }) {
@@ -233,7 +236,10 @@ export function verifyOrderUploadToken({
     }
 
     if (!Number.isFinite(createdAtMs)) {
-      return { valid: false, error: 'Upload token missing valid creation time.' }
+      return {
+        valid: false,
+        error: 'Upload token missing valid creation time.',
+      }
     }
 
     const expiresAtMs = createdAtMs + maxAgeHours * 60 * 60 * 1000

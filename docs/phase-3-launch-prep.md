@@ -19,6 +19,11 @@
 - `Book Human Restore` 默认链接已接入 Lemon Squeezy checkout
 - 首屏不再预下载 inpaint 模型，用户选择照片后再下载，避免首页被 0% 下载弹窗遮挡
 - 接入 Vercel Web Analytics，并增加首批产品漏斗事件
+- 已新增 Supabase 存储/数据库方案，用于付费上传、AI 结果和审核状态
+- 已新增 `/admin/review` 人工审核后台
+- 已新增 AI restore API：上传后默认尝试自动启动云端修复，结果进入人工审核
+- 已新增 `Approve & send`：人工审核后通过 Resend 给用户发送私有下载链接
+- 已新增 30 天保留清理接口和 Vercel Cron 配置
 
 当前线上状态：
 
@@ -53,9 +58,14 @@ Install command: npm install --ignore-scripts
 2. 用户在 `Human-assisted Restore - $19/photo` 区域看到独立付费 CTA
 3. 用户点击 `Book Human Restore`
 4. 打开 Lemon Squeezy checkout 并完成付款
-5. 付款成功页或订单邮件告知上传方式与交付说明
-6. 用户只在此时主动上传照片或回复邮件
-7. 人工完成 review / touch-up，并在 beta 期间 `48 小时内` 邮件交付
+5. 付款成功页验证订单并展示安全上传表单
+6. 用户只在此时主动上传照片和修复留言
+7. 系统把原图保存到 Supabase Storage，并创建 `human_restore_jobs` 记录
+8. 系统默认尝试启动云端 AI 修复
+9. 站长进入 `/admin/review` 查看原图、AI 结果和用户留言
+10. 站长确认结果可交付后点击 `Approve & send`
+11. 用户收到 Resend 发出的私有下载链接
+12. 原图和结果在 30 天保留窗口后由清理任务删除
 
 当前 checkout：
 
@@ -69,7 +79,9 @@ https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df26
 - 如果未配置环境变量，则使用上述 Lemon Squeezy checkout 作为默认链接
 - 因此只有在你显式设置了新的 `VITE_EARLY_ACCESS_URL` 时，首页按钮才会覆盖默认 checkout
 - 已实现付款成功说明页路径：`/human-restore/success`
-- 该页面用于说明上传方式、隐私边界和 beta 交付承诺
+- 已实现安全上传页路径：`/human-restore/upload`
+- 已实现人工审核后台路径：`/admin/review`
+- 该页面用于订单验证、上传方式、隐私边界和 beta 交付承诺
 
 可以使用的付款工具：
 
@@ -112,12 +124,13 @@ https://artgen.site/human-restore/success
 ```text
 Thank you for booking MemoryFix AI Human-assisted Restore.
 
-Next step: reply to your order email and attach the photo you want restored.
+Next step: use the secure upload form to send the photo you want restored.
 
 What happens next:
-1. We review the photo and confirm whether it fits the beta workflow.
-2. We complete AI restoration plus manual touch-up.
-3. We deliver the final result by email within 48 hours during beta.
+1. We store your upload privately for this paid order.
+2. Cloud AI creates a restoration draft from your photo and notes.
+3. We review the before/after result before delivery.
+4. We send the final result by email within 48 hours during beta.
 
 Important: the free local tool does not upload your photos. Upload is required only for this paid service after you explicitly choose it.
 ```
@@ -159,7 +172,8 @@ Best for scanning and restoring a small collection.
 9. `Privacy / Terms / Open Source` 锚点可跳转
 10. `Book Human Restore` 在未配置环境变量时打开默认 Lemon Squeezy checkout，在配置环境变量后打开你指定的新链接
 11. 直接访问 `/human-restore/success` 可以看到 thank-you 与上传说明页面
-12. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
+12. 直接访问 `/admin/review` 可以看到 admin token 解锁页面
+13. 浏览器控制台没有阻断模型加载的 CORS、COEP、WASM MIME 错误
 
 ## 重要边界
 
@@ -187,10 +201,13 @@ No third-party network requests at all.
 ## 下一步
 
 1. 激活 Lemon Squeezy 店铺，确认可以真实收款
-2. 用真实流程完成一次测试付款，检查 checkout、订单、邮件、后台记录
-3. 配置付款成功页面或订单邮件，告诉用户如何上传照片
-4. 小范围找 `20-50` 个目标用户做首轮获客测试
-5. 根据访问量、`click_human_restore` 点击率、checkout 转化率继续调整文案与价格
+2. 创建 Supabase 项目并执行 `supabase/human-restore.sql`
+3. 在 Vercel 配置 `.env.example` 中列出的真实环境变量
+4. 配置 Lemon Squeezy webhook 到 `/api/lemonsqueezy-webhook`
+5. 配置 Resend 正式发件域名，替换 `onboarding@resend.dev`
+6. 用测试订单跑通：付款、上传、AI 修复、后台审核、发送结果、下载链接
+7. 小范围找 `20-50` 个目标用户做首轮获客测试
+8. 根据访问量、`click_human_restore` 点击率、上传完成率、付费交付反馈继续调整文案与价格
 
 ## 当前埋点
 
@@ -213,6 +230,11 @@ No third-party network requests at all.
 - `toggle_original_compare`
 - `click_human_restore`
 - `view_human_restore_success`
+- `view_human_restore_secure_upload`
+- `submit_human_restore_upload_started`
+- `submit_human_restore_upload_completed`
+- `submit_human_restore_upload_failed`
+- `view_admin_review`
 
 ## Lemon Squeezy 产品建议
 

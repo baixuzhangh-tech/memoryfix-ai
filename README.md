@@ -27,7 +27,10 @@ No upload. No account. No cloud processing.
 - Vercel Web Analytics page view tracking and product funnel events
 - Pricing validation section for Free Local, Family Pack, and Album Pack
 - Human-assisted Restore CTA for opt-in upload and manual review
-- Human Restore success page with post-payment upload instructions
+- Human Restore success page with secure post-payment upload
+- Supabase-backed paid restore job queue
+- Cloud AI restore processing with human review before delivery
+- Admin review page at `/admin/review`
 - GPL-3.0 open-source attribution
 
 ## Product Boundary
@@ -51,6 +54,18 @@ Not the current best fit:
 
 For stronger results, the product direction is an opt-in `Human-assisted Restore`
 workflow where users explicitly consent before any upload happens.
+
+Paid restore workflow:
+
+```text
+Lemon Squeezy checkout
+-> secure upload page
+-> Supabase Storage + restore job record
+-> cloud AI restoration
+-> admin before/after review
+-> approve and send result download link by email
+-> delete files after the 30-day retention window
+```
 
 Pricing validation structure:
 
@@ -120,6 +135,11 @@ identifiers. The current funnel events cover:
 - `toggle_original_compare`
 - `click_human_restore`
 - `view_human_restore_success`
+- `view_human_restore_secure_upload`
+- `submit_human_restore_upload_started`
+- `submit_human_restore_upload_completed`
+- `submit_human_restore_upload_failed`
+- `view_admin_review`
 
 ## Deployment
 
@@ -136,6 +156,9 @@ Use these settings for the first launch:
 - Install command: `npm install --ignore-scripts`
 - Paid validation URL: `Book Human Restore` points to the Lemon Squeezy checkout URL by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
 - Success page path: `/human-restore/success`
+- Secure upload path: `/human-restore/upload`
+- Admin review path: `/admin/review`
+- Supabase setup SQL: `supabase/human-restore.sql`
 
 Current checkout:
 
@@ -148,6 +171,16 @@ Recommended success redirect:
 ```text
 https://artgen.site/human-restore/success
 ```
+
+Required production services for the paid workflow:
+
+- Lemon Squeezy for checkout and webhooks
+- Supabase Database + Storage for private originals, AI results, and job state
+- OpenAI or fal.ai for cloud restoration
+- Resend for secure upload, confirmation, and delivery emails
+
+Keep real secrets out of Git. Use `.env.local` locally and Vercel Environment
+Variables in production.
 
 ## Validation Notes
 

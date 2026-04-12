@@ -8,6 +8,14 @@ import {
   sendEmail,
   verifyOrderUploadToken,
 } from './_lib/human-restore.js'
+import {
+  getHumanRestoreBuckets,
+  insertEvent,
+  insertJob,
+  isSupabaseConfigured,
+  uploadObject,
+} from './_lib/supabase.js'
+import { runRestoreJob } from './_lib/ai-restore.js'
 
 export const config = {
   api: {
@@ -24,11 +32,17 @@ const allowedImageTypes = new Set([
   'image/heif',
 ])
 
+function shouldAutoProcessAfterUpload() {
+  return process.env.HUMAN_RESTORE_AUTO_PROCESS_AFTER_UPLOAD !== 'false'
+}
+
 async function sendMerchantNotificationEmail({
+  adminUrl,
   resendApiKey,
   fromEmail,
   inboxEmail,
   supportEmail,
+  jobId,
   submissionReference,
   uploadSource,
   checkoutEmail,
@@ -41,15 +55,38 @@ async function sendMerchantNotificationEmail({
     : `Checkout ${checkoutEmail}`
   const html = `
     <h1>New Human-assisted Restore upload</h1>
-    <p><strong>Submission reference:</strong> ${escapeHtml(submissionReference)}</p>
+    <p><strong>Submission reference:</strong> ${escapeHtml(
+      submissionReference
+    )}</p>
     <p><strong>Upload source:</strong> ${escapeHtml(uploadSource)}</p>
     <p><strong>Checkout email:</strong> ${escapeHtml(checkoutEmail)}</p>
-    <p><strong>Order number:</strong> ${escapeHtml(orderReference || 'Not provided')}</p>
+    <p><strong>Order number:</strong> ${escapeHtml(
+      orderReference || 'Not provided'
+    )}</p>
+    <p><strong>Job ID:</strong> ${escapeHtml(jobId)}</p>
     <p><strong>Support contact:</strong> ${escapeHtml(supportEmail)}</p>
     <p><strong>Repair notes:</strong></p>
-    <p>${escapeHtml(notes || 'No extra notes provided.').replace(/\n/g, '<br />')}</p>
-    <p><strong>Attached file:</strong> ${escapeHtml(photo.filename)}</p>
+    <p>${escapeHtml(notes || 'No extra notes provided.').replace(
+      /\n/g,
+      '<br />'
+    )}</p>
+    <p><strong>Stored file:</strong> ${escapeHtml(photo.filename)}</p>
+    <p><strong>Admin review:</strong> <a href="${escapeHtml(
+      adminUrl
+    )}">${escapeHtml(adminUrl)}</a></p>
   `
+  const text = [
+    'New Human-assisted Restore upload',
+    `Submission reference: ${submissionReference}`,
+    `Upload source: ${uploadSource}`,
+    `Checkout email: ${checkoutEmail}`,
+    `Order number: ${orderReference || 'Not provided'}`,
+    `Job ID: ${jobId}`,
+    `Stored file: ${photo.filename}`,
+    `Repair notes: ${notes || 'No extra notes provided.'}`,
+    `Admin review: ${adminUrl}`,
+    `Support contact: ${supportEmail}`,
+  ].join('\n')
 
   await sendEmail({
     resendApiKey,
@@ -59,12 +96,7 @@ async function sendMerchantNotificationEmail({
       reply_to: checkoutEmail,
       subject: `MemoryFix AI upload - ${subjectSuffix}`,
       html,
-      attachments: [
-        {
-          filename: photo.filename,
-          content: photo.data.toString('base64'),
-        },
-      ],
+      text,
     },
   })
 }
@@ -80,9 +112,13 @@ async function sendCustomerConfirmationEmail({
   const html = `
     <h1>We received your photo</h1>
     <p>Thank you for submitting your paid Human-assisted Restore order to MemoryFix AI.</p>
-    <p><strong>Submission reference:</strong> ${escapeHtml(submissionReference)}</p>
+    <p><strong>Submission reference:</strong> ${escapeHtml(
+      submissionReference
+    )}</p>
     <p><strong>Checkout email:</strong> ${escapeHtml(checkoutEmail)}</p>
-    <p><strong>Order number:</strong> ${escapeHtml(orderReference || 'Not provided')}</p>
+    <p><strong>Order number:</strong> ${escapeHtml(
+      orderReference || 'Not provided'
+    )}</p>
     <p>What happens next:</p>
     <ul>
       <li>We match this upload to your paid order.</li>
@@ -128,11 +164,12 @@ export default async function handler(req, res) {
   const inboxEmail = process.env.HUMAN_RESTORE_INBOX
   const supportEmail = process.env.HUMAN_RESTORE_SUPPORT_EMAIL || inboxEmail
   const uploadTokenSecret = process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET
+  const siteUrl = process.env.SITE_URL || 'https://artgen.site'
   const fromEmail =
     process.env.HUMAN_RESTORE_FROM_EMAIL ||
     'MemoryFix AI <onboarding@resend.dev>'
 
-  if (!resendApiKey || !inboxEmail) {
+  if (!resendApiKey || !inboxEmail || !isSupabaseConfigured()) {
     json(res, 503, {
       error:
         'Upload is not configured yet. Please try again later or use your order email as fallback.',
@@ -161,7 +198,10 @@ export default async function handler(req, res) {
       ? tokenVerification.payload.checkoutEmail
       : (fields.checkoutEmail || '').trim()
     const orderReference = isSecureUpload
-      ? String(tokenVerification.payload.orderNumber || tokenVerification.payload.orderId)
+      ? String(
+          tokenVerification.payload.orderNumber ||
+            tokenVerification.payload.orderId
+        )
       : (fields.orderReference || '').trim()
     const notes = (fields.notes || '').trim()
 
@@ -203,18 +243,97 @@ export default async function handler(req, res) {
       return
     }
 
-    await sendMerchantNotificationEmail({
-      resendApiKey,
-      fromEmail,
-      inboxEmail,
-      supportEmail,
-      submissionReference,
-      uploadSource: isSecureUpload ? 'secure_link' : 'fallback_form',
-      checkoutEmail,
-      orderReference,
-      notes,
-      photo: file,
+    const buckets = getHumanRestoreBuckets()
+    const safeSubmissionReference = submissionReference.replace(
+      /[^A-Z0-9-]/g,
+      ''
+    )
+    const storagePath = `${safeSubmissionReference}/${file.filename}`
+    const orderPayload = isSecureUpload ? tokenVerification.payload : null
+
+    await uploadObject({
+      bucket: buckets.originals,
+      contentType: file.contentType,
+      data: file.data,
+      path: storagePath,
     })
+
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 30)
+
+    const job = await insertJob({
+      checkout_email: checkoutEmail,
+      customer_name: orderPayload?.customerName || '',
+      expires_at: expiresAt.toISOString(),
+      notes,
+      order_bound: isSecureUpload,
+      order_id: orderPayload?.orderId || null,
+      order_number: orderReference || null,
+      original_file_name: file.filename,
+      original_file_size: file.data.length,
+      original_file_type: file.contentType,
+      original_storage_bucket: buckets.originals,
+      original_storage_path: storagePath,
+      product_name: orderPayload?.productName || 'Human-assisted Restore',
+      receipt_url: orderPayload?.receiptUrl || '',
+      status: 'uploaded',
+      submission_reference: submissionReference,
+      test_mode: Boolean(orderPayload?.testMode),
+      upload_source: isSecureUpload ? 'secure_link' : 'fallback_form',
+    })
+
+    await insertEvent(job.id, 'photo_uploaded', {
+      file_name: file.filename,
+      file_size: file.data.length,
+      order_bound: isSecureUpload,
+      upload_source: isSecureUpload ? 'secure_link' : 'fallback_form',
+    })
+
+    let currentJob = job
+
+    if (shouldAutoProcessAfterUpload()) {
+      currentJob = await runRestoreJob({ job }).catch(async error => {
+        await insertEvent(job.id, 'ai_restore_auto_start_failed', {
+          error:
+            error instanceof Error ? error.message : 'Auto restore failed.',
+        })
+        return job
+      })
+      await insertEvent(currentJob.id, 'ai_restore_auto_started', {
+        provider: currentJob.ai_provider,
+        status: currentJob.status,
+      })
+    }
+
+    const adminUrl = new URL('/admin/review', siteUrl)
+    adminUrl.searchParams.set('job', currentJob.id)
+
+    let merchantEmailSent = true
+
+    try {
+      await sendMerchantNotificationEmail({
+        adminUrl: adminUrl.toString(),
+        resendApiKey,
+        fromEmail,
+        inboxEmail,
+        supportEmail,
+        jobId: currentJob.id,
+        submissionReference,
+        uploadSource: isSecureUpload ? 'secure_link' : 'fallback_form',
+        checkoutEmail,
+        orderReference,
+        notes,
+        photo: file,
+      })
+    } catch (error) {
+      merchantEmailSent = false
+      await insertEvent(currentJob.id, 'merchant_notification_failed', {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Merchant notification failed.',
+      })
+    }
 
     let confirmationEmailSent = true
 
@@ -236,6 +355,7 @@ export default async function handler(req, res) {
       orderBound: isSecureUpload,
       submissionReference,
       confirmationEmailSent,
+      merchantEmailSent,
       supportEmail,
     })
   } catch {

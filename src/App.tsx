@@ -3,6 +3,7 @@
 import { ArrowLeftIcon, InformationCircleIcon } from '@heroicons/react/outline'
 import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
+import AdminReviewPage from './components/AdminReviewPage'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
 import HumanRestoreUploadForm from './components/HumanRestoreUploadForm'
@@ -133,6 +134,7 @@ const legacyHumanRestoreUrl =
 
 const humanRestoreSecureUploadPath = '/human-restore/upload'
 const humanRestoreSuccessPath = '/human-restore/success'
+const adminReviewPath = '/admin/review'
 
 const humanRestoreSteps = [
   {
@@ -153,6 +155,9 @@ const humanRestoreSecureUploadTitle =
   'Secure Upload - MemoryFix AI Human-assisted Restore'
 const humanRestoreSecureUploadDescription =
   'Use your secure upload link to send the photo and notes for your paid MemoryFix AI Human-assisted Restore order.'
+const adminReviewTitle = 'Admin Review - MemoryFix AI'
+const adminReviewDescription =
+  'Private MemoryFix AI review queue for paid Human-assisted Restore orders.'
 
 type DirectSecureAccessResponse = {
   error?: string
@@ -303,6 +308,7 @@ function App() {
   const isHumanRestoreSuccessPage = currentPath === humanRestoreSuccessPath
   const isHumanRestoreSecureUploadPage =
     currentPath === humanRestoreSecureUploadPath
+  const isAdminReviewPage = currentPath === adminReviewPath
   const secureUploadToken = currentSearchParams.get('token') || ''
   const defaultCheckoutEmail =
     currentSearchParams.get('checkout_email') ||
@@ -378,10 +384,13 @@ function App() {
     directAccessCheckoutRef ||
     ''
 
-  let mainView: 'editor' | 'success' | 'secure-upload' | 'home' = 'home'
+  let mainView: 'admin' | 'editor' | 'success' | 'secure-upload' | 'home' =
+    'home'
 
   if (file) {
     mainView = 'editor'
+  } else if (isAdminReviewPage) {
+    mainView = 'admin'
   } else if (isHumanRestoreSecureUploadPage) {
     mainView = 'secure-upload'
   } else if (isHumanRestoreSuccessPage) {
@@ -391,11 +400,16 @@ function App() {
   useEffect(() => {
     const isHumanRestoreOrderPage =
       isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
+    const isPrivatePage = isHumanRestoreOrderPage || isAdminReviewPage
     let pageTitle = homePageTitle
     let pageDescription = homePageDescription
     let pagePath = '/'
 
-    if (isHumanRestoreSecureUploadPage) {
+    if (isAdminReviewPage) {
+      pageTitle = adminReviewTitle
+      pageDescription = adminReviewDescription
+      pagePath = adminReviewPath
+    } else if (isHumanRestoreSecureUploadPage) {
       pageTitle = humanRestoreSecureUploadTitle
       pageDescription = humanRestoreSecureUploadDescription
       pagePath = humanRestoreSecureUploadPath
@@ -405,9 +419,7 @@ function App() {
       pagePath = humanRestoreSuccessPath
     }
 
-    const pageRobots = isHumanRestoreOrderPage
-      ? 'noindex, nofollow'
-      : 'index, follow'
+    const pageRobots = isPrivatePage ? 'noindex, nofollow' : 'index, follow'
     const pageUrl = new URL(pagePath, siteUrl).toString()
 
     document.title = pageTitle
@@ -422,7 +434,11 @@ function App() {
     upsertMetaTag('name', 'twitter:title', pageTitle)
     upsertMetaTag('name', 'twitter:description', pageDescription)
     upsertMetaTag('name', 'twitter:url', pageUrl)
-  }, [isHumanRestoreSecureUploadPage, isHumanRestoreSuccessPage])
+  }, [
+    isAdminReviewPage,
+    isHumanRestoreSecureUploadPage,
+    isHumanRestoreSuccessPage,
+  ])
 
   useEffect(() => {
     const unsubscribe = onSetLanguageTag(() =>
@@ -434,6 +450,8 @@ function App() {
       pageViewEvent = 'view_human_restore_secure_upload'
     } else if (isHumanRestoreSuccessPage) {
       pageViewEvent = 'view_human_restore_success'
+    } else if (isAdminReviewPage) {
+      pageViewEvent = 'view_admin_review'
     }
 
     trackProductEvent(pageViewEvent)
@@ -441,7 +459,11 @@ function App() {
     return () => {
       unsubscribe()
     }
-  }, [isHumanRestoreSecureUploadPage, isHumanRestoreSuccessPage])
+  }, [
+    isAdminReviewPage,
+    isHumanRestoreSecureUploadPage,
+    isHumanRestoreSuccessPage,
+  ])
 
   useEffect(() => {
     let isActive = true
@@ -852,14 +874,21 @@ function App() {
       <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
         <Button
           className={[
-            file || isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
+            file ||
+            isHumanRestoreSuccessPage ||
+            isHumanRestoreSecureUploadPage ||
+            isAdminReviewPage
               ? ''
               : 'opacity-50 pointer-events-none',
             'pl-1 pr-1',
           ].join(' ')}
           icon={<ArrowLeftIcon className="h-6 w-6" />}
           onClick={() => {
-            if (isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage) {
+            if (
+              isHumanRestoreSuccessPage ||
+              isHumanRestoreSecureUploadPage ||
+              isAdminReviewPage
+            ) {
               window.location.assign('/')
               return
             }
@@ -869,7 +898,9 @@ function App() {
         >
           <div className="md:w-[180px]">
             <span className="hidden select-none sm:inline">
-              {isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
+              {isHumanRestoreSuccessPage ||
+              isHumanRestoreSecureUploadPage ||
+              isAdminReviewPage
                 ? 'Back home'
                 : m.start_new()}
             </span>
@@ -891,7 +922,8 @@ function App() {
         <div className="hidden items-center justify-end gap-3 md:flex">
           {!file &&
             !isHumanRestoreSuccessPage &&
-            !isHumanRestoreSecureUploadPage && (
+            !isHumanRestoreSecureUploadPage &&
+            !isAdminReviewPage && (
               <>
                 <a
                   href="#privacy"
@@ -948,6 +980,7 @@ function App() {
         className={file ? 'relative' : 'relative'}
       >
         {mainView === 'editor' && file && <Editor file={file} />}
+        {mainView === 'admin' && <AdminReviewPage />}
         {mainView === 'secure-upload' && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
