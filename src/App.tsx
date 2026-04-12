@@ -127,7 +127,7 @@ const oldPhotoSamples = [
   },
 ]
 
-const humanRestoreUrl =
+const legacyHumanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
   'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
 
@@ -158,6 +158,12 @@ type DirectSecureAccessResponse = {
   error?: string
   ok?: boolean
   uploadUrl?: string
+}
+
+type CreateCheckoutResponse = {
+  checkoutUrl?: string
+  error?: string
+  ok?: boolean
 }
 
 type SecureOrderResponse = {
@@ -255,6 +261,10 @@ function App() {
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
+  const [checkoutLaunchError, setCheckoutLaunchError] = useState('')
+  const [checkoutLaunchStatus, setCheckoutLaunchStatus] = useState<
+    'idle' | 'loading' | 'error'
+  >('idle')
   const [directUploadUrl, setDirectUploadUrl] = useState('')
   const [directUploadStatus, setDirectUploadStatus] = useState<
     'idle' | 'loading' | 'ready' | 'unavailable'
@@ -530,6 +540,47 @@ function App() {
     successHeroDescription = maskedCheckoutEmail
       ? `We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure link sent to ${maskedCheckoutEmail} is also available if you leave this page.`
       : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
+  }
+
+  async function handleLaunchHumanRestoreCheckout() {
+    if (checkoutLaunchStatus === 'loading') {
+      return
+    }
+
+    setCheckoutLaunchStatus('loading')
+    setCheckoutLaunchError('')
+    trackProductEvent('click_human_restore', {
+      destination: 'server_checkout',
+    })
+
+    try {
+      const response = await fetch('/api/human-restore-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      })
+      const responseBody = (await response
+        .json()
+        .catch(() => null)) as CreateCheckoutResponse | null
+
+      if (!response.ok || !responseBody?.checkoutUrl) {
+        throw new Error(
+          responseBody?.error ||
+            'Secure checkout could not be opened right now. Please try again.'
+        )
+      }
+
+      window.location.assign(responseBody.checkoutUrl)
+    } catch (error) {
+      setCheckoutLaunchStatus('error')
+      setCheckoutLaunchError(
+        error instanceof Error
+          ? error.message
+          : 'Secure checkout could not be opened right now. Please try again.'
+      )
+    }
   }
 
   useEffect(() => {
@@ -909,32 +960,42 @@ function App() {
                 </div>
               </div>
               <div className="flex flex-col items-stretch gap-3 md:w-[260px]">
-                <a
-                  href={humanRestoreUrl}
-                  target={
-                    humanRestoreUrl.startsWith('http') ? '_blank' : undefined
-                  }
-                  rel={
-                    humanRestoreUrl.startsWith('http')
-                      ? 'noreferrer'
-                      : undefined
-                  }
-                  onClick={() => {
-                    trackProductEvent('click_human_restore', {
-                      destination: humanRestoreUrl.startsWith('http')
-                        ? 'checkout'
-                        : 'mailto',
-                    })
-                  }}
+                <button
+                  type="button"
+                  onClick={handleLaunchHumanRestoreCheckout}
+                  disabled={checkoutLaunchStatus === 'loading'}
                   className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
                 >
-                  Book Human Restore
-                </a>
+                  {checkoutLaunchStatus === 'loading'
+                    ? 'Opening secure checkout...'
+                    : 'Book Human Restore'}
+                </button>
                 <p className="text-sm leading-6 text-[#66574d] md:text-right">
                   Important: the free local repair tool does not upload photos.
                   This paid service requires upload only after you explicitly
                   choose Human-assisted Restore.
                 </p>
+                {checkoutLaunchStatus === 'error' && (
+                  <div className="rounded-[1.5rem] border border-[#f0b5a9] bg-[#fff1ed] px-4 py-4 text-sm leading-6 text-[#8a2f1d] md:text-right">
+                    <p className="font-black">Checkout could not be opened</p>
+                    <p className="mt-2">{checkoutLaunchError}</p>
+                    {legacyHumanRestoreUrl && (
+                      <a
+                        href={legacyHumanRestoreUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => {
+                          trackProductEvent('click_human_restore', {
+                            destination: 'legacy_checkout_fallback',
+                          })
+                        }}
+                        className="mt-3 inline-flex font-black text-[#8a2f1d] underline underline-offset-4"
+                      >
+                        Open hosted checkout directly
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
 
