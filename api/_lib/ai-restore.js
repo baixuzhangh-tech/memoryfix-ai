@@ -10,6 +10,13 @@ import {
 const defaultFalModel = 'fal-ai/image-editing/photo-restoration'
 const defaultOpenAIImageModel = 'gpt-image-1.5'
 const defaultReplicateModel = 'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
+const defaultReplicatePromptModel = 'timothybrooks/instruct-pix2pix:30c1d0b916a6f8efce20493f5d61ee27491ab2a60437c13c588468b9810ec23f'
+
+const promptCapableReplicateModels = new Set([
+  'timothybrooks/instruct-pix2pix',
+  'stability-ai/sdxl',
+  'stability-ai/stable-diffusion',
+])
 
 function wait(ms) {
   return new Promise(resolve => {
@@ -19,18 +26,62 @@ function wait(ms) {
 
 function buildRestorePrompt(job) {
   const notes = String(job.notes || '').trim()
-  const userNotes = notes
-    ? `Customer notes: ${notes}`
-    : 'Customer notes: naturally restore the photo while preserving identity and original character.'
 
-  return [
-    'Restore this old family photo naturally.',
-    'Remove scratches, stains, dust, fold marks, and age damage where possible.',
-    'Preserve the original people, faces, clothing, pose, background, era, and vintage character.',
-    'Do not invent new people, change identity, over-beautify faces, or make the image look modern/artificial.',
-    'If details are uncertain, keep the result conservative and realistic.',
-    userNotes,
-  ].join('\n')
+  const systemRules = [
+    'You are a professional photo restoration specialist.',
+    '',
+    '## Core restoration principles',
+    '- Remove scratches, stains, dust, fold marks, water damage, and age deterioration.',
+    '- Repair torn or missing areas conservatively, using surrounding context as reference.',
+    '- Restore faded colors to plausible natural tones for the era without over-saturating.',
+    '- Enhance clarity and sharpness while preserving the natural film grain character.',
+    '',
+    '## Identity and authenticity preservation (CRITICAL)',
+    '- NEVER alter facial features, body proportions, age, ethnicity, or identity of any person.',
+    '- NEVER add, remove, or replace any person in the photo.',
+    '- NEVER change clothing, hairstyle, pose, or body language.',
+    '- Preserve the original composition, framing, and background setting.',
+    '- Maintain the era-appropriate look — do not modernize the image.',
+    '',
+    '## Quality constraints',
+    '- Keep the result photorealistic. No painterly, cartoon, or AI-artifact look.',
+    '- When details are ambiguous or heavily damaged, prefer conservative reconstruction over creative invention.',
+    '- Output resolution should match or exceed the input resolution.',
+    '',
+    '## Safety constraints',
+    '- Do not generate NSFW, violent, or offensive content regardless of what the input contains.',
+    '- If the input photo contains text or watermarks, attempt to restore the image behind them only if the customer requests it.',
+  ]
+
+  const customerSection = notes
+    ? [
+        '',
+        '## Customer-specific restoration instructions',
+        `The customer has provided the following instructions. Follow them as closely as possible while respecting the core principles above:`,
+        '',
+        notes,
+      ]
+    : [
+        '',
+        '## Default restoration scope',
+        'No specific instructions from the customer. Perform a natural, conservative restoration: fix damage, enhance clarity, restore color, and preserve the original character of the photo.',
+      ]
+
+  return [...systemRules, ...customerSection].join('\n')
+}
+
+function buildShortPrompt(job) {
+  const notes = String(job.notes || '').trim()
+
+  if (notes) {
+    return `Restore this old photo: ${notes}. Remove scratches, stains, and damage. Preserve identity and original character. Keep it photorealistic.`
+  }
+
+  return 'Restore this old photo naturally. Remove scratches, stains, dust, and age damage. Preserve the original people, faces, era, and character. Keep it photorealistic.'
+}
+
+function hasCustomerNotes(job) {
+  return String(job.notes || '').trim().length > 0
 }
 
 function getProvider(requestedProvider) {
@@ -309,13 +360,35 @@ async function callReplicate({ job, prompt }) {
     expiresIn: 60 * 30,
     path: job.original_storage_path,
   })
-  const model = process.env.REPLICATE_RESTORE_MODEL || defaultReplicateModel
+  const customerHasNotes = hasCustomerNotes(job)
+  const configuredModel = process.env.REPLICATE_RESTORE_MODEL
+  const promptModel = process.env.REPLICATE_PROMPT_MODEL || defaultReplicatePromptModel
+
+  const model = configuredModel
+    ? configuredModel
+    : customerHasNotes
+      ? promptModel
+      : defaultReplicateModel
+
   const [owner, rest] = model.split('/')
   const [name, version] = (rest || '').split(':')
+  const modelKey = `${owner}/${name}`
+  const isPromptCapable =
+    promptCapableReplicateModels.has(modelKey) ||
+    model === promptModel
+
+  const input = isPromptCapable
+    ? {
+        image: imageUrl,
+        prompt: buildShortPrompt(job),
+        image_guidance_scale: 1.5,
+        guidance_scale: 7.5,
+      }
+    : { img: imageUrl }
 
   const createBody = version
-    ? { version, input: { img: imageUrl } }
-    : { input: { img: imageUrl } }
+    ? { version, input }
+    : { input }
   const createUrl = version
     ? 'https://api.replicate.com/v1/predictions'
     : `https://api.replicate.com/v1/models/${owner}/${name}/predictions`
