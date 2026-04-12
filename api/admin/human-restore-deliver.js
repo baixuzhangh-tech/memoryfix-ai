@@ -7,11 +7,15 @@ import {
 } from '../_lib/human-restore.js'
 import {
   createSignedUrl,
+  downloadObject,
   getDeliveryDownloadUrlSeconds,
+  getHumanRestoreBuckets,
   getJob,
   insertEvent,
   updateJob,
+  uploadObject,
 } from '../_lib/supabase.js'
+import { buildComparisonImage } from '../_lib/comparison-image.js'
 
 export const config = {
   api: {
@@ -20,35 +24,48 @@ export const config = {
 }
 
 function buildDeliveryEmail({
+  comparisonUrl,
   downloadUrl,
   expiresDays,
   job,
   reviewNote,
   supportEmail,
 }) {
+  const comparisonSection = comparisonUrl
+    ? `
+      <div style="margin:24px 0;text-align:center">
+        <p style="font-size:14px;color:#9b6b3c;font-weight:bold;letter-spacing:2px;text-transform:uppercase">Before & After</p>
+        <img src="${escapeHtml(comparisonUrl)}" alt="Before and after comparison" style="max-width:100%;border-radius:12px;border:2px solid #e6d2b7" />
+      </div>
+    `
+    : ''
+
   const html = `
-    <h1>Your restored photo is ready</h1>
-    <p>Thank you for using MemoryFix AI Human-assisted Restore.</p>
-    <p>Your reviewed result is ready here:</p>
-    <p><a href="${escapeHtml(downloadUrl)}">${escapeHtml(downloadUrl)}</a></p>
-    <p>This private download link expires in about ${expiresDays} days. If it expires before you download, reply to this email and we can resend it during the 30-day beta retention window.</p>
-    ${
-      reviewNote
-        ? `<p><strong>Review note:</strong><br />${escapeHtml(
-            reviewNote
-          ).replace(/\n/g, '<br />')}</p>`
-        : ''
-    }
-    <p>Submission reference: ${escapeHtml(job.submission_reference)}</p>
-    <p>Support: ${escapeHtml(supportEmail)}</p>
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#211915">
+      <h1 style="color:#211915;font-size:24px">Your restored photo is ready ✨</h1>
+      <p>Thank you for using MemoryFix AI Human-assisted Restore.</p>
+      ${comparisonSection}
+      <p><strong>Download your restored photo:</strong></p>
+      <p style="margin:16px 0"><a href="${escapeHtml(downloadUrl)}" style="display:inline-block;background:#211915;color:#fff;padding:14px 28px;border-radius:999px;text-decoration:none;font-weight:bold">Download restored photo</a></p>
+      <p style="font-size:13px;color:#66574d">Or copy this link: <a href="${escapeHtml(downloadUrl)}" style="color:#9b6b3c">${escapeHtml(downloadUrl)}</a></p>
+      <p style="font-size:13px;color:#66574d">This private link expires in about ${expiresDays} days. If it expires before you download, reply to this email and we can resend it.</p>
+      ${
+        reviewNote
+          ? `<div style="margin:16px 0;padding:12px 16px;background:#fffaf3;border:1px solid #e6d2b7;border-radius:12px"><strong>Note from our team:</strong><br />${escapeHtml(
+              reviewNote
+            ).replace(/\n/g, '<br />')}</div>`
+          : ''
+      }
+      <hr style="border:none;border-top:1px solid #e6d2b7;margin:24px 0" />
+      <p style="font-size:12px;color:#9b6b3c">Ref: ${escapeHtml(job.submission_reference)} · Support: ${escapeHtml(supportEmail)}</p>
+    </div>
   `
   const text = [
     'Your restored photo is ready.',
     `Download: ${downloadUrl}`,
     `This private download link expires in about ${expiresDays} days.`,
-    reviewNote ? `Review note: ${reviewNote}` : '',
-    `Submission reference: ${job.submission_reference}`,
-    `Support: ${supportEmail}`,
+    reviewNote ? `Note from our team: ${reviewNote}` : '',
+    `Ref: ${job.submission_reference} · Support: ${supportEmail}`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -110,7 +127,44 @@ export default async function handler(req, res) {
       expiresIn,
       path: job.result_storage_path,
     })
+
+    let comparisonUrl = ''
+
+    try {
+      const [originalObj, resultObj] = await Promise.all([
+        downloadObject({
+          bucket: job.original_storage_bucket,
+          path: job.original_storage_path,
+        }),
+        downloadObject({
+          bucket: job.result_storage_bucket,
+          path: job.result_storage_path,
+        }),
+      ])
+      const comparisonBuffer = await buildComparisonImage({
+        originalBuffer: originalObj.buffer,
+        resultBuffer: resultObj.buffer,
+      })
+      const buckets = getHumanRestoreBuckets()
+      const comparisonPath = `${job.submission_reference}/comparison-${Date.now()}.jpg`
+
+      await uploadObject({
+        bucket: buckets.results,
+        contentType: 'image/jpeg',
+        data: comparisonBuffer,
+        path: comparisonPath,
+      })
+      comparisonUrl = await createSignedUrl({
+        bucket: buckets.results,
+        expiresIn,
+        path: comparisonPath,
+      })
+    } catch (comparisonError) {
+      // Comparison image is optional; proceed without it.
+    }
+
     const emailContent = buildDeliveryEmail({
+      comparisonUrl,
       downloadUrl,
       expiresDays,
       job,

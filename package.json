@@ -13,6 +13,7 @@
     "react-dom": "^17.0.2",
     "react-use": "^17.3.1",
     "react-zoom-pan-pinch": "^3.3.0",
+    "sharp": "^0.34.5",
     "vite": "^5.0.2",
     "vite-plugin-eslint": "^1.8.1",
     "vite-plugin-svgr": "^4.2.0",
