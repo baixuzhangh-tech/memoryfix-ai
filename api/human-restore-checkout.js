@@ -2,12 +2,14 @@ import { randomUUID } from 'crypto'
 import { json } from './_lib/human-restore.js'
 
 const defaultSiteUrl = 'https://artgen.site'
+const defaultHumanRestoreCheckoutUrl =
+  'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
 
 function getRuntimeCheckoutUrl() {
   return (
     process.env.LEMON_SQUEEZY_CHECKOUT_URL ||
     process.env.VITE_EARLY_ACCESS_URL ||
-    ''
+    defaultHumanRestoreCheckoutUrl
   )
 }
 
