@@ -183,17 +183,17 @@ export default function HumanRestoreUploadForm(
     <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
       <div className="max-w-3xl">
         <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-          Upload your paid order
+          Backup upload form
         </p>
         <h2 className="mt-3 text-3xl font-black sm:text-4xl">
           {isSecureUpload
             ? 'Use your secure upload link to submit the photo.'
-            : 'Submit your photo here instead of replying by email.'}
+            : 'Use this backup form for your paid order only if needed.'}
         </h2>
         <p className="mt-4 leading-7 text-[#66574d]">
           {isSecureUpload
             ? 'This page is already tied to your paid order. Add your photo and notes below, then submit once.'
-            : 'Use the same email you entered at checkout. If you can find your order number, add it too. That helps us match your payment and start work faster.'}
+            : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the order number if you have it so we can match the paid order quickly.'}
         </p>
       </div>
 
@@ -239,7 +239,7 @@ export default function HumanRestoreUploadForm(
           <p className="mt-3 text-sm leading-6 text-[#355322]">
             {isSecureUpload
               ? 'Payment confirmed. This upload will attach directly to your paid order.'
-              : 'Use this backup form only for a paid Human-assisted Restore order.'}
+              : 'Use this backup form only if the secure upload page or secure email link is unavailable.'}
           </p>
         </article>
         <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
@@ -437,10 +437,10 @@ export default function HumanRestoreUploadForm(
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <p className="max-w-2xl text-sm leading-6 text-[#66574d]">
-            This form is only for paid Human-assisted Restore orders. The free
-            local repair tool still keeps photos in your browser and does not
-            upload them. Please submit only once per paid order unless support
-            asks you to upload again.
+            This backup form is only for paid Human-assisted Restore orders. The
+            free local repair tool still keeps photos in your browser and does
+            not upload them. Please submit only once per paid order unless
+            support asks you to upload again.
           </p>
           <button
             type="submit"
