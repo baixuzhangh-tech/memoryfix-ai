@@ -23,7 +23,8 @@ export default async function handler(req, res) {
   const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const variantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
   const parsedVariantId = Number(variantId)
-  const successUrl = new URL('/human-restore/success', siteUrl)
+  const successBase = new URL('/human-restore/success', siteUrl).toString()
+  const redirectUrl = `${successBase}?order_id=[order_id]&email=[email]`
 
   if (!apiKey || !storeId || !variantId) {
     json(res, 503, {
@@ -45,7 +46,7 @@ export default async function handler(req, res) {
           type: 'checkouts',
           attributes: {
             product_options: {
-              redirect_url: successUrl.toString(),
+              redirect_url: redirectUrl,
               ...(Number.isFinite(parsedVariantId)
                 ? { enabled_variants: [parsedVariantId] }
                 : {}),
