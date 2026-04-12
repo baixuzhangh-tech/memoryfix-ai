@@ -12,6 +12,7 @@ import {
   getHumanRestoreBuckets,
   getJob,
   insertEvent,
+  updateOrderByJobId,
   updateJob,
   uploadObject,
 } from '../_lib/supabase.js'
@@ -42,12 +43,16 @@ function buildDeliveryEmail({
       </tr>
       <tr>
         <td align="center" style="padding:0 0 6px 0">
-          <img src="${esc(comparisonUrl)}" alt="Before and after comparison" width="520" style="display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid #e6d2b7" />
+          <img src="${esc(
+            comparisonUrl
+          )}" alt="Before and after comparison" width="520" style="display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid #e6d2b7" />
         </td>
       </tr>
       <tr>
         <td align="center" style="padding:0 0 28px 0">
-          <a href="${esc(comparisonUrl)}" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b6b3c;text-decoration:underline" download>Save comparison image</a>
+          <a href="${esc(
+            comparisonUrl
+          )}" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b6b3c;text-decoration:underline" download>Save comparison image</a>
         </td>
       </tr>
     `
@@ -60,7 +65,9 @@ function buildDeliveryEmail({
           <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="background:#fffaf3;border:1px solid #e6d2b7;border-radius:8px">
             <tr>
               <td style="padding:16px 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#4a3728">
-                <strong style="color:#211915">Note from our team:</strong><br />${esc(reviewNote).replace(/\n/g, '<br />')}
+                <strong style="color:#211915">Note from our team:</strong><br />${esc(
+                  reviewNote
+                ).replace(/\n/g, '<br />')}
               </td>
             </tr>
           </table>
@@ -113,7 +120,9 @@ function buildDeliveryEmail({
                 <tr>
                   <td style="background:#211915;padding:32px 40px" align="center">
                     <table border="0" cellpadding="0" cellspacing="0" role="presentation"><tr><td style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;color:#ffffff;line-height:34px" align="center">Your restored photo<br/>is ready</td></tr></table>
-                    <table border="0" cellpadding="0" cellspacing="0" role="presentation"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#c8b9a8;padding-top:10px" align="center">Order ${esc(job.submission_reference)}</td></tr></table>
+                    <table border="0" cellpadding="0" cellspacing="0" role="presentation"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#c8b9a8;padding-top:10px" align="center">Order ${esc(
+                      job.submission_reference
+                    )}</td></tr></table>
                   </td>
                 </tr>
 
@@ -138,7 +147,9 @@ function buildDeliveryEmail({
                           <table border="0" cellpadding="0" cellspacing="0" role="presentation">
                             <tr>
                               <td align="center" style="background:#211915;border-radius:8px">
-                                <a href="${esc(downloadUrl)}" target="_blank" style="display:inline-block;padding:16px 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px">Download Restored Photo</a>
+                                <a href="${esc(
+                                  downloadUrl
+                                )}" target="_blank" style="display:inline-block;padding:16px 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px">Download Restored Photo</a>
                               </td>
                             </tr>
                           </table>
@@ -148,7 +159,9 @@ function buildDeliveryEmail({
                       <!-- LINK FALLBACK -->
                       <tr>
                         <td align="center" style="padding:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b8b7c">
-                          Button not working? <a href="${esc(downloadUrl)}" style="color:#9b6b3c;text-decoration:underline">Click here to download</a>
+                          Button not working? <a href="${esc(
+                            downloadUrl
+                          )}" style="color:#9b6b3c;text-decoration:underline">Click here to download</a>
                         </td>
                       </tr>
 
@@ -183,7 +196,11 @@ function buildDeliveryEmail({
                 <tr>
                   <td style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#9b8b7c" align="center">
                     Ref: ${esc(job.submission_reference)}<br/>
-                    Questions? Contact <a href="mailto:${esc(supportEmail)}" style="color:#9b6b3c;text-decoration:underline">${esc(supportEmail)}</a><br/>
+                    Questions? Contact <a href="mailto:${esc(
+                      supportEmail
+                    )}" style="color:#9b6b3c;text-decoration:underline">${esc(
+    supportEmail
+  )}</a><br/>
                     <span style="font-size:11px;color:#bfb3a5">&copy; ${new Date().getFullYear()} MemoryFix AI &middot; Privacy-first photo restoration</span>
                   </td>
                 </tr>
@@ -292,7 +309,9 @@ export default async function handler(req, res) {
         resultBuffer: resultObj.buffer,
       })
       const buckets = getHumanRestoreBuckets()
-      const comparisonPath = `${job.submission_reference}/comparison-${Date.now()}.jpg`
+      const comparisonPath = `${
+        job.submission_reference
+      }/comparison-${Date.now()}.jpg`
 
       await uploadObject({
         bucket: buckets.results,
@@ -334,6 +353,9 @@ export default async function handler(req, res) {
       review_note: reviewNote,
       status: 'delivered',
     })
+    await updateOrderByJobId(jobId, {
+      status: 'delivered',
+    }).catch(() => null)
 
     await insertEvent(jobId, 'delivery_email_sent', {
       delivery_email_id: emailPayload?.id || null,

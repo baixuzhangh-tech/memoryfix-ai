@@ -1,9 +1,37 @@
 import { randomUUID } from 'crypto'
-import { json } from './_lib/human-restore.js'
+import {
+  createSubmissionReference,
+  getBoundary,
+  json,
+  parseMultipartForm,
+  readRawBody,
+} from './_lib/human-restore.js'
+import {
+  getHumanRestoreBuckets,
+  insertOrder,
+  isSupabaseConfigured,
+  updateOrder,
+  uploadObject,
+} from './_lib/supabase.js'
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+}
 
 const defaultSiteUrl = 'https://artgen.site'
 const defaultHumanRestoreCheckoutUrl =
   'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
+const maxUploadSizeBytes = 15 * 1024 * 1024
+const unpaidOrderRetentionHours = 48
+const allowedImageTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+])
 
 function getRuntimeCheckoutUrl() {
   return (
@@ -92,6 +120,28 @@ async function discoverCheckoutConfig({ checkoutUrl, requestHeaders }) {
   }
 }
 
+function validatePhoto(file) {
+  if (!file || file.fieldName !== 'photo') {
+    return 'Please attach the photo you want restored.'
+  }
+
+  if (!allowedImageTypes.has(file.contentType)) {
+    return 'Please upload a JPG, PNG, WebP, HEIC, or HEIF image.'
+  }
+
+  if (file.data.length > maxUploadSizeBytes) {
+    return 'Please keep the upload under 15 MB for this beta workflow.'
+  }
+
+  return ''
+}
+
+function getExpiresAt() {
+  const expiresAt = new Date()
+  expiresAt.setHours(expiresAt.getHours() + unpaidOrderRetentionHours)
+  return expiresAt.toISOString()
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     json(res, 405, { error: 'Method not allowed.' })
@@ -102,18 +152,37 @@ export default async function handler(req, res) {
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
   let storeId = process.env.LEMON_SQUEEZY_STORE_ID
   let variantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
-  const checkoutRef = randomUUID()
-  const successBase = new URL('/human-restore/success', siteUrl).toString()
-  const redirectUrl = `${successBase}?checkout_ref=${checkoutRef}`
 
-  if (!apiKey) {
+  if (!apiKey || !isSupabaseConfigured()) {
     json(res, 503, {
-      error: 'Server-created checkout is not configured yet.',
+      error:
+        'Human-assisted Restore checkout is not configured yet. Please try again later.',
     })
     return
   }
 
+  const contentType = req.headers['content-type'] || ''
+  const boundary = getBoundary(contentType)
+
+  if (!boundary) {
+    json(res, 400, {
+      error: 'Please upload a photo before opening checkout.',
+    })
+    return
+  }
+
+  let localOrder = null
+
   try {
+    const rawBody = await readRawBody(req)
+    const { fields, file } = parseMultipartForm(rawBody, boundary)
+    const photoError = validatePhoto(file)
+
+    if (photoError) {
+      json(res, 400, { error: photoError })
+      return
+    }
+
     const requestHeaders = {
       Accept: 'application/vnd.api+json',
       'Content-Type': 'application/vnd.api+json',
@@ -137,6 +206,44 @@ export default async function handler(req, res) {
       return
     }
 
+    const orderId = randomUUID()
+    const checkoutRef = randomUUID()
+    const submissionReference = createSubmissionReference()
+    const buckets = getHumanRestoreBuckets()
+    const safeSubmissionReference = submissionReference.replace(
+      /[^A-Z0-9-]/g,
+      ''
+    )
+    const storagePath = `${safeSubmissionReference}/${file.filename}`
+    const notes = String(fields.notes || '').trim()
+
+    await uploadObject({
+      bucket: buckets.originals,
+      contentType: file.contentType,
+      data: file.data,
+      path: storagePath,
+    })
+
+    localOrder = await insertOrder({
+      checkout_ref: checkoutRef,
+      expires_at: getExpiresAt(),
+      id: orderId,
+      notes,
+      original_file_name: file.filename,
+      original_file_size: file.data.length,
+      original_file_type: file.contentType,
+      original_storage_bucket: buckets.originals,
+      original_storage_path: storagePath,
+      product_name: 'Human-assisted Restore',
+      status: 'pending_payment',
+      submission_reference: submissionReference,
+      variant_id: String(variantId),
+    })
+
+    const redirectUrl = new URL('/human-restore/success', siteUrl)
+    redirectUrl.searchParams.set('order_id', localOrder.id)
+    redirectUrl.searchParams.set('checkout_ref', checkoutRef)
+
     const parsedVariantId = Number(variantId)
     const response = await fetch('https://api.lemonsqueezy.com/v1/checkouts', {
       method: 'POST',
@@ -146,15 +253,17 @@ export default async function handler(req, res) {
           type: 'checkouts',
           attributes: {
             product_options: {
-              redirect_url: redirectUrl,
+              redirect_url: redirectUrl.toString(),
               ...(Number.isFinite(parsedVariantId)
                 ? { enabled_variants: [parsedVariantId] }
                 : {}),
             },
             checkout_data: {
               custom: {
-                flow: 'human_restore_inline_upload',
                 checkout_ref: checkoutRef,
+                flow: 'human_restore_preupload',
+                human_restore_order_id: localOrder.id,
+                submission_reference: submissionReference,
               },
             },
           },
@@ -178,6 +287,7 @@ export default async function handler(req, res) {
     const payload = await response.json().catch(() => null)
 
     if (!response.ok) {
+      await updateOrder(localOrder.id, { status: 'failed' }).catch(() => null)
       json(res, 502, {
         error: getErrorMessage(payload),
       })
@@ -187,18 +297,33 @@ export default async function handler(req, res) {
     const checkoutUrl = payload?.data?.attributes?.url
 
     if (!checkoutUrl) {
+      await updateOrder(localOrder.id, { status: 'failed' }).catch(() => null)
       json(res, 502, {
         error: 'Checkout URL was not returned by Lemon Squeezy.',
       })
       return
     }
 
+    const checkoutId = payload?.data?.id ? String(payload.data.id) : ''
+
+    if (checkoutId || checkoutUrl) {
+      localOrder = await updateOrder(localOrder.id, {
+        checkout_id: checkoutId || null,
+        checkout_url: checkoutUrl,
+      })
+    }
+
     json(res, 200, {
       ok: true,
-      checkoutUrl,
       checkoutRef,
+      checkoutUrl,
+      orderId: localOrder.id,
     })
   } catch {
+    if (localOrder?.id) {
+      await updateOrder(localOrder.id, { status: 'failed' }).catch(() => null)
+    }
+
     json(res, 500, {
       error: 'Secure checkout could not be created right now.',
     })

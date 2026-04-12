@@ -82,6 +82,55 @@ create table if not exists public.human_restore_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.human_restore_orders (
+  id uuid primary key default gen_random_uuid(),
+  checkout_ref text not null unique,
+  submission_reference text not null unique,
+  status text not null default 'pending_payment' check (
+    status in (
+      'pending_payment',
+      'paid',
+      'uploaded',
+      'processing',
+      'ai_queued',
+      'ai_failed',
+      'needs_review',
+      'manual_review',
+      'delivered',
+      'failed',
+      'expired',
+      'deleted'
+    )
+  ),
+  payment_provider text not null default 'lemon_squeezy',
+  checkout_id text,
+  checkout_url text,
+  payment_provider_order_id text unique,
+  payment_provider_order_identifier text,
+  order_number text,
+  checkout_email text,
+  customer_name text,
+  product_name text not null default 'Human-assisted Restore',
+  receipt_url text,
+  test_mode boolean not null default false,
+  variant_id text,
+  notes text,
+  original_file_name text not null,
+  original_file_type text not null,
+  original_file_size integer not null,
+  original_storage_bucket text not null,
+  original_storage_path text not null,
+  job_id uuid references public.human_restore_jobs(id) on delete set null,
+  payment_confirmed_at timestamptz,
+  expires_at timestamptz not null default now() + interval '48 hours',
+  deleted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.human_restore_jobs
+  add column if not exists human_restore_order_id uuid references public.human_restore_orders(id) on delete set null;
+
 create index if not exists human_restore_jobs_status_created_idx
   on public.human_restore_jobs (status, created_at desc);
 
@@ -92,6 +141,10 @@ create index if not exists human_restore_jobs_order_id_idx
   on public.human_restore_jobs (order_id)
   where order_id is not null;
 
+create index if not exists human_restore_jobs_local_order_idx
+  on public.human_restore_jobs (human_restore_order_id)
+  where human_restore_order_id is not null;
+
 create index if not exists human_restore_jobs_expires_idx
   on public.human_restore_jobs (expires_at)
   where deleted_at is null;
@@ -99,8 +152,23 @@ create index if not exists human_restore_jobs_expires_idx
 create index if not exists human_restore_events_job_created_idx
   on public.human_restore_events (job_id, created_at desc);
 
+create index if not exists human_restore_orders_status_created_idx
+  on public.human_restore_orders (status, created_at desc);
+
+create index if not exists human_restore_orders_checkout_ref_idx
+  on public.human_restore_orders (checkout_ref);
+
+create index if not exists human_restore_orders_payment_provider_order_idx
+  on public.human_restore_orders (payment_provider_order_id)
+  where payment_provider_order_id is not null;
+
+create index if not exists human_restore_orders_expires_idx
+  on public.human_restore_orders (expires_at)
+  where deleted_at is null;
+
 alter table public.human_restore_jobs enable row level security;
 alter table public.human_restore_events enable row level security;
+alter table public.human_restore_orders enable row level security;
 
 -- The app uses SUPABASE_SERVICE_ROLE_KEY from Vercel serverless functions.
 -- No public RLS policies are needed because browser clients never access these

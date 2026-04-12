@@ -4,6 +4,7 @@ import {
   createJobSignedUrls,
   getJob,
   insertEvent,
+  updateOrderByJobId,
   updateJob,
 } from '../_lib/supabase.js'
 
@@ -73,6 +74,11 @@ export default async function handler(req, res) {
     const updatedJob = await updateJob(jobId, patch)
 
     await insertEvent(jobId, 'admin_job_updated', patch)
+    if (patch.status) {
+      await updateOrderByJobId(jobId, { status: patch.status }).catch(
+        () => null
+      )
+    }
 
     json(res, 200, {
       job: await createJobSignedUrls(updatedJob),

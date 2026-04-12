@@ -112,6 +112,16 @@ export async function insertJob(job) {
   return Array.isArray(payload) ? payload[0] : payload
 }
 
+export async function insertOrder(order) {
+  const payload = await supabaseRest('/human_restore_orders', {
+    method: 'POST',
+    body: order,
+    prefer: 'return=representation',
+  })
+
+  return Array.isArray(payload) ? payload[0] : payload
+}
+
 export async function insertEvent(jobId, eventType, metadata = {}) {
   if (!jobId) {
     return null
@@ -138,6 +148,57 @@ export async function getJob(jobId) {
     select: '*',
   })
   const payload = await supabaseRest(`/human_restore_jobs?${params.toString()}`)
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
+export async function getOrder(orderId) {
+  if (!orderId) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    id: `eq.${orderId}`,
+    limit: '1',
+    select: '*',
+  })
+  const payload = await supabaseRest(
+    `/human_restore_orders?${params.toString()}`
+  )
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
+export async function getOrderByCheckoutRef(checkoutRef) {
+  if (!checkoutRef) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    checkout_ref: `eq.${checkoutRef}`,
+    limit: '1',
+    select: '*',
+  })
+  const payload = await supabaseRest(
+    `/human_restore_orders?${params.toString()}`
+  )
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
+export async function getOrderByProviderOrderId(providerOrderId) {
+  if (!providerOrderId) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    limit: '1',
+    payment_provider_order_id: `eq.${providerOrderId}`,
+    select: '*',
+  })
+  const payload = await supabaseRest(
+    `/human_restore_orders?${params.toString()}`
+  )
 
   return Array.isArray(payload) ? payload[0] || null : null
 }
@@ -212,6 +273,19 @@ export async function listExpiredJobs({ limit = 20 } = {}) {
   return supabaseRest(`/human_restore_jobs?${params.toString()}`)
 }
 
+export async function listExpiredOrders({ limit = 20 } = {}) {
+  const params = new URLSearchParams({
+    deleted_at: 'is.null',
+    expires_at: `lt.${new Date().toISOString()}`,
+    limit: String(limit),
+    order: 'expires_at.asc',
+    select: '*',
+    status: 'in.(pending_payment,expired,failed)',
+  })
+
+  return supabaseRest(`/human_restore_orders?${params.toString()}`)
+}
+
 export async function updateJob(jobId, patch) {
   const payload = await supabaseRest(
     `/human_restore_jobs?id=eq.${encodeURIComponent(jobId)}`,
@@ -228,6 +302,42 @@ export async function updateJob(jobId, patch) {
   return Array.isArray(payload) ? payload[0] : payload
 }
 
+export async function updateOrder(orderId, patch) {
+  const payload = await supabaseRest(
+    `/human_restore_orders?id=eq.${encodeURIComponent(orderId)}`,
+    {
+      method: 'PATCH',
+      body: {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      },
+      prefer: 'return=representation',
+    }
+  )
+
+  return Array.isArray(payload) ? payload[0] : payload
+}
+
+export async function updateOrderByJobId(jobId, patch) {
+  if (!jobId) {
+    return null
+  }
+
+  const payload = await supabaseRest(
+    `/human_restore_orders?job_id=eq.${encodeURIComponent(jobId)}`,
+    {
+      method: 'PATCH',
+      body: {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      },
+      prefer: 'return=representation',
+    }
+  )
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
 export async function uploadObject({
   bucket,
   contentType = 'application/octet-stream',
@@ -239,14 +349,17 @@ export async function uploadObject({
   const trimmedBucket = bucket.trim()
   const encodedPath = encodeStoragePath(path)
 
-  await supabaseFetch(`${url}/storage/v1/object/${trimmedBucket}/${encodedPath}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': contentType,
-      'x-upsert': upsert ? 'true' : 'false',
-    },
-    body: data,
-  })
+  await supabaseFetch(
+    `${url}/storage/v1/object/${trimmedBucket}/${encodedPath}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+        'x-upsert': upsert ? 'true' : 'false',
+      },
+      body: data,
+    }
+  )
 
   return {
     bucket,

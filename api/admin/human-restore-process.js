@@ -1,7 +1,12 @@
 import { requireAdmin } from '../_lib/admin.js'
 import { runRestoreJob } from '../_lib/ai-restore.js'
 import { json, readRawBody } from '../_lib/human-restore.js'
-import { createJobSignedUrls, getJob, insertEvent } from '../_lib/supabase.js'
+import {
+  createJobSignedUrls,
+  getJob,
+  insertEvent,
+  updateOrderByJobId,
+} from '../_lib/supabase.js'
 
 export const config = {
   api: {
@@ -45,6 +50,9 @@ export default async function handler(req, res) {
       provider: updatedJob.ai_provider,
       status: updatedJob.status,
     })
+    await updateOrderByJobId(updatedJob.id, {
+      status: updatedJob.status,
+    }).catch(() => null)
 
     json(res, 200, {
       job: await createJobSignedUrls(updatedJob),

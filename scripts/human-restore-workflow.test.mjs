@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import { Readable } from 'node:stream'
 import adminDeliverHandler from '../api/admin/human-restore-deliver.js'
 import adminJobHandler from '../api/admin/human-restore-job.js'
 import adminJobsHandler from '../api/admin/human-restore-jobs.js'
 import adminProcessHandler from '../api/admin/human-restore-process.js'
 import cleanupHandler from '../api/cron/human-restore-cleanup.js'
-import { createOrderUploadToken } from '../api/_lib/human-restore.js'
 import checkoutHandler from '../api/human-restore-checkout.js'
-import secureAccessHandler from '../api/human-restore-secure-access.js'
-import uploadHandler from '../api/human-restore-upload.js'
+import orderHandler from '../api/human-restore-order.js'
+import webhookHandler from '../api/lemonsqueezy-webhook.js'
 import {
   appendHumanRestoreCheckoutRef,
   readHumanRestoreCheckoutContext,
@@ -34,6 +34,7 @@ function createMockState() {
     lemonOrders: [],
     nextEmailId: 1,
     nextJobId: 1,
+    orders: [],
     storage: new Map(),
   }
 }
@@ -129,6 +130,95 @@ function installMockFetch(state) {
 
           Object.assign(job, patch)
           return makeJsonResponse([job])
+        }
+      }
+
+      if (url.pathname.startsWith('/rest/v1/human_restore_orders')) {
+        if (method === 'POST') {
+          const body = JSON.parse(getBodyText(options))
+          const now = new Date().toISOString()
+          const order = {
+            ...body,
+            created_at: now,
+            id: body.id || `order-${state.orders.length + 1}`,
+            updated_at: now,
+          }
+
+          state.orders.push(order)
+          return makeJsonResponse([order])
+        }
+
+        if (method === 'GET') {
+          let orders = [...state.orders]
+          const idFilter = url.searchParams.get('id')
+          const checkoutRefFilter = url.searchParams.get('checkout_ref')
+          const providerOrderFilter = url.searchParams.get(
+            'payment_provider_order_id'
+          )
+          const statusFilter = url.searchParams.get('status')
+          const deletedFilter = url.searchParams.get('deleted_at')
+          const expiresFilter = url.searchParams.get('expires_at')
+
+          if (idFilter?.startsWith('eq.')) {
+            orders = orders.filter(order => order.id === idFilter.slice(3))
+          }
+
+          if (checkoutRefFilter?.startsWith('eq.')) {
+            orders = orders.filter(
+              order => order.checkout_ref === checkoutRefFilter.slice(3)
+            )
+          }
+
+          if (providerOrderFilter?.startsWith('eq.')) {
+            orders = orders.filter(
+              order =>
+                order.payment_provider_order_id === providerOrderFilter.slice(3)
+            )
+          }
+
+          if (statusFilter?.startsWith('in.(')) {
+            const statuses = statusFilter
+              .slice('in.('.length, -1)
+              .split(',')
+              .filter(Boolean)
+
+            orders = orders.filter(order => statuses.includes(order.status))
+          }
+
+          if (deletedFilter === 'is.null') {
+            orders = orders.filter(order => !order.deleted_at)
+          }
+
+          if (expiresFilter?.startsWith('lt.')) {
+            const threshold = Date.parse(expiresFilter.slice(3))
+            orders = orders.filter(
+              order => Date.parse(order.expires_at) < threshold
+            )
+          }
+
+          return makeJsonResponse(orders)
+        }
+
+        if (method === 'PATCH') {
+          const idFilter = url.searchParams.get('id')
+          const jobFilter = url.searchParams.get('job_id')
+          const patch = JSON.parse(getBodyText(options))
+          let order = null
+
+          if (idFilter?.startsWith('eq.')) {
+            const id = idFilter.slice(3)
+            order = state.orders.find(candidate => candidate.id === id)
+          } else if (jobFilter?.startsWith('eq.')) {
+            const jobId = jobFilter.slice(3)
+            order = state.orders.find(candidate => candidate.job_id === jobId)
+          }
+
+          if (!order) {
+            return makeJsonResponse([])
+          }
+
+          Object.assign(order, patch)
+          return makeJsonResponse([order])
         }
       }
 
@@ -385,6 +475,16 @@ async function invoke(handler, reqOptions = {}) {
   }
 }
 
+function createSignedWebhookBody(payload) {
+  const body = Buffer.from(JSON.stringify(payload))
+  const signature = crypto
+    .createHmac('sha256', process.env.LEMON_SQUEEZY_WEBHOOK_SECRET)
+    .update(body)
+    .digest('hex')
+
+  return { body, signature }
+}
+
 function installEnv() {
   Object.assign(process.env, {
     AI_RESTORE_PROVIDER: 'fal',
@@ -403,6 +503,7 @@ function installEnv() {
     LEMON_SQUEEZY_API_KEY: 'lemon-key',
     LEMON_SQUEEZY_CHECKOUT_URL:
       'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268',
+    LEMON_SQUEEZY_WEBHOOK_SECRET: 'webhook-secret',
     OPENAI_API_KEY: 'openai-key',
     OPENAI_IMAGE_EDIT_MODEL: 'gpt-image-1.5',
     RESEND_API_KEY: 'resend-key',
@@ -460,78 +561,9 @@ async function main() {
     'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268?checkout%5Bcustom%5D%5Bflow%5D=human_restore_inline_upload&checkout%5Bcustom%5D%5Bcheckout_ref%5D=checkout-ref-123'
   )
 
-  const checkoutResponse = await invoke(checkoutHandler, {
-    method: 'POST',
-  })
-
-  assert.equal(checkoutResponse.statusCode, 200)
-  assert.equal(checkoutResponse.body.ok, true)
-  assert.equal(state.lemonCheckouts.length, 1)
-  assert.equal(state.lemonCheckouts[0].data.relationships.store.data.id, '789')
-  assert.equal(
-    state.lemonCheckouts[0].data.relationships.variant.data.id,
-    '123'
-  )
-
-  const serverCheckoutRef =
-    state.lemonCheckouts[0].data.attributes.checkout_data.custom.checkout_ref
-  const orderCreatedAt = new Date(startedAtMs + 5000).toISOString()
-
-  state.lemonOrders.push({
-    attributes: {
-      created_at: orderCreatedAt,
-      first_order_item: {
-        product_name: 'Human-assisted Restore',
-        variant_id: 123,
-      },
-      identifier: 'order-identifier-123',
-      meta: {
-        custom_data: {
-          checkout_ref: serverCheckoutRef,
-        },
-      },
-      order_number: 1001,
-      status: 'paid',
-      test_mode: true,
-      urls: {
-        receipt: 'https://receipt.test/order-123',
-      },
-      user_email: 'buyer@example.com',
-      user_name: 'Buyer',
-    },
-    id: 'order-123',
-    type: 'orders',
-  })
-
-  const secureAccessResponse = await invoke(secureAccessHandler, {
-    method: 'GET',
-    query: {
-      checkoutRef: serverCheckoutRef,
-      checkoutStartedAt: new Date(startedAtMs).toISOString(),
-    },
-  })
-
-  assert.equal(secureAccessResponse.statusCode, 200)
-  assert.equal(secureAccessResponse.body.ok, true)
-  assert.match(secureAccessResponse.body.uploadUrl, /\/human-restore\/upload/)
-
-  const token = createOrderUploadToken({
-    tokenSecret: process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET,
-    order: {
-      checkoutEmail: 'buyer@example.com',
-      createdAt: new Date().toISOString(),
-      customerName: 'Buyer',
-      orderId: 'order-123',
-      orderNumber: '1001',
-      productName: 'Human-assisted Restore',
-      receiptUrl: 'https://receipt.test/order-123',
-      testMode: true,
-    },
-  })
-  const multipart = createMultipartBody(
+  const checkoutMultipart = createMultipartBody(
     {
       notes: 'Please remove scratches while keeping faces natural.',
-      token,
     },
     {
       contentType: 'image/jpeg',
@@ -540,19 +572,122 @@ async function main() {
       filename: 'grandma.jpg',
     }
   )
-  const uploadResponse = await invoke(uploadHandler, {
-    body: multipart.body,
-    headers: { 'content-type': multipart.contentType },
+  const checkoutResponse = await invoke(checkoutHandler, {
+    body: checkoutMultipart.body,
+    headers: { 'content-type': checkoutMultipart.contentType },
     method: 'POST',
   })
 
-  assert.equal(uploadResponse.statusCode, 200)
-  assert.equal(uploadResponse.body.ok, true)
-  assert.equal(uploadResponse.body.orderBound, true)
+  assert.equal(checkoutResponse.statusCode, 200)
+  assert.equal(checkoutResponse.body.ok, true)
+  assert.ok(checkoutResponse.body.orderId)
+  assert.equal(state.lemonCheckouts.length, 1)
+  assert.equal(state.orders.length, 1)
+  assert.equal(state.orders[0].status, 'pending_payment')
+  assert.equal(
+    state.orders[0].notes,
+    'Please remove scratches while keeping faces natural.'
+  )
+  assert.equal(state.lemonCheckouts[0].data.relationships.store.data.id, '789')
+  assert.equal(
+    state.lemonCheckouts[0].data.relationships.variant.data.id,
+    '123'
+  )
+
+  const checkoutCustomData =
+    state.lemonCheckouts[0].data.attributes.checkout_data.custom
+  const serverCheckoutRef = checkoutCustomData.checkout_ref
+  const localOrderId = checkoutCustomData.human_restore_order_id
+
+  assert.equal(localOrderId, checkoutResponse.body.orderId)
+  assert.equal(localOrderId, state.orders[0].id)
+
+  rememberHumanRestorePendingCheckout({
+    checkoutRef: serverCheckoutRef,
+    localStorageRef: mockStorage,
+    orderId: localOrderId,
+    sessionStorageRef: mockStorage,
+    timestamp: startedAtMs,
+  })
+
+  const recoveredPreuploadContext = readHumanRestoreCheckoutContext({
+    localStorageRef: mockStorage,
+    now: startedAtMs + 1000,
+    sessionStorageRef: mockStorage,
+  })
+
+  assert.equal(recoveredPreuploadContext.pendingOrderId, localOrderId)
+
+  const orderCreatedAt = new Date(startedAtMs + 5000).toISOString()
+  const webhookPayload = {
+    data: {
+      attributes: {
+        created_at: orderCreatedAt,
+        first_order_item: {
+          product_name: 'Human-assisted Restore',
+          variant_id: 123,
+        },
+        identifier: 'order-identifier-123',
+        meta: {
+          custom_data: {
+            checkout_ref: serverCheckoutRef,
+            flow: 'human_restore_preupload',
+            human_restore_order_id: localOrderId,
+            submission_reference: state.orders[0].submission_reference,
+          },
+        },
+        order_number: 1001,
+        status: 'paid',
+        test_mode: true,
+        urls: {
+          receipt: 'https://receipt.test/order-123',
+        },
+        user_email: 'buyer@example.com',
+        user_name: 'Buyer',
+      },
+      id: 'order-123',
+      type: 'orders',
+    },
+    meta: {
+      custom_data: {
+        checkout_ref: serverCheckoutRef,
+        flow: 'human_restore_preupload',
+        human_restore_order_id: localOrderId,
+        submission_reference: state.orders[0].submission_reference,
+      },
+      event_name: 'order_created',
+    },
+  }
+  const signedWebhook = createSignedWebhookBody(webhookPayload)
+  const webhookResponse = await invoke(webhookHandler, {
+    body: signedWebhook.body,
+    headers: { 'x-signature': signedWebhook.signature },
+    method: 'POST',
+  })
+
+  assert.equal(webhookResponse.statusCode, 200)
+  assert.equal(webhookResponse.body.ok, true)
+  assert.equal(webhookResponse.body.preuploadedOrderProcessed, true)
   assert.equal(state.jobs.length, 1)
   assert.equal(state.jobs[0].status, 'needs_review')
   assert.ok(state.jobs[0].result_storage_path)
+  assert.equal(state.orders[0].status, 'needs_review')
+  assert.equal(state.orders[0].checkout_email, 'buyer@example.com')
+  assert.equal(state.orders[0].job_id, state.jobs[0].id)
   assert.equal(state.emails.length, 2)
+
+  const orderStatusResponse = await invoke(orderHandler, {
+    method: 'GET',
+    query: {
+      checkoutRef: serverCheckoutRef,
+      orderId: localOrderId,
+    },
+  })
+
+  assert.equal(orderStatusResponse.statusCode, 200)
+  assert.equal(orderStatusResponse.body.order.paid, true)
+  assert.equal(orderStatusResponse.body.order.photoReceived, true)
+  assert.equal(orderStatusResponse.body.order.status, 'needs_review')
 
   const job = state.jobs[0]
   const listResponse = await invoke(adminJobsHandler, {

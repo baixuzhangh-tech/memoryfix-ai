@@ -3,6 +3,7 @@
 const checkoutSuccessStorageKey = 'ls_checkout_success'
 const pendingCheckoutStorageKey = 'pending_human_restore_checkout'
 const pendingCheckoutRefStorageKey = 'pending_checkout_ref'
+const pendingOrderIdStorageKey = 'pending_human_restore_order_id'
 const checkoutContextMaxAgeMs = 30 * 60 * 1000
 
 function getDefaultLocalStorage() {
@@ -89,6 +90,8 @@ export function readHumanRestoreCheckoutContext(options = {}) {
       : options.sessionStorageRef
   const sessionCheckoutRef =
     sessionStorageRef?.getItem(pendingCheckoutRefStorageKey) || ''
+  const sessionOrderId =
+    sessionStorageRef?.getItem(pendingOrderIdStorageKey) || ''
   const successData = parseStoredJson(
     localStorageRef,
     checkoutSuccessStorageKey
@@ -102,9 +105,13 @@ export function readHumanRestoreCheckoutContext(options = {}) {
   const pendingCheckoutRef = hasRecentPending
     ? String(pendingData?.checkoutRef || sessionCheckoutRef || '')
     : sessionCheckoutRef
+  const pendingOrderId = hasRecentPending
+    ? String(pendingData?.orderId || sessionOrderId || '')
+    : sessionOrderId
 
   return {
     hasPendingCheckout: Boolean(hasRecentPending),
+    pendingOrderId,
     pendingCheckoutRef,
     pendingCheckoutStartedAt:
       hasRecentPending && pendingData?.timestamp
@@ -130,11 +137,15 @@ export function rememberHumanRestorePendingCheckout(options = {}) {
       ? getDefaultSessionStorage()
       : options.sessionStorageRef
   const checkoutRef = options.checkoutRef || ''
+  const orderId = options.orderId || ''
   const timestamp = options.timestamp || Date.now()
 
   if (sessionStorageRef && checkoutRef) {
     try {
       sessionStorageRef.setItem(pendingCheckoutRefStorageKey, checkoutRef)
+      if (orderId) {
+        sessionStorageRef.setItem(pendingOrderIdStorageKey, orderId)
+      }
     } catch {
       // sessionStorage may be unavailable
     }
@@ -147,7 +158,7 @@ export function rememberHumanRestorePendingCheckout(options = {}) {
   try {
     localStorageRef.setItem(
       pendingCheckoutStorageKey,
-      JSON.stringify({ checkoutRef, timestamp })
+      JSON.stringify({ checkoutRef, orderId, timestamp })
     )
   } catch {
     // localStorage may be unavailable
@@ -159,14 +170,20 @@ export function clearHumanRestoreStoredCheckoutContext(options = {}) {
     options.localStorageRef === undefined
       ? getDefaultLocalStorage()
       : options.localStorageRef
+  const sessionStorageRef =
+    options.sessionStorageRef === undefined
+      ? getDefaultSessionStorage()
+      : options.sessionStorageRef
 
-  if (!localStorageRef) {
+  if (!localStorageRef && !sessionStorageRef) {
     return
   }
 
   try {
-    localStorageRef.removeItem(checkoutSuccessStorageKey)
-    localStorageRef.removeItem(pendingCheckoutStorageKey)
+    localStorageRef?.removeItem(checkoutSuccessStorageKey)
+    localStorageRef?.removeItem(pendingCheckoutStorageKey)
+    sessionStorageRef?.removeItem(pendingCheckoutRefStorageKey)
+    sessionStorageRef?.removeItem(pendingOrderIdStorageKey)
   } catch {
     // localStorage may be unavailable
   }

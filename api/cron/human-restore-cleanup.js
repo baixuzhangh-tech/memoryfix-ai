@@ -3,6 +3,8 @@ import {
   deleteObject,
   insertEvent,
   listExpiredJobs,
+  listExpiredOrders,
+  updateOrder,
   updateJob,
 } from '../_lib/supabase.js'
 
@@ -37,7 +39,22 @@ export default async function handler(req, res) {
 
   try {
     const jobs = await listExpiredJobs({ limit: 20 })
+    const orders = await listExpiredOrders({ limit: 20 })
     const deleted = []
+    const deletedOrders = []
+
+    for (const order of orders) {
+      await deleteObject({
+        bucket: order.original_storage_bucket,
+        path: order.original_storage_path,
+      })
+
+      await updateOrder(order.id, {
+        deleted_at: new Date().toISOString(),
+        status: 'deleted',
+      })
+      deletedOrders.push(order.id)
+    }
 
     for (const job of jobs) {
       await deleteObject({
@@ -64,6 +81,7 @@ export default async function handler(req, res) {
 
     json(res, 200, {
       deleted,
+      deletedOrders,
       ok: true,
     })
   } catch (error) {

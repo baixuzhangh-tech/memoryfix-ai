@@ -6,6 +6,9 @@ import { useClickAway } from 'react-use'
 import AdminReviewPage from './components/AdminReviewPage'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
+import HumanRestoreCheckoutForm from './components/HumanRestoreCheckoutForm'
+import HumanRestoreSuccessStatusPage from './components/HumanRestoreSuccessStatusPage'
+import type { HumanRestoreLocalOrder } from './components/HumanRestoreSuccessStatusPage'
 import HumanRestoreUploadForm from './components/HumanRestoreUploadForm'
 import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
@@ -15,9 +18,7 @@ import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
 import trackProductEvent from './analytics'
 import {
-  appendHumanRestoreCheckoutRef,
   clearHumanRestoreStoredCheckoutContext,
-  createHumanRestoreCheckoutRef,
   readHumanRestoreCheckoutContext,
   rememberHumanRestorePendingCheckout,
 } from './humanRestoreCheckoutContext'
@@ -150,8 +151,22 @@ const adminReviewPath = '/admin/review'
 
 const humanRestoreSteps = [
   {
-    title: '1. Pay for one photo',
-    description: 'Complete secure checkout for one important old photo.',
+    title: '1. Upload one photo',
+    description: 'Attach the best scan or original image and add repair notes.',
+  },
+  {
+    title: '2. Secure checkout',
+    description:
+      'Pay with Lemon Squeezy. Your checkout email becomes delivery email.',
+  },
+  {
+    title: '3. AI draft',
+    description:
+      'We create a conservative restoration draft from your source photo.',
+  },
+  {
+    title: '4. Human delivery',
+    description: 'A human reviews the result before private email delivery.',
   },
 ]
 
@@ -162,7 +177,7 @@ const homePageDescription =
 const humanRestoreSuccessTitle =
   'Thank You - MemoryFix AI Human-assisted Restore'
 const humanRestoreSuccessDescription =
-  'Thank you for booking MemoryFix AI Human-assisted Restore. Use the upload form on this page to send your photo and repair notes.'
+  'Thank you for booking MemoryFix AI Human-assisted Restore. Track payment confirmation, AI draft, human review, and private email delivery.'
 const humanRestoreSecureUploadTitle =
   'Secure Upload - MemoryFix AI Human-assisted Restore'
 const humanRestoreSecureUploadDescription =
@@ -177,11 +192,10 @@ type DirectSecureAccessResponse = {
   uploadUrl?: string
 }
 
-type HumanRestoreCheckoutResponse = {
-  checkoutRef?: string
-  checkoutUrl?: string
+type HumanRestoreOrderResponse = {
   error?: string
   ok?: boolean
+  order?: HumanRestoreLocalOrder
 }
 
 type LemonSqueezyEvent = {
@@ -297,11 +311,19 @@ function normalizeCheckoutEmail(value: unknown) {
     .toLowerCase()
 }
 
+function looksLikeUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  )
+}
+
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
 
   const [showAbout, setShowAbout] = useState(false)
+  const [showHumanRestoreCheckout, setShowHumanRestoreCheckout] =
+    useState(false)
   const lemonSqueezySetupRef = useRef(false)
   const modalRef = useRef(null)
 
@@ -321,6 +343,12 @@ function App() {
   const [inlineSecureOrder, setInlineSecureOrder] = useState<
     SecureOrderResponse['order'] | null
   >(null)
+  const [humanRestoreOrderStatus, setHumanRestoreOrderStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle')
+  const [humanRestoreOrderError, setHumanRestoreOrderError] = useState('')
+  const [humanRestoreOrder, setHumanRestoreOrder] =
+    useState<HumanRestoreLocalOrder | null>(null)
   const [browserCheckoutContext] = useState(() =>
     readHumanRestoreCheckoutContext()
   )
@@ -337,18 +365,27 @@ function App() {
     currentSearchParams.get('customer_email') ||
     currentSearchParams.get('email') ||
     ''
+  const queryOrderId = currentSearchParams.get('order_id') || ''
+  const queryCheckoutRef = currentSearchParams.get('checkout_ref') || ''
+  const localHumanRestoreOrderId = looksLikeUuid(queryOrderId)
+    ? queryOrderId
+    : browserCheckoutContext.pendingOrderId || ''
+  const localHumanRestoreCheckoutRef =
+    queryCheckoutRef || browserCheckoutContext.pendingCheckoutRef || ''
+  const hasLocalHumanRestoreOrder = Boolean(localHumanRestoreOrderId)
 
   const maskedCheckoutEmail = maskEmailAddress(
     defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
   )
-  const directAccessOrderId =
-    currentSearchParams.get('order_id') || browserCheckoutContext.storedOrderId
+  const directAccessOrderId = hasLocalHumanRestoreOrder
+    ? ''
+    : queryOrderId || browserCheckoutContext.storedOrderId
   const directAccessOrderIdentifier =
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('orderIdentifier') ||
     ''
   const directAccessCheckoutRef =
-    currentSearchParams.get('checkout_ref') ||
+    (hasLocalHumanRestoreOrder ? '' : queryCheckoutRef) ||
     (isHumanRestoreSuccessPage
       ? browserCheckoutContext.pendingCheckoutRef || ''
       : '')
@@ -448,9 +485,114 @@ function App() {
   ])
 
   useEffect(() => {
+    if (!isHumanRestoreSuccessPage || !hasLocalHumanRestoreOrder) {
+      setHumanRestoreOrderStatus('idle')
+      setHumanRestoreOrderError('')
+      setHumanRestoreOrder(null)
+      return () => undefined
+    }
+
+    let isActive = true
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    async function loadOrder() {
+      if (!isActive) {
+        return
+      }
+
+      setHumanRestoreOrderStatus(currentStatus =>
+        currentStatus === 'ready' ? 'ready' : 'loading'
+      )
+      setHumanRestoreOrderError('')
+
+      try {
+        const requestUrl = new URL(
+          '/api/human-restore-order',
+          window.location.origin
+        )
+        requestUrl.searchParams.set('orderId', localHumanRestoreOrderId)
+
+        if (localHumanRestoreCheckoutRef) {
+          requestUrl.searchParams.set(
+            'checkoutRef',
+            localHumanRestoreCheckoutRef
+          )
+        }
+
+        const response = await fetch(requestUrl.toString())
+        const responseBody = (await response
+          .json()
+          .catch(() => null)) as HumanRestoreOrderResponse | null
+
+        if (!isActive) {
+          return
+        }
+
+        if (!response.ok || !responseBody?.order) {
+          throw new Error(
+            responseBody?.error || 'The order status could not be loaded yet.'
+          )
+        }
+
+        setHumanRestoreOrder(responseBody.order)
+        setHumanRestoreOrderStatus('ready')
+
+        const shouldKeepPolling = [
+          'pending_payment',
+          'paid',
+          'uploaded',
+          'processing',
+          'ai_queued',
+        ].includes(responseBody.order.status)
+
+        if (shouldKeepPolling) {
+          retryTimer = setTimeout(loadOrder, 4000)
+        } else {
+          clearHumanRestoreStoredCheckoutContext()
+        }
+      } catch (error) {
+        if (!isActive) {
+          return
+        }
+
+        setHumanRestoreOrderStatus('error')
+        setHumanRestoreOrderError(
+          error instanceof Error
+            ? error.message
+            : 'The order status could not be loaded yet.'
+        )
+        retryTimer = setTimeout(loadOrder, 5000)
+      }
+    }
+
+    loadOrder()
+
+    return () => {
+      isActive = false
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+      }
+    }
+  }, [
+    hasLocalHumanRestoreOrder,
+    isHumanRestoreSuccessPage,
+    localHumanRestoreCheckoutRef,
+    localHumanRestoreOrderId,
+  ])
+
+  useEffect(() => {
     let isActive = true
 
     if (!isHumanRestoreSuccessPage) {
+      setDirectUploadStatus('idle')
+      setDirectUploadUrl('')
+      setDirectUploadToken('')
+      return () => {
+        isActive = false
+      }
+    }
+
+    if (hasLocalHumanRestoreOrder) {
       setDirectUploadStatus('idle')
       setDirectUploadUrl('')
       setDirectUploadToken('')
@@ -580,6 +722,7 @@ function App() {
     directAccessOrderId,
     directAccessOrderIdentifier,
     browserCheckoutContext.hasPendingCheckout,
+    hasLocalHumanRestoreOrder,
     isHumanRestoreSuccessPage,
     secureUploadToken,
   ])
@@ -699,8 +842,9 @@ function App() {
           const paidCheckoutEmail = normalizeCheckoutEmail(
             orderAttributes.user_email
           )
-          const pendingCheckoutRef =
-            sessionStorage.getItem('pending_checkout_ref') || ''
+          const pendingContext = readHumanRestoreCheckoutContext()
+          const pendingCheckoutRef = pendingContext.pendingCheckoutRef || ''
+          const pendingOrderId = pendingContext.pendingOrderId || ''
 
           try {
             localStorage.setItem(
@@ -721,8 +865,14 @@ function App() {
             window.location.origin
           )
 
-          if (paidOrderId) {
+          if (pendingOrderId) {
+            successUrl.searchParams.set('order_id', pendingOrderId)
+          } else if (paidOrderId) {
             successUrl.searchParams.set('order_id', paidOrderId)
+          }
+
+          if (pendingOrderId && paidOrderId) {
+            successUrl.searchParams.set('provider_order_id', paidOrderId)
           }
 
           if (paidOrderIdentifier) {
@@ -733,7 +883,7 @@ function App() {
             successUrl.searchParams.set('email', paidCheckoutEmail)
           }
 
-          if (!paidOrderId && pendingCheckoutRef) {
+          if (pendingCheckoutRef) {
             successUrl.searchParams.set('checkout_ref', pendingCheckoutRef)
           }
 
@@ -753,56 +903,18 @@ function App() {
     return true
   }
 
-  async function handleLaunchHumanRestoreCheckout() {
-    if (checkoutLaunchStatus === 'loading') {
-      return
-    }
-
-    setCheckoutLaunchStatus('loading')
+  function handleLaunchHumanRestoreCheckout() {
     setCheckoutLaunchError('')
+    setCheckoutLaunchStatus('idle')
+    setShowHumanRestoreCheckout(true)
+  }
 
-    let checkoutUrl = ''
-    let checkoutRef = ''
-
-    try {
-      const response = await fetch('/api/human-restore-checkout', {
-        method: 'POST',
-      })
-      const responseBody = (await response
-        .json()
-        .catch(() => null)) as HumanRestoreCheckoutResponse | null
-
-      if (response.ok && responseBody?.checkoutUrl) {
-        checkoutUrl = responseBody.checkoutUrl
-        checkoutRef = responseBody.checkoutRef || ''
-      } else if (legacyHumanRestoreUrl) {
-        checkoutRef = createHumanRestoreCheckoutRef()
-        checkoutUrl = appendHumanRestoreCheckoutRef(
-          legacyHumanRestoreUrl,
-          checkoutRef
-        )
-      } else {
-        throw new Error(
-          responseBody?.error || 'Secure checkout could not be created.'
-        )
-      }
-    } catch (error) {
-      if (legacyHumanRestoreUrl) {
-        checkoutRef = createHumanRestoreCheckoutRef()
-        checkoutUrl = appendHumanRestoreCheckoutRef(
-          legacyHumanRestoreUrl,
-          checkoutRef
-        )
-      } else {
-        setCheckoutLaunchStatus('error')
-        setCheckoutLaunchError(
-          error instanceof Error
-            ? error.message
-            : 'Secure checkout could not be created.'
-        )
-        return
-      }
-    }
+  function handleHumanRestoreCheckoutCreated(payload: {
+    checkoutRef: string
+    checkoutUrl: string
+    orderId: string
+  }) {
+    const { checkoutRef, checkoutUrl, orderId } = payload
 
     if (!checkoutUrl) {
       setCheckoutLaunchStatus('error')
@@ -810,12 +922,14 @@ function App() {
       return
     }
 
-    rememberHumanRestorePendingCheckout({ checkoutRef })
+    rememberHumanRestorePendingCheckout({ checkoutRef, orderId })
+    setShowHumanRestoreCheckout(false)
 
     if (ensureLemonSqueezySetup()) {
       trackProductEvent('click_human_restore', {
         checkout_ref_created: Boolean(checkoutRef),
         destination: 'lemonjs_overlay',
+        local_order_created: Boolean(orderId),
       })
       window.LemonSqueezy?.Url.Open(checkoutUrl)
       setCheckoutLaunchStatus('idle')
@@ -825,6 +939,7 @@ function App() {
     trackProductEvent('click_human_restore', {
       checkout_ref_created: Boolean(checkoutRef),
       destination: 'direct_redirect',
+      local_order_created: Boolean(orderId),
     })
     window.location.assign(checkoutUrl)
   }
@@ -1018,160 +1133,171 @@ function App() {
         {mainView === 'secure-upload' && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
-        {mainView === 'success' && (
-          <div className="mx-auto flex max-w-7xl flex-col px-4 py-8 md:px-8 md:py-10">
-            <section className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
-              <div className="relative overflow-hidden rounded-[2rem] bg-[#211915] p-8 text-white shadow-2xl shadow-[#211915]/20 md:p-10">
-                <div className="absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#f3c16f]/20 blur-3xl" />
-                <div className="absolute -bottom-20 left-10 h-52 w-52 rounded-full bg-[#8a4f1d]/20 blur-3xl" />
-                <div className="relative">
-                  <div className="mb-6 inline-flex rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-[#f3c16f]">
-                    Human-reviewed restoration
-                  </div>
-                  <h1 className="max-w-3xl text-4xl font-black tracking-tight sm:text-6xl">
-                    {successHeroTitle}
-                  </h1>
-                  <p className="mt-5 max-w-2xl text-base leading-8 text-[#f7eadb] md:text-lg">
-                    {successHeroDescription}
-                  </p>
-
-                  <div className="mt-7 grid gap-3">
-                    {humanRestorePostPaymentSteps.map((step, index) => (
-                      <div
-                        key={step.label}
-                        className="grid grid-cols-[2.5rem_1fr] gap-4 rounded-[1.25rem] border border-white/10 bg-white/[0.07] p-4"
-                      >
-                        <div
-                          className={
-                            index < 2
-                              ? 'flex h-10 w-10 items-center justify-center rounded-full bg-[#f3c16f] text-sm font-black text-[#211915]'
-                              : 'flex h-10 w-10 items-center justify-center rounded-full border border-white/20 text-sm font-black text-[#f6eadb]'
-                          }
-                        >
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="text-sm font-black text-white">
-                            {step.title}
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-[#e8d6c3]">
-                            {step.description}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-7 flex flex-wrap gap-2">
-                    <div className="rounded-full border border-[#b8d99f]/30 bg-[#f4ffe8] px-4 py-2 text-xs font-black text-[#355322]">
-                      Paid order confirmed
+        {mainView === 'success' &&
+          (hasLocalHumanRestoreOrder ? (
+            <HumanRestoreSuccessStatusPage
+              errorMessage={humanRestoreOrderError}
+              order={humanRestoreOrder}
+              status={humanRestoreOrderStatus}
+            />
+          ) : (
+            <div className="mx-auto flex max-w-7xl flex-col px-4 py-8 md:px-8 md:py-10">
+              <section className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
+                <div className="relative overflow-hidden rounded-[2rem] bg-[#211915] p-8 text-white shadow-2xl shadow-[#211915]/20 md:p-10">
+                  <div className="absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#f3c16f]/20 blur-3xl" />
+                  <div className="absolute -bottom-20 left-10 h-52 w-52 rounded-full bg-[#8a4f1d]/20 blur-3xl" />
+                  <div className="relative">
+                    <div className="mb-6 inline-flex rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-[#f3c16f]">
+                      Human-reviewed restoration
                     </div>
-                    {maskedCheckoutEmail && (
-                      <div className="rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold text-[#f6eadb]">
-                        {maskedCheckoutEmail}
+                    <h1 className="max-w-3xl text-4xl font-black tracking-tight sm:text-6xl">
+                      {successHeroTitle}
+                    </h1>
+                    <p className="mt-5 max-w-2xl text-base leading-8 text-[#f7eadb] md:text-lg">
+                      {successHeroDescription}
+                    </p>
+
+                    <div className="mt-7 grid gap-3">
+                      {humanRestorePostPaymentSteps.map((step, index) => (
+                        <div
+                          key={step.label}
+                          className="grid grid-cols-[2.5rem_1fr] gap-4 rounded-[1.25rem] border border-white/10 bg-white/[0.07] p-4"
+                        >
+                          <div
+                            className={
+                              index < 2
+                                ? 'flex h-10 w-10 items-center justify-center rounded-full bg-[#f3c16f] text-sm font-black text-[#211915]'
+                                : 'flex h-10 w-10 items-center justify-center rounded-full border border-white/20 text-sm font-black text-[#f6eadb]'
+                            }
+                          >
+                            {index + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm font-black text-white">
+                              {step.title}
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-[#e8d6c3]">
+                              {step.description}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-7 flex flex-wrap gap-2">
+                      <div className="rounded-full border border-[#b8d99f]/30 bg-[#f4ffe8] px-4 py-2 text-xs font-black text-[#355322]">
+                        Paid order confirmed
                       </div>
-                    )}
-                    {defaultOrderReference && (
-                      <div className="max-w-full truncate rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold text-[#f6eadb]">
-                        Order linked
-                      </div>
-                    )}
+                      {maskedCheckoutEmail && (
+                        <div className="rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold text-[#f6eadb]">
+                          {maskedCheckoutEmail}
+                        </div>
+                      )}
+                      {defaultOrderReference && (
+                        <div className="max-w-full truncate rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold text-[#f6eadb]">
+                          Order linked
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div id="direct-upload-form" className="scroll-mt-28">
-                {(directUploadStatus === 'idle' || isInlineUploadPreparing) && (
-                  <section className="rounded-[2rem] border border-[#e1c8a8] bg-white p-6 shadow-2xl shadow-[#8a4f1d]/15 md:p-8">
-                    <p className="text-sm font-black uppercase tracking-[0.24em] text-[#9b6b3c]">
-                      Preparing upload
-                    </p>
-                    <h2 className="mt-3 text-3xl font-black tracking-tight text-[#211915]">
-                      We are linking this page to your paid order.
-                    </h2>
-                    <p className="mt-4 leading-7 text-[#66574d]">
-                      This usually takes a few seconds. If the direct upload
-                      cannot be attached, the page will switch to the backup
-                      upload form automatically. Do not pay again.
-                    </p>
-                    <div className="mt-6 grid gap-3">
-                      <div className="h-3 overflow-hidden rounded-full bg-[#f2dfc3]">
-                        <div className="h-full w-2/3 rounded-full bg-[#211915]" />
-                      </div>
-                      <p className="text-sm font-bold text-[#5b4a40]">
-                        Verifying checkout and preparing your secure upload
-                        card...
+                <div id="direct-upload-form" className="scroll-mt-28">
+                  {(directUploadStatus === 'idle' ||
+                    isInlineUploadPreparing) && (
+                    <section className="rounded-[2rem] border border-[#e1c8a8] bg-white p-6 shadow-2xl shadow-[#8a4f1d]/15 md:p-8">
+                      <p className="text-sm font-black uppercase tracking-[0.24em] text-[#9b6b3c]">
+                        Preparing upload
                       </p>
-                    </div>
-                  </section>
-                )}
+                      <h2 className="mt-3 text-3xl font-black tracking-tight text-[#211915]">
+                        We are linking this page to your paid order.
+                      </h2>
+                      <p className="mt-4 leading-7 text-[#66574d]">
+                        This usually takes a few seconds. If the direct upload
+                        cannot be attached, the page will switch to the backup
+                        upload form automatically. Do not pay again.
+                      </p>
+                      <div className="mt-6 grid gap-3">
+                        <div className="h-3 overflow-hidden rounded-full bg-[#f2dfc3]">
+                          <div className="h-full w-2/3 rounded-full bg-[#211915]" />
+                        </div>
+                        <p className="text-sm font-bold text-[#5b4a40]">
+                          Verifying checkout and preparing your secure upload
+                          card...
+                        </p>
+                      </div>
+                    </section>
+                  )}
 
-                {isInlineSecureUploadReady && inlineSecureOrder && (
-                  <HumanRestoreUploadForm
-                    defaultEmail=""
-                    defaultOrderReference=""
-                    presentation="task-card"
-                    secureOrderSummary={{
-                      checkoutEmailMasked:
-                        inlineSecureOrder.checkoutEmailMasked,
-                      orderNumber: inlineSecureOrder.orderNumber,
-                      productName: inlineSecureOrder.productName,
-                    }}
-                    secureUploadToken={directUploadToken}
-                  />
-                )}
+                  {isInlineSecureUploadReady && inlineSecureOrder && (
+                    <HumanRestoreUploadForm
+                      defaultEmail=""
+                      defaultOrderReference=""
+                      presentation="task-card"
+                      secureOrderSummary={{
+                        checkoutEmailMasked:
+                          inlineSecureOrder.checkoutEmailMasked,
+                        orderNumber: inlineSecureOrder.orderNumber,
+                        productName: inlineSecureOrder.productName,
+                      }}
+                      secureUploadToken={directUploadToken}
+                    />
+                  )}
 
-                {shouldAutoFallbackToBackupForm && !isInlineUploadPreparing && (
-                  <HumanRestoreUploadForm
-                    defaultEmail={defaultCheckoutEmail}
-                    defaultOrderReference={defaultOrderReference}
-                    presentation="task-card"
-                  />
-                )}
-              </div>
-            </section>
+                  {shouldAutoFallbackToBackupForm &&
+                    !isInlineUploadPreparing && (
+                      <HumanRestoreUploadForm
+                        defaultEmail={defaultCheckoutEmail}
+                        defaultOrderReference={defaultOrderReference}
+                        presentation="task-card"
+                      />
+                    )}
+                </div>
+              </section>
 
-            <section className="mt-6 grid gap-4 md:grid-cols-3">
-              {humanRestoreServiceHighlights.map(card => (
-                <article
-                  key={card.title}
-                  className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/85 p-6 shadow-lg shadow-[#8a4f1d]/5"
-                >
-                  <h2 className="text-lg font-black text-[#211915]">
-                    {card.title}
-                  </h2>
-                  <p className="mt-3 text-sm leading-6 text-[#66574d]">
-                    {card.description}
-                  </p>
-                </article>
-              ))}
-            </section>
-
-            <section className="mt-6 grid gap-4 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-6 shadow-xl shadow-[#8a4f1d]/10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center md:p-8">
-              <div>
-                <p className="text-sm font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
-                  Need to come back later?
-                </p>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-[#66574d]">
-                  {maskedCheckoutEmail
-                    ? `The secure backup link is also waiting in ${maskedCheckoutEmail}. Do not pay again if direct upload is temporarily unavailable here.`
-                    : 'The same secure upload link is also in your checkout email as backup access. Do not pay again if direct upload is temporarily unavailable here.'}
-                </p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                {humanRestoreTrustNotes.map(note => (
+              <section className="mt-6 grid gap-4 md:grid-cols-3">
+                {humanRestoreServiceHighlights.map(card => (
                   <article
-                    key={note.title}
-                    className="rounded-[1.25rem] border border-[#e6d2b7] bg-[#fffaf3] p-4 text-sm leading-6 text-[#66574d]"
+                    key={card.title}
+                    className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/85 p-6 shadow-lg shadow-[#8a4f1d]/5"
                   >
-                    <h2 className="font-black text-[#211915]">{note.title}</h2>
-                    <p className="mt-2">{note.description}</p>
+                    <h2 className="text-lg font-black text-[#211915]">
+                      {card.title}
+                    </h2>
+                    <p className="mt-3 text-sm leading-6 text-[#66574d]">
+                      {card.description}
+                    </p>
                   </article>
                 ))}
-              </div>
-            </section>
-          </div>
-        )}
+              </section>
+
+              <section className="mt-6 grid gap-4 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-6 shadow-xl shadow-[#8a4f1d]/10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center md:p-8">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                    Need to come back later?
+                  </p>
+                  <p className="mt-3 max-w-3xl text-sm leading-7 text-[#66574d]">
+                    {maskedCheckoutEmail
+                      ? `The secure backup link is also waiting in ${maskedCheckoutEmail}. Do not pay again if direct upload is temporarily unavailable here.`
+                      : 'The same secure upload link is also in your checkout email as backup access. Do not pay again if direct upload is temporarily unavailable here.'}
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {humanRestoreTrustNotes.map(note => (
+                    <article
+                      key={note.title}
+                      className="rounded-[1.25rem] border border-[#e6d2b7] bg-[#fffaf3] p-4 text-sm leading-6 text-[#66574d]"
+                    >
+                      <h2 className="font-black text-[#211915]">
+                        {note.title}
+                      </h2>
+                      <p className="mt-2">{note.description}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ))}
         {mainView === 'home' && (
           <div className="mx-auto flex max-w-7xl flex-col px-4 py-10 md:px-8">
             <section className="grid items-center gap-10 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
@@ -1271,11 +1397,11 @@ function App() {
                 <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
                   For one important old photo that deserves extra care. Local
                   repair stays free and private. If you choose Human-assisted
-                  Restore, upload happens only after explicit checkout, then we
-                  combine AI base restoration with human review and manual
-                  touch-up.
+                  Restore, we temporarily save the one photo you select, open
+                  secure checkout, then start AI draft plus human review after
+                  payment is confirmed.
                 </p>
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {humanRestoreSteps.map(step => (
                     <div
                       key={step.title}
@@ -1299,13 +1425,13 @@ function App() {
                   className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
                 >
                   {checkoutLaunchStatus === 'loading'
-                    ? 'Opening secure checkout...'
-                    : 'Book Human Restore'}
+                    ? 'Preparing secure checkout...'
+                    : 'Start Human Restore'}
                 </button>
                 <p className="text-sm leading-6 text-[#66574d] md:text-right">
                   Important: the free local repair tool does not upload photos.
-                  This paid service requires upload only after you explicitly
-                  choose Human-assisted Restore.
+                  This paid service uploads only the one photo you explicitly
+                  submit for Human-assisted Restore.
                 </p>
                 {checkoutLaunchStatus === 'error' && (
                   <div className="rounded-[1.5rem] border border-[#f0b5a9] bg-[#fff1ed] px-4 py-4 text-sm leading-6 text-[#8a2f1d] md:text-right">
@@ -1487,6 +1613,16 @@ function App() {
         )}
       </main>
 
+      {showHumanRestoreCheckout && (
+        <Modal>
+          <HumanRestoreCheckoutForm
+            onCancel={() => {
+              setShowHumanRestoreCheckout(false)
+            }}
+            onCheckoutCreated={handleHumanRestoreCheckoutCreated}
+          />
+        </Modal>
+      )}
       {showAbout && (
         <Modal>
           <div ref={modalRef} className="max-w-3xl space-y-5 text-lg">
