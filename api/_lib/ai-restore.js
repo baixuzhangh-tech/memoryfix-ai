@@ -1,5 +1,6 @@
 import {
   createSignedUrl,
+  deleteObject,
   downloadObject,
   getHumanRestoreBuckets,
   updateJob,
@@ -36,8 +37,14 @@ function getProvider(requestedProvider) {
     return requestedProvider
   }
 
-  if (process.env.AI_RESTORE_PROVIDER) {
-    return process.env.AI_RESTORE_PROVIDER
+  const configuredProvider = process.env.AI_RESTORE_PROVIDER
+
+  if (configuredProvider === 'fal' && process.env.FAL_KEY) {
+    return 'fal'
+  }
+
+  if (configuredProvider === 'openai' && process.env.OPENAI_API_KEY) {
+    return 'openai'
   }
 
   if (process.env.FAL_KEY) {
@@ -293,9 +300,9 @@ async function callFal({ job, prompt }) {
     return queuedOrImmediate
   }
 
-  const maxPolls = Number(process.env.FAL_RESTORE_MAX_POLLS) || 8
+  const maxPolls = Number(process.env.FAL_RESTORE_MAX_POLLS) || 2
   const pollIntervalMs =
-    Number(process.env.FAL_RESTORE_POLL_INTERVAL_MS) || 1500
+    Number(process.env.FAL_RESTORE_POLL_INTERVAL_MS) || 1000
 
   for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     await wait(pollIntervalMs)
@@ -330,6 +337,18 @@ async function finishJobWithResult({ job, prompt, result }) {
     data: result.buffer,
     path: resultPath,
   })
+
+  if (
+    job.result_storage_bucket &&
+    job.result_storage_path &&
+    (job.result_storage_bucket !== buckets.results ||
+      job.result_storage_path !== resultPath)
+  ) {
+    await deleteObject({
+      bucket: job.result_storage_bucket,
+      path: job.result_storage_path,
+    }).catch(() => null)
+  }
 
   return updateJob(job.id, {
     ai_error: null,
