@@ -60,38 +60,63 @@ const featureCards = [
   },
 ]
 
+const freeLocalRepairLimit = 3
+const localRepairPackCredits = 10
+const localRepairPackPrice = '$9.90'
+const humanRestorePrice = '$19.90'
+const localRepairUsageStorageKey = 'memoryfix_local_repair_usage_v1'
+const pendingLocalRepairPackCheckoutKey =
+  'memoryfix_pending_local_repair_pack_checkout_v1'
+
+type PricingPlanKind = 'free-local' | 'local-pack' | 'human-restore'
+
+type LocalRepairUsage = {
+  freeUsed: number
+  paidCredits: number
+  totalStarted: number
+  updatedAt: number
+}
+
 const pricingCards = [
   {
+    kind: 'free-local' as PricingPlanKind,
     name: 'Free Local',
     price: '$0',
-    description: 'Private browser repair for small damage.',
+    description: `Try ${freeLocalRepairLimit} private browser repairs for small damage before paying.`,
     features: [
-      'No upload for local repair',
+      `${freeLocalRepairLimit} local photo starts included`,
       'Manual scratch and stain repair',
       'Private 4x upscaling',
     ],
+    cta: 'Try free local repair',
+    badge: 'Private trial',
   },
   {
-    name: 'Family Pack',
-    price: '$9',
-    description:
-      '10 restore credits for HD / Pro workflows. Best for trying a few important memories.',
+    kind: 'local-pack' as PricingPlanKind,
+    name: 'Local Pack',
+    price: localRepairPackPrice,
+    description: `${localRepairPackCredits} extra browser-local repair credits. Your photos still stay on your device.`,
     features: [
-      '10 restore credits',
-      'HD / Pro workflow access',
+      `${localRepairPackCredits} local photo starts`,
+      'No cloud upload for local repair',
       'Credits do not expire',
     ],
+    cta: 'Buy 10 local repairs',
+    badge: 'Most private',
   },
   {
-    name: 'Album Pack',
-    price: '$19',
+    kind: 'human-restore' as PricingPlanKind,
+    name: 'Human-assisted Restore',
+    price: humanRestorePrice,
     description:
-      '30 restore credits for family albums. Best for scanning and restoring a small collection.',
+      'One important photo restored with a cloud AI draft plus human review before delivery.',
     features: [
-      '30 restore credits',
-      'Batch album workflow priority',
-      'Credits do not expire',
+      '1 cloud AI + human reviewed photo',
+      'Upload only after you choose this workflow',
+      'Private email delivery',
     ],
+    cta: 'Start Human Restore',
+    badge: 'Best result',
   },
 ]
 
@@ -145,6 +170,11 @@ const oldPhotoSamples = [
 const legacyHumanRestoreUrl =
   import.meta.env.VITE_EARLY_ACCESS_URL ||
   'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268'
+
+const localRepairPackCheckoutUrl =
+  import.meta.env.VITE_LOCAL_REPAIR_PACK_URL ||
+  import.meta.env.VITE_LOCAL_PACK_CHECKOUT_URL ||
+  ''
 
 const humanRestoreSecureUploadPath = '/human-restore/upload'
 const humanRestoreSuccessPath = '/human-restore/success'
@@ -318,17 +348,187 @@ function looksLikeUuid(value: string) {
   )
 }
 
+function normalizeLocalRepairUsage(
+  value?: Partial<LocalRepairUsage> | null
+): LocalRepairUsage {
+  return {
+    freeUsed: Math.max(0, Number(value?.freeUsed || 0)),
+    paidCredits: Math.max(0, Number(value?.paidCredits || 0)),
+    totalStarted: Math.max(0, Number(value?.totalStarted || 0)),
+    updatedAt: Math.max(0, Number(value?.updatedAt || 0)),
+  }
+}
+
+function readLocalRepairUsage(): LocalRepairUsage {
+  if (typeof window === 'undefined') {
+    return normalizeLocalRepairUsage()
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(localRepairUsageStorageKey)
+    return normalizeLocalRepairUsage(rawValue ? JSON.parse(rawValue) : null)
+  } catch {
+    return normalizeLocalRepairUsage()
+  }
+}
+
+function writeLocalRepairUsage(usage: LocalRepairUsage) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      localRepairUsageStorageKey,
+      JSON.stringify(usage)
+    )
+  } catch {
+    // Local repair still works in private browsing, but quotas cannot persist.
+  }
+}
+
+function getFreeLocalRepairsRemaining(usage: LocalRepairUsage) {
+  return Math.max(0, freeLocalRepairLimit - usage.freeUsed)
+}
+
+function consumeLocalRepairCredit() {
+  const currentUsage = readLocalRepairUsage()
+  const freeRemaining = getFreeLocalRepairsRemaining(currentUsage)
+
+  if (freeRemaining > 0) {
+    const nextUsage = normalizeLocalRepairUsage({
+      ...currentUsage,
+      freeUsed: currentUsage.freeUsed + 1,
+      totalStarted: currentUsage.totalStarted + 1,
+      updatedAt: Date.now(),
+    })
+    writeLocalRepairUsage(nextUsage)
+    return {
+      allowed: true,
+      source: 'free_local',
+      usage: nextUsage,
+    }
+  }
+
+  if (currentUsage.paidCredits > 0) {
+    const nextUsage = normalizeLocalRepairUsage({
+      ...currentUsage,
+      paidCredits: currentUsage.paidCredits - 1,
+      totalStarted: currentUsage.totalStarted + 1,
+      updatedAt: Date.now(),
+    })
+    writeLocalRepairUsage(nextUsage)
+    return {
+      allowed: true,
+      source: 'paid_local_credit',
+      usage: nextUsage,
+    }
+  }
+
+  return {
+    allowed: false,
+    source: 'limit_reached',
+    usage: currentUsage,
+  }
+}
+
+function addLocalRepairPackCredits() {
+  const currentUsage = readLocalRepairUsage()
+  const nextUsage = normalizeLocalRepairUsage({
+    ...currentUsage,
+    paidCredits: currentUsage.paidCredits + localRepairPackCredits,
+    updatedAt: Date.now(),
+  })
+  writeLocalRepairUsage(nextUsage)
+  return nextUsage
+}
+
+function readPendingLocalRepairPackCheckout() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(
+      pendingLocalRepairPackCheckoutKey
+    )
+    const pendingCheckout = rawValue ? JSON.parse(rawValue) : null
+    const startedAt = Number(pendingCheckout?.startedAt || 0)
+    const isFresh = startedAt > Date.now() - 1000 * 60 * 60 * 2
+    return Boolean(pendingCheckout?.plan === 'local_repair_pack' && isFresh)
+  } catch {
+    return false
+  }
+}
+
+function rememberPendingLocalRepairPackCheckout() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      pendingLocalRepairPackCheckoutKey,
+      JSON.stringify({
+        credits: localRepairPackCredits,
+        plan: 'local_repair_pack',
+        startedAt: Date.now(),
+      })
+    )
+  } catch {
+    // Session storage is optional; the UI will show an error if checkout fails.
+  }
+}
+
+function clearPendingLocalRepairPackCheckout() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.sessionStorage.removeItem(pendingLocalRepairPackCheckoutKey)
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function withLocalPackCheckoutMetadata(checkoutUrl: string) {
+  try {
+    const url = new URL(checkoutUrl)
+    url.searchParams.set(
+      'checkout[custom][memoryfix_plan]',
+      'local_repair_pack'
+    )
+    url.searchParams.set(
+      'checkout[custom][memoryfix_credits]',
+      String(localRepairPackCredits)
+    )
+    return url.toString()
+  } catch {
+    return checkoutUrl
+  }
+}
+
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
+  const [localRepairUsage, setLocalRepairUsage] = useState(() =>
+    readLocalRepairUsage()
+  )
 
   const [showAbout, setShowAbout] = useState(false)
   const [showHumanRestoreCheckout, setShowHumanRestoreCheckout] =
+    useState(false)
+  const [showLocalRepairLimitModal, setShowLocalRepairLimitModal] =
     useState(false)
   const lemonSqueezySetupRef = useRef(false)
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
+  const [localPackCheckoutError, setLocalPackCheckoutError] = useState('')
+  const [localPackCheckoutStatus, setLocalPackCheckoutStatus] = useState<
+    'idle' | 'opening' | 'success' | 'error'
+  >('idle')
   const [checkoutLaunchError, setCheckoutLaunchError] = useState('')
   const [checkoutLaunchStatus, setCheckoutLaunchStatus] = useState<
     'idle' | 'loading' | 'error'
@@ -375,6 +575,11 @@ function App() {
   const localHumanRestoreCheckoutRef =
     queryCheckoutRef || browserCheckoutContext.pendingCheckoutRef || ''
   const hasLocalHumanRestoreOrder = Boolean(localHumanRestoreOrderId)
+  const freeLocalRepairsRemaining =
+    getFreeLocalRepairsRemaining(localRepairUsage)
+  const paidLocalRepairCreditsRemaining = localRepairUsage.paidCredits
+  const canStartLocalRepair =
+    freeLocalRepairsRemaining > 0 || paidLocalRepairCreditsRemaining > 0
 
   const maskedCheckoutEmail = maskEmailAddress(
     defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
@@ -492,6 +697,19 @@ function App() {
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
   ])
+
+  useEffect(() => {
+    function handleStorageChange(event: StorageEvent) {
+      if (event.key === localRepairUsageStorageKey) {
+        setLocalRepairUsage(readLocalRepairUsage())
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+    }
+  }, [])
 
   useEffect(() => {
     if (!isHumanRestoreSuccessPage || !hasLocalHumanRestoreOrder) {
@@ -854,6 +1072,28 @@ function App() {
           const pendingContext = readHumanRestoreCheckoutContext()
           const pendingCheckoutRef = pendingContext.pendingCheckoutRef || ''
           const pendingOrderId = pendingContext.pendingOrderId || ''
+          const isLocalRepairPackCheckout = readPendingLocalRepairPackCheckout()
+
+          if (isLocalRepairPackCheckout) {
+            clearPendingLocalRepairPackCheckout()
+            const nextUsage = addLocalRepairPackCredits()
+            setLocalRepairUsage(nextUsage)
+            setLocalPackCheckoutStatus('success')
+            setLocalPackCheckoutError('')
+            setShowLocalRepairLimitModal(false)
+            window.LemonSqueezy?.Url.Close?.()
+            trackProductEvent('complete_local_repair_pack_checkout', {
+              added_credits: localRepairPackCredits,
+              has_order_id: Boolean(paidOrderId),
+              paid_credits_remaining: nextUsage.paidCredits,
+            })
+            window.setTimeout(() => {
+              document
+                .getElementById('local-repair-start')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }, 250)
+            return
+          }
 
           try {
             localStorage.setItem(
@@ -912,7 +1152,65 @@ function App() {
     return true
   }
 
+  function scrollToLocalRepairStart() {
+    document
+      .getElementById('local-repair-start')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  function handleLaunchLocalPackCheckout() {
+    setLocalPackCheckoutError('')
+    setLocalPackCheckoutStatus('opening')
+
+    if (!localRepairPackCheckoutUrl) {
+      setLocalPackCheckoutStatus('error')
+      setLocalPackCheckoutError(
+        'Local Pack checkout is not configured yet. Add VITE_LOCAL_REPAIR_PACK_URL in Vercel with the $9.90 Lemon Squeezy checkout URL.'
+      )
+      trackProductEvent('click_local_pack_checkout', {
+        destination: 'missing_checkout_url',
+      })
+      return
+    }
+
+    if (!ensureLemonSqueezySetup()) {
+      setLocalPackCheckoutStatus('error')
+      setLocalPackCheckoutError(
+        'Secure checkout could not load in this browser. Please refresh, disable checkout-blocking extensions, and try again.'
+      )
+      trackProductEvent('click_local_pack_checkout', {
+        destination: 'lemonjs_unavailable',
+      })
+      return
+    }
+
+    rememberPendingLocalRepairPackCheckout()
+    trackProductEvent('click_local_pack_checkout', {
+      credits: localRepairPackCredits,
+      destination: 'lemonjs_overlay',
+    })
+    window.LemonSqueezy?.Url.Open(
+      withLocalPackCheckoutMetadata(localRepairPackCheckoutUrl)
+    )
+    setLocalPackCheckoutStatus('idle')
+  }
+
+  function handlePricingPlanAction(planKind: PricingPlanKind) {
+    if (planKind === 'free-local') {
+      scrollToLocalRepairStart()
+      return
+    }
+
+    if (planKind === 'local-pack') {
+      handleLaunchLocalPackCheckout()
+      return
+    }
+
+    handleLaunchHumanRestoreCheckout()
+  }
+
   function handleLaunchHumanRestoreCheckout() {
+    clearPendingLocalRepairPackCheckout()
     setCheckoutLaunchError('')
     setCheckoutLaunchStatus('idle')
     setShowHumanRestoreCheckout(true)
@@ -1020,8 +1318,42 @@ function App() {
   }
 
   async function handleFileSelection(nextFile: File) {
+    const currentLocalRepairUsage = readLocalRepairUsage()
+    const hasFreeStarts =
+      getFreeLocalRepairsRemaining(currentLocalRepairUsage) > 0
+    const hasPaidCredits = currentLocalRepairUsage.paidCredits > 0
+
+    if (!hasFreeStarts && !hasPaidCredits) {
+      setLocalRepairUsage(currentLocalRepairUsage)
+      setShowLocalRepairLimitModal(true)
+      setLocalPackCheckoutStatus('idle')
+      trackProductEvent('local_repair_limit_reached', {
+        free_limit: freeLocalRepairLimit,
+        paid_credits_remaining: currentLocalRepairUsage.paidCredits,
+        total_started: currentLocalRepairUsage.totalStarted,
+      })
+      return
+    }
+
     const { file: resizedFile } = await resizeImageFile(nextFile, 1024 * 4)
+    const localRepairAccess = consumeLocalRepairCredit()
+
+    setLocalRepairUsage(localRepairAccess.usage)
+
+    if (!localRepairAccess.allowed) {
+      setShowLocalRepairLimitModal(true)
+      setLocalPackCheckoutStatus('idle')
+      trackProductEvent('local_repair_limit_reached', {
+        free_limit: freeLocalRepairLimit,
+        paid_credits_remaining: localRepairAccess.usage.paidCredits,
+        total_started: localRepairAccess.usage.totalStarted,
+      })
+      return
+    }
+
     trackProductEvent('upload_photo', {
+      local_repair_access: localRepairAccess.source,
+      paid_credits_remaining: localRepairAccess.usage.paidCredits,
       size_bucket: resizedFile.size > 2 * 1024 * 1024 ? 'large' : 'small',
     })
     setFile(resizedFile)
@@ -1341,7 +1673,10 @@ function App() {
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-[#e6d2b7] bg-white/75 p-5 shadow-2xl shadow-[#8a4f1d]/10">
+              <div
+                id="local-repair-start"
+                className="rounded-[2rem] border border-[#e6d2b7] bg-white/75 p-5 shadow-2xl shadow-[#8a4f1d]/10"
+              >
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
@@ -1355,6 +1690,45 @@ function App() {
                     Private
                   </div>
                 </div>
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[#e6d2b7] bg-[#fffaf3] px-4 py-3">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                      Free local starts
+                    </p>
+                    <p className="mt-1 text-2xl font-black text-[#211915]">
+                      {freeLocalRepairsRemaining}/{freeLocalRepairLimit} left
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[#e6d2b7] bg-[#fffaf3] px-4 py-3">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                      Paid local credits
+                    </p>
+                    <p className="mt-1 text-2xl font-black text-[#211915]">
+                      {paidLocalRepairCreditsRemaining}
+                    </p>
+                  </div>
+                </div>
+                {!canStartLocalRepair && (
+                  <div className="mb-4 rounded-2xl border border-[#f0b5a9] bg-[#fff1ed] px-4 py-3 text-sm leading-6 text-[#8a2f1d]">
+                    Your {freeLocalRepairLimit} free local repairs are used. Buy{' '}
+                    {localRepairPackCredits} more browser-local repairs or
+                    choose Human-assisted Restore for one important photo.
+                  </div>
+                )}
+                {localPackCheckoutStatus === 'success' && (
+                  <div className="mb-4 rounded-2xl border border-[#badf9f] bg-[#f4ffe9] px-4 py-3 text-sm font-bold text-[#3f6b20]">
+                    Local Pack activated. {localRepairPackCredits} repair
+                    credits were added to this browser.
+                  </div>
+                )}
+                {localPackCheckoutStatus === 'error' && (
+                  <div className="mb-4 rounded-2xl border border-[#f0b5a9] bg-[#fff1ed] px-4 py-3 text-sm leading-6 text-[#8a2f1d]">
+                    <p className="font-black">
+                      Local Pack checkout unavailable
+                    </p>
+                    <p className="mt-1">{localPackCheckoutError}</p>
+                  </div>
+                )}
                 <div className="h-72">
                   <FileSelect onSelection={handleFileSelection} />
                 </div>
@@ -1362,6 +1736,25 @@ function App() {
                   Your photo is read by the browser. The AI model runs locally
                   after it downloads and caches the model files.
                 </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleLaunchLocalPackCheckout}
+                    disabled={localPackCheckoutStatus === 'opening'}
+                    className="inline-flex justify-center rounded-full bg-[#211915] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#211915]/15 transition hover:-translate-y-0.5 hover:bg-[#3a2820] disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {localPackCheckoutStatus === 'opening'
+                      ? 'Opening checkout...'
+                      : `Buy ${localRepairPackCredits} local repairs - ${localRepairPackPrice}`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLaunchHumanRestoreCheckout}
+                    className="inline-flex justify-center rounded-full border border-[#d7b98c] bg-white px-5 py-3 text-sm font-black text-[#211915] transition hover:-translate-y-0.5 hover:bg-[#fffaf3]"
+                  >
+                    Human Restore - {humanRestorePrice}
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -1406,14 +1799,16 @@ function App() {
                   Restore one important photo with human help.
                 </h2>
                 <p className="mt-4 text-lg font-black text-[#211915]">
-                  MemoryFix AI Human-assisted Restore - $19/photo
+                  MemoryFix AI Human-assisted Restore -{' '}
+                  {`${humanRestorePrice}/photo`}
                 </p>
                 <p className="mt-4 max-w-3xl leading-7 text-[#66574d]">
                   For one important old photo that deserves extra care. Local
-                  repair stays free and private. If you choose Human-assisted
-                  Restore, we temporarily save the one photo you select, open
-                  secure checkout, then start AI draft plus human review after
-                  payment is confirmed.
+                  repair stays private in the browser for free starts and paid
+                  local credits. If you choose Human-assisted Restore, we
+                  temporarily save the one photo you select, open secure
+                  checkout, then start AI draft plus human review after payment
+                  is confirmed.
                 </p>
                 <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {humanRestoreSteps.map(step => (
@@ -1511,54 +1906,122 @@ function App() {
             <section id="pricing" className="py-10">
               <div className="text-center">
                 <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                  Paid validation path
+                  Simple repair options
                 </p>
                 <h2 className="mt-3 text-4xl font-black sm:text-5xl">
-                  Free local repair first. Credits for stronger workflows.
+                  Three choices. Clear privacy boundaries.
                 </h2>
                 <p className="mx-auto mt-5 max-w-2xl leading-7 text-[#66574d]">
-                  Start privately in the browser. Pay only when you want HD /
-                  Pro restore credits or human-assisted work for an important
-                  photo.
+                  Start with {freeLocalRepairLimit} private browser-local
+                  repairs, buy more local credits when you need them, or choose
+                  cloud AI plus human review for one important photo.
                 </p>
               </div>
               <div className="mt-8 grid gap-5 lg:grid-cols-3">
-                {pricingCards.map((plan, index) => (
-                  <div
-                    key={plan.name}
-                    className={[
-                      'rounded-[2rem] border p-7 shadow-xl',
-                      index === 1
-                        ? 'border-[#211915] bg-[#211915] text-white shadow-[#211915]/20'
-                        : 'border-[#e6d2b7] bg-white/70 text-[#211915] shadow-[#8a4f1d]/10',
-                    ].join(' ')}
-                  >
-                    <h3 className="text-2xl font-black">{plan.name}</h3>
-                    <p
+                {pricingCards.map(plan => {
+                  const isFeatured = plan.kind === 'local-pack'
+                  const isLocalPack = plan.kind === 'local-pack'
+                  const isHumanRestorePlan = plan.kind === 'human-restore'
+                  const isLocalPackOpening =
+                    isLocalPack && localPackCheckoutStatus === 'opening'
+                  let planButtonClass =
+                    'border border-[#d7b98c] bg-white text-[#211915] hover:bg-[#fffaf3]'
+
+                  if (isFeatured) {
+                    planButtonClass =
+                      'bg-[#f3c16f] text-[#211915] hover:bg-[#ffd48a]'
+                  } else if (isHumanRestorePlan) {
+                    planButtonClass =
+                      'bg-[#211915] text-white hover:bg-[#3a2820]'
+                  }
+
+                  return (
+                    <div
+                      key={plan.name}
                       className={[
-                        'mt-3 leading-7',
-                        index === 1 ? 'text-[#e8dfd5]' : 'text-[#66574d]',
+                        'flex flex-col rounded-[2rem] border p-7 shadow-xl',
+                        isFeatured
+                          ? 'border-[#211915] bg-[#211915] text-white shadow-[#211915]/20'
+                          : 'border-[#e6d2b7] bg-white/70 text-[#211915] shadow-[#8a4f1d]/10',
                       ].join(' ')}
                     >
-                      {plan.description}
-                    </p>
-                    <div className="mt-6 text-5xl font-black">{plan.price}</div>
-                    <ul className="mt-6 space-y-3">
-                      {plan.features.map(feature => (
-                        <li key={feature} className="flex gap-3">
-                          <span
-                            className={
-                              index === 1 ? 'text-[#f3c16f]' : 'text-[#9b6b3c]'
-                            }
-                          >
-                            *
-                          </span>
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-2xl font-black">{plan.name}</h3>
+                        <span
+                          className={[
+                            'rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.16em]',
+                            isFeatured
+                              ? 'bg-[#f3c16f] text-[#211915]'
+                              : 'bg-[#fffaf3] text-[#9b6b3c]',
+                          ].join(' ')}
+                        >
+                          {plan.badge}
+                        </span>
+                      </div>
+                      <p
+                        className={[
+                          'mt-3 leading-7',
+                          isFeatured ? 'text-[#e8dfd5]' : 'text-[#66574d]',
+                        ].join(' ')}
+                      >
+                        {plan.description}
+                      </p>
+                      <div className="mt-6 text-5xl font-black">
+                        {plan.price}
+                      </div>
+                      <ul className="mt-6 space-y-3">
+                        {plan.features.map(feature => (
+                          <li key={feature} className="flex gap-3">
+                            <span
+                              className={
+                                isFeatured ? 'text-[#f3c16f]' : 'text-[#9b6b3c]'
+                              }
+                            >
+                              *
+                            </span>
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        onClick={() => handlePricingPlanAction(plan.kind)}
+                        disabled={isLocalPackOpening}
+                        className={[
+                          'mt-auto inline-flex justify-center rounded-full px-6 py-4 text-sm font-black transition hover:-translate-y-1 disabled:cursor-wait disabled:opacity-70',
+                          planButtonClass,
+                        ].join(' ')}
+                      >
+                        {isLocalPackOpening ? 'Opening checkout...' : plan.cta}
+                      </button>
+                      {isLocalPack && localPackCheckoutStatus === 'success' && (
+                        <p
+                          className={[
+                            'mt-4 rounded-2xl px-4 py-3 text-sm font-bold',
+                            isFeatured
+                              ? 'bg-[#30421f] text-[#d9ffc8]'
+                              : 'bg-[#f4ffe9] text-[#3f6b20]',
+                          ].join(' ')}
+                        >
+                          Activated in this browser. Current paid credits:{' '}
+                          {paidLocalRepairCreditsRemaining}
+                        </p>
+                      )}
+                      {isLocalPack && localPackCheckoutStatus === 'error' && (
+                        <p
+                          className={[
+                            'mt-4 rounded-2xl px-4 py-3 text-sm leading-6',
+                            isFeatured
+                              ? 'bg-[#3a201b] text-[#ffd9d1]'
+                              : 'bg-[#fff1ed] text-[#8a2f1d]',
+                          ].join(' ')}
+                        >
+                          {localPackCheckoutError}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </section>
 
@@ -1630,6 +2093,71 @@ function App() {
         )}
       </main>
 
+      {showLocalRepairLimitModal && (
+        <Modal>
+          <div className="max-w-3xl rounded-[2rem] bg-[#fffaf3] p-8 text-[#211915] shadow-2xl shadow-[#211915]/20">
+            <p className="text-sm font-black uppercase tracking-[0.22em] text-[#9b6b3c]">
+              Local repair limit reached
+            </p>
+            <h2 className="mt-3 text-4xl font-black">
+              You used your {freeLocalRepairLimit} free local repairs.
+            </h2>
+            <p className="mt-5 text-lg leading-8 text-[#66574d]">
+              Continue privately in this browser with {localRepairPackCredits}{' '}
+              more local repair credits, or choose Human-assisted Restore for
+              one important photo that needs cloud AI plus human review.
+            </p>
+            <div className="mt-7 grid gap-4 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={handleLaunchLocalPackCheckout}
+                disabled={localPackCheckoutStatus === 'opening'}
+                className="rounded-[1.5rem] bg-[#211915] px-6 py-5 text-left text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820] disabled:cursor-wait disabled:opacity-70"
+              >
+                <span className="block text-sm font-black uppercase tracking-[0.18em] text-[#f3c16f]">
+                  Most private
+                </span>
+                <span className="mt-2 block text-2xl font-black">
+                  {localPackCheckoutStatus === 'opening'
+                    ? 'Opening checkout...'
+                    : `Buy ${localRepairPackCredits} local repairs`}
+                </span>
+                <span className="mt-2 block text-sm leading-6 text-[#e8dfd5]">
+                  {localRepairPackPrice}. Photos still stay on your device.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={handleLaunchHumanRestoreCheckout}
+                className="rounded-[1.5rem] border border-[#d7b98c] bg-white px-6 py-5 text-left text-[#211915] shadow-lg transition hover:-translate-y-1 hover:bg-[#fffaf3]"
+              >
+                <span className="block text-sm font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                  Best result
+                </span>
+                <span className="mt-2 block text-2xl font-black">
+                  Human Restore
+                </span>
+                <span className="mt-2 block text-sm leading-6 text-[#66574d]">
+                  {humanRestorePrice}/photo. Cloud AI draft plus human review.
+                </span>
+              </button>
+            </div>
+            {localPackCheckoutStatus === 'error' && (
+              <div className="mt-5 rounded-2xl border border-[#f0b5a9] bg-[#fff1ed] px-4 py-3 text-sm leading-6 text-[#8a2f1d]">
+                <p className="font-black">Local Pack checkout unavailable</p>
+                <p className="mt-1">{localPackCheckoutError}</p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowLocalRepairLimitModal(false)}
+              className="mt-6 rounded-full border border-[#d7b98c] bg-white px-6 py-3 text-sm font-black text-[#211915] transition hover:bg-[#fffaf3]"
+            >
+              Not now
+            </button>
+          </div>
+        </Modal>
+      )}
       {showHumanRestoreCheckout && (
         <Modal>
           <HumanRestoreCheckoutForm

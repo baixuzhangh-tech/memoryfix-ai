@@ -158,7 +158,9 @@ Use these settings for the first launch:
 - Build command: `npm run build`
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
-- Paid validation URL: `Book Human Restore` points to the Lemon Squeezy checkout URL by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
+- Human Restore checkout URL: the $19.90/photo flow points to Lemon Squeezy by default, and can be overridden with `VITE_EARLY_ACCESS_URL`
+- Local Pack checkout URL: set `VITE_LOCAL_REPAIR_PACK_URL` to the $9.90 / 10 local repair credits Lemon Squeezy checkout URL
+- Local repair quota: the browser-local MVP uses `localStorage` for 3 free starts and purchased local credits on the same device
 - Success page path: `/human-restore/success`
 - Secure upload path: `/human-restore/upload`
 - Admin review path: `/admin/review`
