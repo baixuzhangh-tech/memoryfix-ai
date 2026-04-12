@@ -6,6 +6,14 @@ import {
   sendEmail,
 } from '../_lib/human-restore.js'
 import {
+  emailCtaButton,
+  emailCtaFallback,
+  emailInfoBox,
+  emailNoteBox,
+  emailParagraph,
+  emailShell,
+} from '../_lib/email-templates.js'
+import {
   createSignedUrl,
   downloadObject,
   getDeliveryDownloadUrlSeconds,
@@ -35,185 +43,40 @@ function buildDeliveryEmail({
   const esc = escapeHtml
 
   const comparisonSection = comparisonUrl
-    ? `
-      <tr>
-        <td align="center" style="padding:0 0 8px 0">
-          <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 auto"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#9b6b3c;padding-bottom:12px" align="center">BEFORE &amp; AFTER</td></tr></table>
-        </td>
-      </tr>
-      <tr>
-        <td align="center" style="padding:0 0 6px 0">
-          <img src="${esc(
-            comparisonUrl
-          )}" alt="Before and after comparison" width="520" style="display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid #e6d2b7" />
-        </td>
-      </tr>
-      <tr>
-        <td align="center" style="padding:0 0 28px 0">
-          <a href="${esc(
-            comparisonUrl
-          )}" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b6b3c;text-decoration:underline" download>Save comparison image</a>
-        </td>
-      </tr>
-    `
+    ? [
+        `<tr><td align="center" style="padding:0 0 8px 0"><table border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 auto"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#9b6b3c;padding-bottom:12px" align="center">BEFORE &amp; AFTER</td></tr></table></td></tr>`,
+        `<tr><td align="center" style="padding:0 0 6px 0"><img src="${esc(comparisonUrl)}" alt="Before and after comparison" width="520" style="display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid #e6d2b7" /></td></tr>`,
+        `<tr><td align="center" style="padding:0 0 28px 0"><a href="${esc(comparisonUrl)}" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b6b3c;text-decoration:underline" download>Save comparison image</a></td></tr>`,
+      ].join('')
     : ''
 
   const reviewSection = reviewNote
-    ? `
-      <tr>
-        <td style="padding:0 0 24px 0">
-          <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="background:#fffaf3;border:1px solid #e6d2b7;border-radius:8px">
-            <tr>
-              <td style="padding:16px 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#4a3728">
-                <strong style="color:#211915">Note from our team:</strong><br />${esc(
-                  reviewNote
-                ).replace(/\n/g, '<br />')}
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    `
+    ? emailNoteBox(
+        `<strong style="color:#211915">Note from our team:</strong><br/>${esc(reviewNote).replace(/\n/g, '<br/>')}`
+      )
     : ''
 
-  const html = `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <title>Your restored photo is ready</title>
-  <!--[if mso]><style>table,td{font-family:Arial,Helvetica,sans-serif!important}</style><![endif]-->
-  <style>
-    @media only screen and (max-width:620px){
-      .email-wrapper{width:100%!important;padding:12px!important}
-      .email-body{padding:28px 20px!important}
-    }
-  </style>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f0eb;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f5f0eb">
-    <tr>
-      <td align="center" style="padding:32px 16px">
-        <!-- OUTER WRAPPER -->
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="600" class="email-wrapper" style="max-width:600px;width:100%">
+  const bodyRows = [
+    emailParagraph(
+      'Thank you for choosing MemoryFix AI. Our team has carefully reviewed and restored your photo. We hope the result brings back wonderful memories.'
+    ),
+    comparisonSection,
+    emailCtaButton(downloadUrl, 'Download Restored Photo'),
+    emailCtaFallback(downloadUrl, 'Click here to download'),
+    emailInfoBox(
+      `This private download link expires in <strong style="color:#4a3728">${expiresDays} days</strong>.<br/>If it expires before you download, just reply to this email.`
+    ),
+    reviewSection,
+  ].join('')
 
-          <!-- LOGO HEADER -->
-          <tr>
-            <td align="center" style="padding:0 0 24px 0">
-              <table border="0" cellpadding="0" cellspacing="0" role="presentation">
-                <tr>
-                  <td style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#211915;letter-spacing:-0.5px">
-                    MemoryFix<span style="color:#9b6b3c"> AI</span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- MAIN CARD -->
-          <tr>
-            <td>
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(33,25,21,0.06)">
-
-                <!-- HERO BANNER -->
-                <tr>
-                  <td style="background:#211915;padding:32px 40px" align="center">
-                    <table border="0" cellpadding="0" cellspacing="0" role="presentation"><tr><td style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;color:#ffffff;line-height:34px" align="center">Your restored photo<br/>is ready</td></tr></table>
-                    <table border="0" cellpadding="0" cellspacing="0" role="presentation"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#c8b9a8;padding-top:10px" align="center">Order ${esc(
-                      job.submission_reference
-                    )}</td></tr></table>
-                  </td>
-                </tr>
-
-                <!-- BODY -->
-                <tr>
-                  <td class="email-body" style="padding:32px 40px 12px 40px">
-                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-
-                      <!-- THANK YOU -->
-                      <tr>
-                        <td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:24px;color:#4a3728;padding:0 0 24px 0">
-                          Thank you for choosing MemoryFix AI. Our team has carefully reviewed and restored your photo. We hope the result brings back wonderful memories.
-                        </td>
-                      </tr>
-
-                      <!-- COMPARISON IMAGE -->
-                      ${comparisonSection}
-
-                      <!-- CTA BUTTON -->
-                      <tr>
-                        <td align="center" style="padding:0 0 16px 0">
-                          <table border="0" cellpadding="0" cellspacing="0" role="presentation">
-                            <tr>
-                              <td align="center" style="background:#211915;border-radius:8px">
-                                <a href="${esc(
-                                  downloadUrl
-                                )}" target="_blank" style="display:inline-block;padding:16px 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px">Download Restored Photo</a>
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-
-                      <!-- LINK FALLBACK -->
-                      <tr>
-                        <td align="center" style="padding:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9b8b7c">
-                          Button not working? <a href="${esc(
-                            downloadUrl
-                          )}" style="color:#9b6b3c;text-decoration:underline">Click here to download</a>
-                        </td>
-                      </tr>
-
-                      <!-- EXPIRY NOTICE -->
-                      <tr>
-                        <td style="padding:0 0 24px 0">
-                          <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="background:#faf8f5;border-radius:8px">
-                            <tr>
-                              <td style="padding:14px 20px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#7a6c60" align="center">
-                                This private download link expires in <strong style="color:#4a3728">${expiresDays} days</strong>.<br/>If it expires before you download, just reply to this email.
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-
-                      <!-- REVIEW NOTE -->
-                      ${reviewSection}
-
-                    </table>
-                  </td>
-                </tr>
-
-              </table>
-            </td>
-          </tr>
-
-          <!-- FOOTER -->
-          <tr>
-            <td style="padding:24px 0 0 0" align="center">
-              <table border="0" cellpadding="0" cellspacing="0" role="presentation">
-                <tr>
-                  <td style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#9b8b7c" align="center">
-                    Ref: ${esc(job.submission_reference)}<br/>
-                    Questions? Contact <a href="mailto:${esc(
-                      supportEmail
-                    )}" style="color:#9b6b3c;text-decoration:underline">${esc(
-    supportEmail
-  )}</a><br/>
-                    <span style="font-size:11px;color:#bfb3a5">&copy; ${new Date().getFullYear()} MemoryFix AI &middot; Privacy-first photo restoration</span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+  const html = emailShell({
+    title: 'Your restored photo is ready',
+    heroTitle: 'Your restored photo<br/>is ready',
+    heroSubtitle: `Order ${esc(job.submission_reference)}`,
+    bodyRows,
+    footerRef: job.submission_reference,
+    supportEmail,
+  })
 
   const text = [
     'YOUR RESTORED PHOTO IS READY',

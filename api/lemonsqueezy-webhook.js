@@ -13,6 +13,16 @@ import {
   sendEmail,
   verifyWebhookSignature,
 } from './_lib/human-restore.js'
+import {
+  emailCtaButton,
+  emailCtaFallback,
+  emailDetailBlock,
+  emailInfoBox,
+  emailNoteBox,
+  emailParagraph,
+  emailShell,
+  emailStepsList,
+} from './_lib/email-templates.js'
 import { runRestoreJob } from './_lib/ai-restore.js'
 import {
   getJob,
@@ -125,26 +135,30 @@ async function findLocalOrder(order) {
 }
 
 function buildLegacySecureUploadEmail({ uploadUrl, order, supportEmail }) {
-  const customerName = order.customerName
-    ? escapeHtml(order.customerName)
-    : 'there'
+  const customerName = order.customerName || 'there'
   const orderNumber = order.orderNumber
     ? String(order.orderNumber)
     : 'your paid order'
-  const productName = escapeHtml(order.productName)
-  const safeUploadUrl = escapeHtml(uploadUrl)
-  const safeSupportEmail = escapeHtml(supportEmail)
 
-  const html = `
-    <h1>Your secure photo upload link</h1>
-    <p>Hi ${customerName},</p>
-    <p>Thanks for purchasing ${productName}. Use the secure link below to upload the photo for your paid order ${escapeHtml(
-    orderNumber
-  )}.</p>
-    <p><a href="${safeUploadUrl}">${safeUploadUrl}</a></p>
-    <p>This link is tied to your paid order and is intended only for your restoration upload.</p>
-    <p>If the link does not open or you need help, contact ${safeSupportEmail}.</p>
-  `
+  const bodyRows = [
+    emailParagraph(
+      `Hi ${escapeHtml(customerName)}, thanks for purchasing ${escapeHtml(order.productName)}. Use the button below to upload the photo for your paid order.`
+    ),
+    emailCtaButton(uploadUrl, 'Upload Your Photo'),
+    emailCtaFallback(uploadUrl, 'Click here to open the upload page'),
+    emailInfoBox(
+      `This link is tied to your paid order and is intended only for your restoration upload.<br/>If the link does not open, contact <a href="mailto:${escapeHtml(supportEmail)}" style="color:#9b6b3c;text-decoration:underline">${escapeHtml(supportEmail)}</a>.`
+    ),
+  ].join('')
+
+  const html = emailShell({
+    title: 'Your secure upload link',
+    heroTitle: 'Your secure photo<br/>upload link is ready',
+    heroSubtitle: `Order ${escapeHtml(orderNumber)}`,
+    bodyRows,
+    footerRef: orderNumber,
+    supportEmail,
+  })
 
   const text = [
     'Your secure MemoryFix AI upload link is ready.',
@@ -164,26 +178,36 @@ function buildPaymentConfirmedEmail({
   supportEmail,
 }) {
   const orderNumber = order.orderNumber || order.orderId
-  const customerName = order.customerName
-    ? escapeHtml(order.customerName)
-    : 'there'
-  const safeSupportEmail = escapeHtml(supportEmail)
-  const html = `
-    <h1>Your MemoryFix AI order is confirmed</h1>
-    <p>Hi ${customerName},</p>
-    <p>We received your payment and the photo you uploaded before checkout. Your restoration is now in our AI draft plus human review workflow.</p>
-    <p><strong>Order:</strong> ${escapeHtml(orderNumber)}</p>
-    <p><strong>Submission reference:</strong> ${escapeHtml(
-      submissionReference
-    )}</p>
-    <p><strong>What happens next:</strong></p>
-    <ul>
-      <li>We prepare an AI restoration draft from your source photo.</li>
-      <li>A human reviews the before and after result before delivery.</li>
-      <li>During beta, approved restores are usually delivered within 48 hours.</li>
-    </ul>
-    <p>Your result will be sent to this checkout email. If you need help, contact ${safeSupportEmail}.</p>
-  `
+  const customerName = order.customerName || 'there'
+
+  const bodyRows = [
+    emailParagraph(
+      `Hi ${escapeHtml(customerName)}, we received your payment and the photo you uploaded before checkout. Your restoration is now in our AI draft plus human review workflow.`
+    ),
+    emailDetailBlock([
+      ['Order', String(orderNumber)],
+      ['Submission reference', submissionReference],
+    ]),
+    emailParagraph('<strong style="color:#211915">What happens next:</strong>'),
+    emailStepsList([
+      'We prepare an AI restoration draft from your source photo.',
+      'A human reviews the before and after result before delivery.',
+      'During beta, approved restores are usually delivered within 48 hours.',
+    ]),
+    emailInfoBox(
+      'Your result will be sent to this checkout email address.'
+    ),
+  ].join('')
+
+  const html = emailShell({
+    title: 'Your order is confirmed',
+    heroTitle: 'Your order is<br/>confirmed',
+    heroSubtitle: submissionReference,
+    bodyRows,
+    footerRef: submissionReference,
+    supportEmail,
+  })
+
   const text = [
     'Your MemoryFix AI order is confirmed.',
     `Order: ${orderNumber}`,
@@ -204,27 +228,30 @@ function buildMerchantPaidOrderEmail({
   order,
   supportEmail,
 }) {
-  const html = `
-    <h1>Paid Human-assisted Restore order is ready for review</h1>
-    <p><strong>Submission reference:</strong> ${escapeHtml(
-      localOrder.submission_reference
-    )}</p>
-    <p><strong>Checkout email:</strong> ${escapeHtml(order.checkoutEmail)}</p>
-    <p><strong>Lemon order:</strong> ${escapeHtml(
-      order.orderNumber || order.orderId
-    )}</p>
-    <p><strong>Job ID:</strong> ${escapeHtml(currentJob.id)}</p>
-    <p><strong>Status:</strong> ${escapeHtml(currentJob.status)}</p>
-    <p><strong>Repair notes:</strong></p>
-    <p>${escapeHtml(localOrder.notes || 'No extra notes provided.').replace(
-      /\n/g,
-      '<br />'
-    )}</p>
-    <p><strong>Admin review:</strong> <a href="${escapeHtml(
-      adminUrl
-    )}">${escapeHtml(adminUrl)}</a></p>
-    <p><strong>Support contact:</strong> ${escapeHtml(supportEmail)}</p>
-  `
+  const bodyRows = [
+    emailDetailBlock([
+      ['Submission reference', localOrder.submission_reference],
+      ['Checkout email', order.checkoutEmail],
+      ['Lemon order', String(order.orderNumber || order.orderId)],
+      ['Job ID', currentJob.id],
+      ['Status', currentJob.status],
+    ]),
+    emailNoteBox(
+      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(localOrder.notes || 'No extra notes provided.').replace(/\n/g, '<br/>')}`
+    ),
+    emailCtaButton(adminUrl, 'Open Admin Review'),
+    emailCtaFallback(adminUrl, 'Open admin review page'),
+  ].join('')
+
+  const html = emailShell({
+    title: 'Paid order ready for review',
+    heroTitle: 'Paid order is<br/>ready for review',
+    heroSubtitle: localOrder.submission_reference,
+    bodyRows,
+    footerRef: localOrder.submission_reference,
+    supportEmail,
+  })
+
   const text = [
     'Paid Human-assisted Restore order is ready for review',
     `Submission reference: ${localOrder.submission_reference}`,

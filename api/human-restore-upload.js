@@ -9,6 +9,16 @@ import {
   verifyOrderUploadToken,
 } from './_lib/human-restore.js'
 import {
+  emailCtaButton,
+  emailCtaFallback,
+  emailDetailBlock,
+  emailInfoBox,
+  emailNoteBox,
+  emailParagraph,
+  emailShell,
+  emailStepsList,
+} from './_lib/email-templates.js'
+import {
   countJobsByOrderId,
   countRecentJobsByEmail,
   getHumanRestoreBuckets,
@@ -124,28 +134,32 @@ async function sendMerchantNotificationEmail({
   const subjectSuffix = orderReference
     ? `Order ${orderReference}`
     : `Checkout ${checkoutEmail}`
-  const html = `
-    <h1>New Human-assisted Restore upload</h1>
-    <p><strong>Submission reference:</strong> ${escapeHtml(
-      submissionReference
-    )}</p>
-    <p><strong>Upload source:</strong> ${escapeHtml(uploadSource)}</p>
-    <p><strong>Checkout email:</strong> ${escapeHtml(checkoutEmail)}</p>
-    <p><strong>Order number:</strong> ${escapeHtml(
-      orderReference || 'Not provided'
-    )}</p>
-    <p><strong>Job ID:</strong> ${escapeHtml(jobId)}</p>
-    <p><strong>Support contact:</strong> ${escapeHtml(supportEmail)}</p>
-    <p><strong>Repair notes:</strong></p>
-    <p>${escapeHtml(notes || 'No extra notes provided.').replace(
-      /\n/g,
-      '<br />'
-    )}</p>
-    <p><strong>Stored file:</strong> ${escapeHtml(photo.filename)}</p>
-    <p><strong>Admin review:</strong> <a href="${escapeHtml(
-      adminUrl
-    )}">${escapeHtml(adminUrl)}</a></p>
-  `
+
+  const bodyRows = [
+    emailDetailBlock([
+      ['Submission reference', submissionReference],
+      ['Upload source', uploadSource],
+      ['Checkout email', checkoutEmail],
+      ['Order number', orderReference || 'Not provided'],
+      ['Job ID', jobId],
+      ['Stored file', photo.filename],
+    ]),
+    emailNoteBox(
+      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(notes || 'No extra notes provided.').replace(/\n/g, '<br/>')}`
+    ),
+    emailCtaButton(adminUrl, 'Open Admin Review'),
+    emailCtaFallback(adminUrl, 'Open admin review page'),
+  ].join('')
+
+  const html = emailShell({
+    title: 'New upload received',
+    heroTitle: 'New photo upload<br/>received',
+    heroSubtitle: submissionReference,
+    bodyRows,
+    footerRef: submissionReference,
+    supportEmail,
+  })
+
   const text = [
     'New Human-assisted Restore upload',
     `Submission reference: ${submissionReference}`,
@@ -180,25 +194,34 @@ async function sendCustomerConfirmationEmail({
   checkoutEmail,
   orderReference,
 }) {
-  const html = `
-    <h1>We received your photo</h1>
-    <p>Thank you for submitting your paid Human-assisted Restore order to MemoryFix AI.</p>
-    <p><strong>Submission reference:</strong> ${escapeHtml(
-      submissionReference
-    )}</p>
-    <p><strong>Checkout email:</strong> ${escapeHtml(checkoutEmail)}</p>
-    <p><strong>Order number:</strong> ${escapeHtml(
-      orderReference || 'Not provided'
-    )}</p>
-    <p>What happens next:</p>
-    <ul>
-      <li>We match this upload to your paid order.</li>
-      <li>We review the image and your notes.</li>
-      <li>We deliver the restored result by email within 48 hours during beta.</li>
-    </ul>
-    <p>If you need to update the photo or add details, reply to this email and include your submission reference.</p>
-    <p>Support: ${escapeHtml(supportEmail)}</p>
-  `
+  const bodyRows = [
+    emailParagraph(
+      'Thank you for submitting your paid Human-assisted Restore order to MemoryFix AI. We have received your photo.'
+    ),
+    emailDetailBlock([
+      ['Submission reference', submissionReference],
+      ['Checkout email', checkoutEmail],
+      ['Order number', orderReference || 'Not provided'],
+    ]),
+    emailParagraph('<strong style="color:#211915">What happens next:</strong>'),
+    emailStepsList([
+      'We match this upload to your paid order.',
+      'We review the image and your notes.',
+      'We deliver the restored result by email within 48 hours during beta.',
+    ]),
+    emailInfoBox(
+      'Need to update the photo or add details? Just reply to this email and include your submission reference.'
+    ),
+  ].join('')
+
+  const html = emailShell({
+    title: 'We received your photo',
+    heroTitle: 'We received<br/>your photo',
+    heroSubtitle: submissionReference,
+    bodyRows,
+    footerRef: submissionReference,
+    supportEmail,
+  })
 
   const text = [
     'We received your photo for MemoryFix AI Human-assisted Restore.',
