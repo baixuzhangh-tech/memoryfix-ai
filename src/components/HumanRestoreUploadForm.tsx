@@ -5,6 +5,7 @@ import { humanRestoreAfterUploadSteps } from '../humanRestoreContent'
 type HumanRestoreUploadFormProps = {
   defaultEmail: string
   defaultOrderReference: string
+  presentation?: 'standalone' | 'task-card'
   secureOrderSummary?: {
     checkoutEmailMasked: string
     orderNumber?: string
@@ -46,10 +47,12 @@ export default function HumanRestoreUploadForm(
   const {
     defaultEmail,
     defaultOrderReference,
+    presentation = 'standalone',
     secureOrderSummary,
     secureUploadToken,
   } = props
   const isSecureUpload = Boolean(secureUploadToken)
+  const isTaskCard = presentation === 'task-card'
 
   const [checkoutEmail, setCheckoutEmail] = useState(defaultEmail)
   const [orderReference, setOrderReference] = useState(defaultOrderReference)
@@ -180,26 +183,62 @@ export default function HumanRestoreUploadForm(
     }
   }
 
+  const sectionClassName = isTaskCard
+    ? 'rounded-[2rem] border border-[#e1c8a8] bg-white p-5 shadow-2xl shadow-[#8a4f1d]/15 md:p-6'
+    : 'mt-10 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10'
+  let eyebrowText = 'Backup upload form'
+  let headingText = 'Use this backup form for your paid order only if needed.'
+
+  if (isTaskCard) {
+    eyebrowText = 'Start here'
+    headingText = isSecureUpload
+      ? 'Upload one source photo'
+      : 'Backup upload for your paid order'
+  } else if (isSecureUpload) {
+    eyebrowText = 'Secure upload'
+    headingText = 'Upload the photo you want restored.'
+  }
+
+  const formClassName = isTaskCard ? 'mt-5 grid gap-4' : 'mt-8 grid gap-6'
+  const notesClassName = isTaskCard
+    ? 'min-h-[104px] rounded-[1.25rem] border border-[#d7b98c] bg-[#fffaf3] px-4 py-3 text-base leading-7 text-[#211915] outline-none transition focus:border-[#211915]'
+    : 'min-h-[140px] rounded-[1.5rem] border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base leading-7 text-[#211915] outline-none transition focus:border-[#211915]'
+  const inputClassName =
+    'rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] outline-none transition focus:border-[#211915]'
+  const fileInputClassName = isTaskCard
+    ? 'rounded-[1.5rem] border-2 border-dashed border-[#d7b98c] bg-[#fffaf3] px-4 py-5 text-base text-[#211915] file:mr-4 file:rounded-full file:border-0 file:bg-[#211915] file:px-5 file:py-3 file:font-black file:text-white'
+    : 'rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] file:mr-4 file:rounded-full file:border-0 file:bg-[#211915] file:px-5 file:py-3 file:font-black file:text-white'
+
   return (
-    <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
+    <section className={sectionClassName}>
       <div className="max-w-3xl">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-          {isSecureUpload ? 'Secure upload' : 'Backup upload form'}
+        <p className="text-sm font-black uppercase tracking-[0.24em] text-[#9b6b3c]">
+          {eyebrowText}
         </p>
-        <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-          {isSecureUpload
-            ? 'Upload the photo you want restored.'
-            : 'Use this backup form for your paid order only if needed.'}
+        <h2
+          className={
+            isTaskCard
+              ? 'mt-2 text-3xl font-black tracking-tight text-[#211915]'
+              : 'mt-3 text-3xl font-black sm:text-4xl'
+          }
+        >
+          {headingText}
         </h2>
-        <p className="mt-4 leading-7 text-[#66574d]">
+        <p
+          className={
+            isTaskCard
+              ? 'mt-3 text-sm leading-6 text-[#66574d]'
+              : 'mt-4 leading-7 text-[#66574d]'
+          }
+        >
           {isSecureUpload
-            ? 'Choose your best source photo, add repair notes that matter, and submit once. After upload, the paid workflow prepares a restoration draft for human review before delivery.'
+            ? 'Choose the clearest scan or original image. Add a short note, then submit once to start human-reviewed restoration.'
             : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the order number if you have it so we can match the paid order quickly.'}
         </p>
       </div>
 
       {isSecureUpload && secureOrderSummary && (
-        <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-[#5b4a40]">
+        <div className="mt-5 flex flex-wrap gap-2 text-xs font-black text-[#5b4a40]">
           <div className="rounded-full border border-[#b8d99f] bg-[#f4ffe8] px-4 py-2 text-[#355322]">
             Payment confirmed
           </div>
@@ -215,15 +254,17 @@ export default function HumanRestoreUploadForm(
         </div>
       )}
 
-      <div className="mt-6 rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] px-5 py-4 text-sm leading-6 text-[#66574d]">
+      <div className="mt-5 rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] px-5 py-4 text-sm leading-6 text-[#66574d]">
         {isSecureUpload
-          ? 'This upload is attached directly to your paid order. Unlike free local repair, this assisted service sends the photo to our cloud restoration workflow and human review queue so we can deliver the approved result by email.'
-          : 'Use this backup form only if direct secure upload is unavailable. Unlike free local repair, this assisted service sends the photo to our cloud restoration workflow and human review queue so we can match and complete your paid order.'}
+          ? 'Privacy note: free local repair stays in your browser. This paid upload is only for the human-reviewed service you purchased.'
+          : 'Privacy note: this backup upload is only for matching and completing your paid human-reviewed restoration order.'}
       </div>
 
-      <form className="mt-8 grid gap-6" onSubmit={handleSubmit}>
+      <form className={formClassName} onSubmit={handleSubmit}>
         {!isSecureUpload && (
-          <div className="grid gap-6 md:grid-cols-2">
+          <div
+            className={isTaskCard ? 'grid gap-4' : 'grid gap-6 md:grid-cols-2'}
+          >
             <label className="grid gap-2" htmlFor={checkoutEmailFieldId}>
               <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
                 Checkout email
@@ -235,7 +276,7 @@ export default function HumanRestoreUploadForm(
                 onChange={event => {
                   setCheckoutEmail(event.currentTarget.value)
                 }}
-                className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] outline-none transition focus:border-[#211915]"
+                className={inputClassName}
                 placeholder="you@example.com"
                 autoComplete="email"
                 disabled={status === 'submitting'}
@@ -254,7 +295,7 @@ export default function HumanRestoreUploadForm(
                 onChange={event => {
                   setOrderReference(event.currentTarget.value)
                 }}
-                className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] outline-none transition focus:border-[#211915]"
+                className={inputClassName}
                 placeholder="Optional, but recommended"
                 autoComplete="off"
                 disabled={status === 'submitting'}
@@ -273,7 +314,7 @@ export default function HumanRestoreUploadForm(
             onChange={event => {
               setNotes(event.currentTarget.value)
             }}
-            className="min-h-[140px] rounded-[1.5rem] border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base leading-7 text-[#211915] outline-none transition focus:border-[#211915]"
+            className={notesClassName}
             placeholder="Tell us what matters most: scratches, missing details, color fading, cleanup around faces, delivery deadline, or any family context that will help."
             disabled={status === 'submitting'}
           />
@@ -291,7 +332,7 @@ export default function HumanRestoreUploadForm(
             onChange={event => {
               onSelectFile(event.currentTarget.files?.[0] ?? null)
             }}
-            className="rounded-2xl border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base text-[#211915] file:mr-4 file:rounded-full file:border-0 file:bg-[#211915] file:px-5 file:py-3 file:font-black file:text-white"
+            className={fileInputClassName}
             disabled={status === 'submitting'}
             required
           />
@@ -309,7 +350,7 @@ export default function HumanRestoreUploadForm(
         {status === 'success' && (
           <div className="grid gap-3 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
             <p className="text-base font-black text-[#1f3413]">
-              Upload received
+              Photo received. Human review is next.
             </p>
             <p className="leading-7">
               {isSecureUpload
@@ -367,8 +408,14 @@ export default function HumanRestoreUploadForm(
           </div>
         )}
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <p className="max-w-2xl text-sm leading-6 text-[#66574d]">
+        <div
+          className={
+            isTaskCard
+              ? 'grid gap-3'
+              : 'flex flex-col gap-3 md:flex-row md:items-center md:justify-between'
+          }
+        >
+          <p className="max-w-2xl text-xs leading-6 text-[#66574d]">
             {isSecureUpload
               ? 'Please submit only once for this paid order unless support asks you to upload again.'
               : 'This backup form is only for paid Human-assisted Restore orders. Please submit only once per paid order unless support asks you to upload again.'}

@@ -1,27 +1,45 @@
 export const humanRestorePostPaymentSteps = [
   {
-    label: 'Step 1',
+    label: 'Paid',
     title: 'Payment confirmed',
     description:
       'Your $19 Human-assisted Restore order is received and linked to this upload flow.',
   },
   {
-    label: 'Step 2',
+    label: 'Upload',
     title: 'Upload one best source photo',
     description:
       'Use the clearest scan or original image you have, then add notes about what matters most.',
   },
   {
-    label: 'Step 3',
+    label: 'Review',
     title: 'AI draft plus human review',
     description:
       'We create a restoration draft, compare before and after quality, and review it before delivery.',
   },
   {
-    label: 'Step 4',
+    label: 'Delivery',
     title: 'Private email delivery',
     description:
       'During beta, approved restores are usually delivered within 48 hours by email.',
+  },
+]
+
+export const humanRestoreServiceHighlights = [
+  {
+    title: 'Not a blind auto-send',
+    description:
+      'Your result goes through a human quality check before the delivery email is sent.',
+  },
+  {
+    title: 'Guided by your notes',
+    description:
+      'Tell us what matters most: scratches, faces, color fading, missing corners, or keeping the image natural.',
+  },
+  {
+    title: 'One focused photo',
+    description:
+      'This order is for one important photo, so the review can focus on the best possible restoration.',
   },
 ]
 
