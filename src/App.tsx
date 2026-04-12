@@ -139,22 +139,6 @@ const humanRestoreSteps = [
     title: '1. Pay for one photo',
     description: 'Complete secure checkout for one important old photo.',
   },
-  {
-    title: '2. Upload only after checkout',
-    description:
-      'After payment, we send a secure upload link by email. If the message is delayed, you can still use the fallback upload form on the thank-you page.',
-  },
-  {
-    title: '3. Get delivery by email',
-    description:
-      'Delivered within 48 hours during beta. Limited beta capacity.',
-  },
-]
-
-const humanRestoreUploadChecklist = [
-  'The original scan or the highest-resolution copy you have',
-  'A short note about the damage or what you want improved',
-  'Any deadline or family context that matters for this restoration',
 ]
 
 const siteUrl = 'https://artgen.site'
@@ -188,23 +172,6 @@ type SecureOrderResponse = {
     receiptUrl?: string
     testMode?: boolean
   }
-}
-
-function formatOrderDate(value: string) {
-  if (!value) {
-    return ''
-  }
-
-  const parsedDate = new Date(value)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return ''
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(parsedDate)
 }
 
 function maskEmailAddress(email: string) {
@@ -299,8 +266,6 @@ function App() {
   const [inlineSecureOrder, setInlineSecureOrder] = useState<
     SecureOrderResponse['order'] | null
   >(null)
-  const [inlineSecureOrderError, setInlineSecureOrderError] = useState('')
-  const [showBackupUploadForm, setShowBackupUploadForm] = useState(false)
 
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
   const currentSearchParams = new URLSearchParams(window.location.search)
@@ -320,9 +285,6 @@ function App() {
     currentSearchParams.get('order') ||
     currentSearchParams.get('checkout_id') ||
     ''
-  const formattedInlineOrderDate = inlineSecureOrder
-    ? formatOrderDate(inlineSecureOrder.createdAt)
-    : ''
 
   let mainView: 'editor' | 'success' | 'secure-upload' | 'home' = 'home'
 
@@ -491,14 +453,12 @@ function App() {
     ) {
       setInlineSecureOrderStatus('idle')
       setInlineSecureOrder(null)
-      setInlineSecureOrderError('')
       return () => undefined
     }
 
     let isActive = true
     setInlineSecureOrderStatus('loading')
     setInlineSecureOrder(null)
-    setInlineSecureOrderError('')
 
     fetch(
       `/api/human-restore-order?token=${encodeURIComponent(directUploadToken)}`
@@ -525,18 +485,13 @@ function App() {
           test_mode: Boolean(responseBody.order.testMode),
         })
       })
-      .catch(error => {
+      .catch(() => {
         if (!isActive) {
           return
         }
 
         setInlineSecureOrderStatus('error')
         setInlineSecureOrder(null)
-        setInlineSecureOrderError(
-          error instanceof Error
-            ? error.message
-            : 'The secure upload form could not be prepared on this page.'
-        )
       })
 
     return () => {
@@ -544,122 +499,37 @@ function App() {
     }
   }, [directUploadStatus, directUploadToken, isHumanRestoreSuccessPage])
 
-  useEffect(() => {
-    if (!showBackupUploadForm || !isHumanRestoreSuccessPage) {
-      return () => undefined
-    }
-
-    const scrollTimeout = window.setTimeout(() => {
-      document
-        .getElementById('backup-upload-form')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 60)
-
-    return () => {
-      window.clearTimeout(scrollTimeout)
-    }
-  }, [isHumanRestoreSuccessPage, showBackupUploadForm])
-
   const isDirectUploadReady =
     directUploadStatus === 'ready' && Boolean(directUploadUrl)
   const isDirectUploadPreparing = directUploadStatus === 'loading'
   const isInlineSecureUploadReady =
     inlineSecureOrderStatus === 'ready' && Boolean(inlineSecureOrder)
-  const backupFormToggleLabel = showBackupUploadForm
-    ? 'Hide backup upload form'
-    : 'Open backup upload form'
+  const isInlineUploadPreparing =
+    isDirectUploadPreparing ||
+    (isDirectUploadReady && inlineSecureOrderStatus === 'loading')
+  const shouldAutoFallbackToBackupForm =
+    directUploadStatus === 'unavailable' || inlineSecureOrderStatus === 'error'
 
-  function scrollToSection(sectionId: string) {
-    document
-      .getElementById(sectionId)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  let successHeroTitle = 'Your payment is confirmed.'
+  let successHeroTitle = 'Payment received. Upload your photo.'
   let successHeroDescription = maskedCheckoutEmail
-    ? `You can upload your photo on this page now. We also sent the secure upload link to ${maskedCheckoutEmail} as backup access on any device.`
-    : 'Your checkout is complete. Upload your photo on this page now. We also send a secure upload link to your checkout email as backup access.'
-  let primaryPathTitle = 'Upload your photo on this page now.'
-  let primaryPathDescription =
-    'This is the fastest way to continue. Once the order is verified below, your upload stays attached to the paid order automatically.'
+    ? `Upload your photo on this page now. We also sent the secure link to ${maskedCheckoutEmail} only as backup access.`
+    : 'Upload your photo on this page now. We also sent the secure link to your checkout email only as backup access.'
 
   if (isInlineSecureUploadReady) {
-    successHeroTitle = 'Your upload form is ready below.'
+    successHeroTitle = 'Payment received. Upload your photo.'
     successHeroDescription = maskedCheckoutEmail
-      ? `Your paid order is confirmed and this page is already tied to it. Upload below now, and keep the secure email sent to ${maskedCheckoutEmail} only as backup access.`
-      : 'Your paid order is confirmed and this page is already tied to it. Upload below now, and keep the secure email only as backup access.'
-    primaryPathTitle = 'Upload below now.'
-    primaryPathDescription =
-      'The secure upload form is ready on this page. Add your photo and notes below to continue immediately.'
-  } else if (
-    isDirectUploadPreparing ||
-    (isDirectUploadReady && inlineSecureOrderStatus === 'loading')
-  ) {
-    successHeroTitle = 'Preparing your upload form.'
+      ? `Your paid order is confirmed and already linked to this page. Upload below now. The secure email sent to ${maskedCheckoutEmail} is only a backup.`
+      : 'Your paid order is confirmed and already linked to this page. Upload below now. The secure email is only a backup.'
+  } else if (isInlineUploadPreparing) {
+    successHeroTitle = 'Payment received. Preparing your upload form.'
     successHeroDescription = maskedCheckoutEmail
-      ? `We are verifying this checkout and preparing the order-bound upload form on this page. The secure link is also in ${maskedCheckoutEmail} as backup access.`
-      : 'We are verifying this checkout and preparing the order-bound upload form on this page. The secure link is also in your checkout email as backup access.'
-    primaryPathTitle = 'Preparing your direct upload form...'
-    primaryPathDescription =
-      'Stay on this page for a moment. If order-bound upload cannot be prepared here, you can still use the email backup link or the backup form below.'
-  } else if (maskedCheckoutEmail) {
-    primaryPathTitle = 'Use direct upload below when available.'
-    primaryPathDescription = `If the order-bound form is unavailable on this page, use the secure email sent to ${maskedCheckoutEmail}, or open the backup upload form below.`
-  }
-
-  let directUploadCta: JSX.Element
-
-  if (isInlineSecureUploadReady) {
-    directUploadCta = (
-      <div className="grid gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            scrollToSection('direct-upload-form')
-          }}
-          className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820]"
-        >
-          Upload photo below now
-        </button>
-        <p className="text-sm leading-6 text-[#66574d]">
-          This page is already tied to the paid order. The secure email link is
-          only your backup access path.
-        </p>
-      </div>
-    )
-  } else if (
-    isDirectUploadPreparing ||
-    (isDirectUploadReady && inlineSecureOrderStatus === 'loading')
-  ) {
-    directUploadCta = (
-      <div className="grid gap-3">
-        <span className="inline-flex justify-center rounded-full bg-[#d8c6b2] px-7 py-4 text-center font-black text-[#5b4a40]">
-          Preparing direct upload...
-        </span>
-        <p className="text-sm leading-6 text-[#66574d]">
-          This usually takes a moment. We are preparing the order-bound upload
-          form directly on this page.
-        </p>
-      </div>
-    )
-  } else {
-    directUploadCta = (
-      <div className="grid gap-3">
-        <span className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/70 px-5 py-4 text-sm leading-6 text-[#66574d]">
-          Use the secure email link first. If it is delayed, the backup upload
-          form below is still available for this paid order.
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            setShowBackupUploadForm(currentValue => !currentValue)
-          }}
-          className="inline-flex justify-center rounded-full border border-[#211915] px-7 py-4 text-center font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
-        >
-          {backupFormToggleLabel}
-        </button>
-      </div>
-    )
+      ? `We are verifying this checkout and preparing the upload form on this page. The secure link in ${maskedCheckoutEmail} is only your backup.`
+      : 'We are verifying this checkout and preparing the upload form on this page. The secure link in your checkout email is only your backup.'
+  } else if (shouldAutoFallbackToBackupForm) {
+    successHeroTitle = 'Payment received. Upload your photo.'
+    successHeroDescription = maskedCheckoutEmail
+      ? `We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure link sent to ${maskedCheckoutEmail} is also available if you leave this page.`
+      : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
   }
 
   useEffect(() => {
@@ -838,77 +708,36 @@ function App() {
         )}
         {mainView === 'success' && (
           <div className="mx-auto flex max-w-5xl flex-col px-4 py-10 md:px-8">
-            <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-12">
+            <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-10">
               <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
                 Payment received
               </p>
-              <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
+              <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-5xl">
                 {successHeroTitle}
               </h1>
-              <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
+              <p className="mt-4 max-w-3xl text-lg leading-8 text-[#66574d]">
                 {successHeroDescription}
               </p>
 
-              <div className="mt-8 grid gap-5 md:grid-cols-3">
-                <article className="rounded-[1.75rem] border border-[#b8d99f] bg-[#f4ffe8] p-6 shadow-xl shadow-[#8a4f1d]/10">
-                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#5c8b32]">
-                    Payment
-                  </p>
-                  <h2 className="mt-3 text-xl font-black text-[#1f3413]">
-                    Confirmed
-                  </h2>
-                  <p className="mt-4 leading-7 text-[#355322]">
-                    Your paid Human-assisted Restore order is recorded.
-                  </p>
-                </article>
-                <article className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10">
-                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#9b6b3c]">
-                    Upload
-                  </p>
-                  <h2 className="mt-3 text-xl font-black text-[#211915]">
-                    Secure page first
-                  </h2>
-                  <p className="mt-4 leading-7 text-[#66574d]">
-                    Use the direct secure upload page when available, or open
-                    the same secure link from your email backup access.
-                  </p>
-                </article>
-                <article className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/75 p-6 shadow-xl shadow-[#8a4f1d]/10">
-                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#9b6b3c]">
-                    Delivery
-                  </p>
-                  <h2 className="mt-3 text-xl font-black text-[#211915]">
-                    Confirmation, then email delivery
-                  </h2>
-                  <p className="mt-4 leading-7 text-[#66574d]">
-                    After upload, we send a confirmation email. During beta,
-                    final delivery is usually sent within 48 hours.
-                  </p>
-                </article>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <div className="rounded-full border border-[#b8d99f] bg-[#f4ffe8] px-4 py-2 text-sm font-bold text-[#355322]">
+                  Paid order confirmed
+                </div>
+                {maskedCheckoutEmail && (
+                  <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
+                    {maskedCheckoutEmail}
+                  </div>
+                )}
+                {defaultOrderReference && (
+                  <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
+                    Order {defaultOrderReference}
+                  </div>
+                )}
               </div>
             </section>
 
-            <section className="mt-10 grid gap-6 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1.15fr_0.85fr] md:p-10">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                  Primary path
-                </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  {primaryPathTitle}
-                </h2>
-                <p className="mt-6 leading-7 text-[#66574d]">
-                  {primaryPathDescription}
-                </p>
-              </div>
-              <div className="rounded-[1.75rem] border border-[#e6d2b7] bg-white/80 p-6 md:p-8">
-                {directUploadCta}
-              </div>
-            </section>
-
-            {(isDirectUploadPreparing ||
-              (isDirectUploadReady &&
-                inlineSecureOrderStatus === 'loading')) && (
-              <section className="mt-10 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10">
+            {isInlineUploadPreparing && (
+              <section className="mt-6 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10">
                 <p className="text-lg font-black text-[#211915]">
                   Preparing your direct upload form...
                 </p>
@@ -919,80 +748,8 @@ function App() {
               </section>
             )}
 
-            {inlineSecureOrderStatus === 'error' && (
-              <section className="mt-10 rounded-[2rem] border border-[#f0b5a9] bg-[#fff1ed] p-8 text-[#8a2f1d] shadow-xl shadow-[#8a4f1d]/10">
-                <p className="text-lg font-black">
-                  Direct upload could not be prepared on this page
-                </p>
-                <p className="mt-3 leading-7">{inlineSecureOrderError}</p>
-                <p className="mt-4 text-sm leading-6">
-                  Do not pay again. Use the secure email link as backup access,
-                  or open the backup upload form below.
-                </p>
-              </section>
-            )}
-
             {isInlineSecureUploadReady && inlineSecureOrder && (
-              <section
-                id="direct-upload-form"
-                className="scroll-mt-28 rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10"
-              >
-                <div className="grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
-                  <div>
-                    <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                      Direct upload
-                    </p>
-                    <h2 className="mt-3 text-3xl font-black text-[#211915] sm:text-4xl">
-                      Upload the paid order photo right here.
-                    </h2>
-                    <p className="mt-4 max-w-2xl leading-7 text-[#66574d]">
-                      This page is already linked to your paid order. Add the
-                      best source photo you have, include any repair notes, and
-                      submit once.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4 rounded-[1.75rem] border border-[#e6d2b7] bg-white/70 p-6">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                        Checkout email
-                      </p>
-                      <p className="mt-2 text-base font-black text-[#211915]">
-                        {inlineSecureOrder.checkoutEmailMasked}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                        Order number
-                      </p>
-                      <p className="mt-2 text-base font-black text-[#211915]">
-                        {inlineSecureOrder.orderNumber ||
-                          inlineSecureOrder.orderId}
-                      </p>
-                    </div>
-                    {formattedInlineOrderDate && (
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                          Purchased
-                        </p>
-                        <p className="mt-2 text-base font-bold text-[#211915]">
-                          {formattedInlineOrderDate}
-                        </p>
-                      </div>
-                    )}
-                    {inlineSecureOrder.receiptUrl && (
-                      <a
-                        href={inlineSecureOrder.receiptUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex justify-center rounded-full border border-[#211915] px-5 py-3 text-center text-sm font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
-                      >
-                        View receipt
-                      </a>
-                    )}
-                  </div>
-                </div>
-
+              <section id="direct-upload-form" className="mt-6 scroll-mt-28">
                 <HumanRestoreUploadForm
                   defaultEmail=""
                   defaultOrderReference=""
@@ -1006,90 +763,30 @@ function App() {
               </section>
             )}
 
-            <section className="mt-10 grid gap-6 md:grid-cols-[0.95fr_1.05fr]">
-              <article className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
-                <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                  Email backup access
-                </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  Keep the secure email only as backup access.
-                </h2>
-                <p className="mt-4 leading-7 text-[#66574d]">
-                  {maskedCheckoutEmail
-                    ? `The direct upload form on this page is the primary path. The secure email sent to ${maskedCheckoutEmail} is only for backup access if you leave this page or need to continue on another device.`
-                    : 'The direct upload form on this page is the primary path. The secure email is only for backup access if you leave this page or need to continue on another device.'}
-                </p>
-                <dl className="mt-6 grid gap-4 text-sm text-[#5b4a40]">
-                  <div>
-                    <dt className="font-black uppercase tracking-[0.14em] text-[#211915]">
-                      Upload email
-                    </dt>
-                    <dd className="mt-2 text-base font-bold text-[#211915]">
-                      {maskedCheckoutEmail || 'Your checkout email'}
-                    </dd>
-                  </div>
-                  {defaultOrderReference && (
-                    <div>
-                      <dt className="font-black uppercase tracking-[0.14em] text-[#211915]">
-                        Reference
-                      </dt>
-                      <dd className="mt-2 text-base font-bold text-[#211915]">
-                        {defaultOrderReference}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </article>
-
-              <article className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-xl shadow-[#8a4f1d]/10 md:p-10">
-                <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                  Need the backup form?
-                </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
-                  Use the backup form only if the secure page or email link is
-                  unavailable.
-                </h2>
-                <ul className="mt-6 space-y-3 text-[#66574d]">
-                  {humanRestoreUploadChecklist.map(item => (
-                    <li key={item} className="flex gap-3 leading-7">
-                      <span className="text-[#9b6b3c]">*</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-6 leading-7 text-[#66574d]">
-                  You do not need to pay again if the secure email is delayed.
-                  Using the same checkout email helps us match the backup
-                  submission quickly.
-                </p>
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowBackupUploadForm(currentValue => !currentValue)
-                    }}
-                    className="inline-flex justify-center rounded-full border border-[#211915] px-7 py-4 text-center font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white"
-                  >
-                    {backupFormToggleLabel}
-                  </button>
-                  <a
-                    href="/"
-                    className="inline-flex justify-center rounded-full border border-[#d7b98c] px-7 py-4 text-center font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-[#fffaf3]"
-                  >
-                    Back to homepage
-                  </a>
-                </div>
-              </article>
-            </section>
-
-            {showBackupUploadForm && (
-              <section id="backup-upload-form" className="scroll-mt-28">
+            {shouldAutoFallbackToBackupForm && !isInlineUploadPreparing && (
+              <section id="direct-upload-form" className="mt-6 scroll-mt-28">
                 <HumanRestoreUploadForm
                   defaultEmail={defaultCheckoutEmail}
                   defaultOrderReference={defaultOrderReference}
                 />
               </section>
             )}
+
+            <section className="mt-6 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-6 shadow-xl shadow-[#8a4f1d]/10 md:p-8">
+              <p className="max-w-3xl text-sm leading-7 text-[#66574d]">
+                {maskedCheckoutEmail
+                  ? `If you leave this page, the secure backup link is also waiting in ${maskedCheckoutEmail}. You do not need to pay again if direct upload is temporarily unavailable here.`
+                  : 'If you leave this page, the same secure upload link is also in your checkout email as backup access. You do not need to pay again if direct upload is temporarily unavailable here.'}
+              </p>
+              <div className="mt-4 flex">
+                <a
+                  href="/"
+                  className="inline-flex justify-center rounded-full border border-[#d7b98c] px-6 py-3 text-center font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-[#fffaf3]"
+                >
+                  Back to homepage
+                </a>
+              </div>
+            </section>
           </div>
         )}
         {mainView === 'home' && (

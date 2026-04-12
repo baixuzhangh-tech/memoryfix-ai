@@ -187,88 +187,37 @@ export default function HumanRestoreUploadForm(
         </p>
         <h2 className="mt-3 text-3xl font-black sm:text-4xl">
           {isSecureUpload
-            ? 'Upload the paid order photo now.'
+            ? 'Upload the photo you want restored.'
             : 'Use this backup form for your paid order only if needed.'}
         </h2>
         <p className="mt-4 leading-7 text-[#66574d]">
           {isSecureUpload
-            ? 'This page is already tied to your paid order. Add your photo and notes below, then submit once.'
+            ? 'Choose your best source photo, add any repair notes that matter, and submit once.'
             : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the order number if you have it so we can match the paid order quickly.'}
         </p>
       </div>
 
       {isSecureUpload && secureOrderSummary && (
-        <div className="mt-8 rounded-[1.75rem] border border-[#e6d2b7] bg-[#fffaf3] p-6">
-          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
-            Secure order details
-          </p>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                Checkout email
-              </p>
-              <p className="mt-2 font-bold text-[#211915]">
-                {secureOrderSummary.checkoutEmailMasked}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                Order number
-              </p>
-              <p className="mt-2 font-bold text-[#211915]">
-                {secureOrderSummary.orderNumber || 'Paid order'}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#66574d]">
-                Product
-              </p>
-              <p className="mt-2 font-bold text-[#211915]">
-                {secureOrderSummary.productName || 'Human-assisted Restore'}
-              </p>
-            </div>
+        <div className="mt-6 flex flex-wrap gap-3 text-sm font-bold text-[#5b4a40]">
+          <div className="rounded-full border border-[#b8d99f] bg-[#f4ffe8] px-4 py-2 text-[#355322]">
+            Payment confirmed
+          </div>
+          <div className="rounded-full border border-[#e6d2b7] bg-[#fffaf3] px-4 py-2">
+            {secureOrderSummary.checkoutEmailMasked}
+          </div>
+          <div className="rounded-full border border-[#e6d2b7] bg-[#fffaf3] px-4 py-2">
+            {secureOrderSummary.orderNumber || 'Paid order'}
+          </div>
+          <div className="rounded-full border border-[#e6d2b7] bg-[#fffaf3] px-4 py-2">
+            {secureOrderSummary.productName || 'Human-assisted Restore'}
           </div>
         </div>
       )}
 
-      <div className="mt-8 grid gap-4 md:grid-cols-3">
-        <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
-          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#5c8b32]">
-            Status
-          </p>
-          <p className="mt-3 text-sm leading-6 text-[#355322]">
-            {isSecureUpload
-              ? 'Payment confirmed. This upload will attach directly to your paid order.'
-              : 'Use this backup form only if the secure upload page or secure email link is unavailable.'}
-          </p>
-        </article>
-        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
-          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
-            Privacy
-          </p>
-          <p className="mt-3 text-sm leading-6 text-[#66574d]">
-            This upload is used only for your paid Human-assisted Restore order.
-            It is not used to train public models.
-          </p>
-        </article>
-        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
-          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
-            Retention
-          </p>
-          <p className="mt-3 text-sm leading-6 text-[#66574d]">
-            During beta, uploaded files are kept only as long as needed to
-            complete delivery and follow-up adjustments.
-          </p>
-        </article>
-        <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5">
-          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
-            Support
-          </p>
-          <p className="mt-3 text-sm leading-6 text-[#66574d]">
-            After submission, we send a confirmation email whenever possible. If
-            anything looks wrong, contact support without paying again.
-          </p>
-        </article>
+      <div className="mt-6 rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] px-5 py-4 text-sm leading-6 text-[#66574d]">
+        {isSecureUpload
+          ? 'This upload is attached directly to your paid order. We use it only to complete your restoration and send your confirmation and delivery emails.'
+          : 'Use this backup form only if direct secure upload is unavailable. We use it only to match and complete your paid restoration order.'}
       </div>
 
       <form className="mt-8 grid gap-6" onSubmit={handleSubmit}>
@@ -357,46 +306,18 @@ export default function HumanRestoreUploadForm(
         </label>
 
         {status === 'success' && (
-          <div className="grid gap-4 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
-                <p className="text-sm font-black uppercase tracking-[0.14em]">
-                  Status
-                </p>
-                <p className="mt-2 text-base font-black text-[#1f3413]">
-                  Upload received
-                </p>
-              </div>
-              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
-                <p className="text-sm font-black uppercase tracking-[0.14em]">
-                  Next step
-                </p>
-                <p className="mt-2 text-base font-black text-[#1f3413]">
-                  Confirmation email sent
-                </p>
-              </div>
-              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
-                <p className="text-sm font-black uppercase tracking-[0.14em]">
-                  Delivery target
-                </p>
-                <p className="mt-2 text-base font-black text-[#1f3413]">
-                  Usually within 48 hours
-                </p>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-black uppercase tracking-[0.14em]">
-                Restoration workflow started
-              </p>
-              <p className="mt-2 leading-7">
-                {isSecureUpload
-                  ? 'Your photo is now attached to the paid order behind this secure link. Keep the confirmation email for your records and reply there if you need to add details.'
-                  : 'Your photo was received and queued for paid order matching. Keep the confirmation email for your records and reply there if you need to add more details.'}
-              </p>
-            </div>
+          <div className="grid gap-3 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
+            <p className="text-base font-black text-[#1f3413]">
+              Upload received
+            </p>
+            <p className="leading-7">
+              {isSecureUpload
+                ? 'Your photo is attached to this paid order. We will send a confirmation email and usually deliver within 48 hours during beta.'
+                : 'Your photo was received for paid order matching. We will send a confirmation email and usually deliver within 48 hours during beta.'}
+            </p>
             {submissionReference && (
-              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4">
-                <p className="text-sm font-black uppercase tracking-[0.14em]">
+              <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4 text-sm">
+                <p className="font-black uppercase tracking-[0.14em]">
                   Submission reference
                 </p>
                 <p className="mt-2 text-base font-black text-[#211915]">
@@ -408,7 +329,7 @@ export default function HumanRestoreUploadForm(
               {confirmationEmailSent ? (
                 <p>
                   {isSecureUpload
-                    ? 'A confirmation email has been sent for this upload. You do not need to submit again unless support asks you to.'
+                    ? 'A confirmation email has been sent. You do not need to submit again unless support asks you to.'
                     : 'A confirmation email has been sent to your checkout email. You do not need to submit again unless support asks you to.'}
                 </p>
               ) : (
@@ -429,7 +350,7 @@ export default function HumanRestoreUploadForm(
             <p>{errorMessage}</p>
             <p className="text-sm leading-6">
               {isSecureUpload
-                ? 'Please retry once using the same secure link. If it still fails, do not pay again. Reply to your secure upload email and mention that the form did not complete.'
+                ? 'Please retry once using this page. If it still fails, do not pay again. Reply to your secure upload email and mention that the form did not complete.'
                 : 'Please retry once. If it still fails, do not pay again. Reply to your order confirmation email and mention that the upload form did not complete.'}
             </p>
           </div>
@@ -437,10 +358,9 @@ export default function HumanRestoreUploadForm(
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <p className="max-w-2xl text-sm leading-6 text-[#66574d]">
-            This backup form is only for paid Human-assisted Restore orders. The
-            free local repair tool still keeps photos in your browser and does
-            not upload them. Please submit only once per paid order unless
-            support asks you to upload again.
+            {isSecureUpload
+              ? 'Please submit only once for this paid order unless support asks you to upload again.'
+              : 'This backup form is only for paid Human-assisted Restore orders. Please submit only once per paid order unless support asks you to upload again.'}
           </p>
           <button
             type="submit"
