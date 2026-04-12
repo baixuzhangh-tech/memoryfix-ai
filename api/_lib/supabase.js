@@ -204,9 +204,10 @@ export async function uploadObject({
   upsert = true,
 }) {
   const { url } = getConfig()
+  const trimmedBucket = bucket.trim()
   const encodedPath = encodeStoragePath(path)
 
-  await supabaseFetch(`${url}/storage/v1/object/${bucket}/${encodedPath}`, {
+  await supabaseFetch(`${url}/storage/v1/object/${trimmedBucket}/${encodedPath}`, {
     method: 'PUT',
     headers: {
       'Content-Type': contentType,
@@ -223,10 +224,11 @@ export async function uploadObject({
 
 export async function downloadObject({ bucket, path }) {
   const { url } = getConfig()
+  const trimmedBucket = bucket.trim()
   const encodedPath = encodeStoragePath(path)
   const { serviceRoleKey } = getConfig()
   const response = await fetch(
-    `${url}/storage/v1/object/${bucket}/${encodedPath}`,
+    `${url}/storage/v1/object/${trimmedBucket}/${encodedPath}`,
     {
       headers: {
         apikey: serviceRoleKey,
@@ -257,9 +259,10 @@ export async function createSignedUrl({
   }
 
   const { url } = getConfig()
+  const trimmedBucket = bucket.trim()
   const encodedPath = encodeStoragePath(path)
   const payload = await supabaseFetch(
-    `${url}/storage/v1/object/sign/${bucket}/${encodedPath}`,
+    `${url}/storage/v1/object/sign/${trimmedBucket}/${encodedPath}`,
     {
       method: 'POST',
       headers: {
@@ -316,8 +319,9 @@ export async function deleteObject({ bucket, path }) {
   }
 
   const { url } = getConfig()
+  const trimmedBucket = bucket.trim()
 
-  return supabaseFetch(`${url}/storage/v1/object/${bucket}`, {
+  return supabaseFetch(`${url}/storage/v1/object/${trimmedBucket}`, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',

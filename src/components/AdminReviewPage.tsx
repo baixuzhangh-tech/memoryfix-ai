@@ -516,6 +516,8 @@ export default function AdminReviewPage() {
                     src={selectedJob.original_signed_url}
                     alt="Original upload"
                     className="max-h-[520px] w-full rounded-[1.25rem] object-contain"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="rounded-[1.25rem] border border-dashed border-[#d7b98c] p-8 text-center text-[#66574d]">
@@ -543,6 +545,8 @@ export default function AdminReviewPage() {
                     src={selectedJob.result_signed_url}
                     alt="AI restored result"
                     className="max-h-[520px] w-full rounded-[1.25rem] object-contain"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="rounded-[1.25rem] border border-dashed border-[#d7b98c] p-8 text-center text-[#66574d]">
