@@ -28,6 +28,73 @@ export const config = {
 const maxUploadSizeBytes = 15 * 1024 * 1024
 const maxSubmissionsPerOrder = 1
 const maxFallbackSubmissionsPerDay = 2
+
+async function verifyLemonSqueezyOrder({ email, orderNumber }) {
+  const apiKey = process.env.LEMON_SQUEEZY_API_KEY
+  const storeId = process.env.LEMON_SQUEEZY_STORE_ID
+
+  if (!apiKey) {
+    return { verified: false, reason: 'Order verification is not configured.' }
+  }
+
+  const url = new URL('https://api.lemonsqueezy.com/v1/orders')
+
+  url.searchParams.set('filter[user_email]', email)
+
+  if (storeId) {
+    url.searchParams.set('filter[store_id]', storeId)
+  }
+
+  url.searchParams.set('page[size]', '10')
+  url.searchParams.set('sort', '-createdAt')
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: 'application/vnd.api+json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+  })
+
+  if (!response.ok) {
+    return { verified: false, reason: 'Could not reach payment provider.' }
+  }
+
+  const payload = await response.json().catch(() => null)
+  const orders = Array.isArray(payload?.data) ? payload.data : []
+  const normalizedOrderNum = String(orderNumber).trim()
+  const match = orders.find(o => {
+    const attrs = o?.attributes || o?.data?.attributes
+
+    if (!attrs) {
+      return false
+    }
+
+    return (
+      String(attrs.order_number) === normalizedOrderNum &&
+      attrs.status === 'paid'
+    )
+  })
+
+  if (!match) {
+    return { verified: false, reason: 'No matching paid order found for this email and order number.' }
+  }
+
+  const attrs = match.attributes || match.data?.attributes
+  const firstItem = attrs?.first_order_item
+
+  return {
+    verified: true,
+    order: {
+      checkoutEmail: attrs.user_email || email,
+      customerName: attrs.user_name || '',
+      orderId: String(match.id),
+      orderNumber: String(attrs.order_number),
+      productName: firstItem?.product_name || 'Human-assisted Restore',
+      receiptUrl: attrs.urls?.receipt || '',
+      testMode: Boolean(attrs.test_mode),
+    },
+  }
+}
 const allowedImageTypes = new Set([
   'image/jpeg',
   'image/png',
@@ -230,6 +297,8 @@ export default async function handler(req, res) {
       return
     }
 
+    let verifiedOrder = null
+
     if (isSecureUpload && tokenVerification?.payload?.orderId) {
       const existingCount = await countJobsByOrderId(
         String(tokenVerification.payload.orderId)
@@ -244,6 +313,36 @@ export default async function handler(req, res) {
     }
 
     if (!isSecureUpload) {
+      if (!orderReference) {
+        json(res, 400, {
+          error: 'Order number is required. You can find it in your payment confirmation email from Lemon Squeezy.',
+        })
+        return
+      }
+
+      const verification = await verifyLemonSqueezyOrder({
+        email: checkoutEmail,
+        orderNumber: orderReference,
+      })
+
+      if (!verification.verified) {
+        json(res, 403, {
+          error: verification.reason || 'Order could not be verified. Please check your email and order number.',
+        })
+        return
+      }
+
+      verifiedOrder = verification.order
+
+      const existingCount = await countJobsByOrderId(verifiedOrder.orderId)
+
+      if (existingCount >= maxSubmissionsPerOrder) {
+        json(res, 409, {
+          error: `This order already has a photo submission. Each order includes ${maxSubmissionsPerOrder} photo restoration. If you need to replace your photo, please contact support.`,
+        })
+        return
+      }
+
       const recentCount = await countRecentJobsByEmail(checkoutEmail, 24)
 
       if (recentCount >= maxFallbackSubmissionsPerDay) {
@@ -284,7 +383,9 @@ export default async function handler(req, res) {
       ''
     )
     const storagePath = `${safeSubmissionReference}/${file.filename}`
-    const orderPayload = isSecureUpload ? tokenVerification.payload : null
+    const orderPayload = isSecureUpload
+      ? tokenVerification.payload
+      : verifiedOrder || null
 
     await uploadObject({
       bucket: buckets.originals,
@@ -301,9 +402,9 @@ export default async function handler(req, res) {
       customer_name: orderPayload?.customerName || '',
       expires_at: expiresAt.toISOString(),
       notes,
-      order_bound: isSecureUpload,
+      order_bound: isSecureUpload || Boolean(verifiedOrder),
       order_id: orderPayload?.orderId || null,
-      order_number: orderReference || null,
+      order_number: orderPayload?.orderNumber || orderReference || null,
       original_file_name: file.filename,
       original_file_size: file.data.length,
       original_file_type: file.contentType,
@@ -314,14 +415,14 @@ export default async function handler(req, res) {
       status: 'uploaded',
       submission_reference: submissionReference,
       test_mode: Boolean(orderPayload?.testMode),
-      upload_source: isSecureUpload ? 'secure_link' : 'fallback_form',
+      upload_source: isSecureUpload ? 'secure_link' : verifiedOrder ? 'verified_fallback' : 'fallback_form',
     })
 
     await insertEvent(job.id, 'photo_uploaded', {
       file_name: file.filename,
       file_size: file.data.length,
-      order_bound: isSecureUpload,
-      upload_source: isSecureUpload ? 'secure_link' : 'fallback_form',
+      order_bound: isSecureUpload || Boolean(verifiedOrder),
+      upload_source: isSecureUpload ? 'secure_link' : verifiedOrder ? 'verified_fallback' : 'fallback_form',
     })
 
     let currentJob = job
