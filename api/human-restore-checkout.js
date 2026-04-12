@@ -25,9 +25,6 @@ export default async function handler(req, res) {
   const parsedVariantId = Number(variantId)
   const successUrl = new URL('/human-restore/success', siteUrl)
 
-  successUrl.searchParams.set('order_id', '[order_id]')
-  successUrl.searchParams.set('email', '[email]')
-
   if (!apiKey || !storeId || !variantId) {
     json(res, 503, {
       error: 'Server-created checkout is not configured yet.',

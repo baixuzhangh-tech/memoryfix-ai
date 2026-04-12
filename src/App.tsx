@@ -166,6 +166,33 @@ type CreateCheckoutResponse = {
   ok?: boolean
 }
 
+type LemonCheckoutSuccessData = {
+  email?: string
+  id?: number | string
+  identifier?: string
+  userEmail?: string
+}
+
+type LemonSqueezyEvent = {
+  data?: LemonCheckoutSuccessData
+  event: string
+}
+
+declare global {
+  interface Window {
+    createLemonSqueezy?: () => void
+    LemonSqueezy?: {
+      Setup: (options: {
+        eventHandler: (event: LemonSqueezyEvent) => void
+      }) => void
+      Url: {
+        Close?: () => void
+        Open: (url: string) => void
+      }
+    }
+  }
+}
+
 type SecureOrderResponse = {
   error?: string
   ok?: boolean
@@ -253,11 +280,26 @@ function upsertCanonicalLink(href: string) {
   canonicalLink.setAttribute('href', href)
 }
 
+function normalizeCheckoutEmail(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function getLemonOrderEmail(orderData: LemonCheckoutSuccessData | undefined) {
+  const snakeCaseEmailKey = 'user_email'
+  const orderDataRecord = orderData as Record<string, unknown> | null
+  const snakeCaseEmail = String(orderDataRecord?.[snakeCaseEmailKey] || '')
+
+  return snakeCaseEmail || orderData?.userEmail || orderData?.email || ''
+}
+
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
 
   const [showAbout, setShowAbout] = useState(false)
+  const lemonSqueezySetupRef = useRef(false)
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
@@ -290,8 +332,13 @@ function App() {
     ''
   const maskedCheckoutEmail = maskEmailAddress(defaultCheckoutEmail)
   const directAccessOrderId = currentSearchParams.get('order_id') || ''
+  const directAccessOrderIdentifier =
+    currentSearchParams.get('order_identifier') ||
+    currentSearchParams.get('orderIdentifier') ||
+    ''
   const defaultOrderReference =
     currentSearchParams.get('order_id') ||
+    currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('order') ||
     currentSearchParams.get('checkout_id') ||
     ''
@@ -387,7 +434,10 @@ function App() {
       }
     }
 
-    if (!directAccessOrderId || !defaultCheckoutEmail) {
+    if (
+      (!directAccessOrderId && !directAccessOrderIdentifier) ||
+      !defaultCheckoutEmail
+    ) {
       setDirectUploadStatus('unavailable')
       setDirectUploadUrl('')
       setDirectUploadToken('')
@@ -404,7 +454,17 @@ function App() {
       '/api/human-restore-secure-access',
       window.location.origin
     )
-    requestUrl.searchParams.set('orderId', directAccessOrderId)
+    if (directAccessOrderId) {
+      requestUrl.searchParams.set('orderId', directAccessOrderId)
+    }
+
+    if (directAccessOrderIdentifier) {
+      requestUrl.searchParams.set(
+        'orderIdentifier',
+        directAccessOrderIdentifier
+      )
+    }
+
     requestUrl.searchParams.set('checkoutEmail', defaultCheckoutEmail)
 
     fetch(requestUrl.toString())
@@ -451,6 +511,7 @@ function App() {
   }, [
     defaultCheckoutEmail,
     directAccessOrderId,
+    directAccessOrderIdentifier,
     isHumanRestoreSuccessPage,
     secureUploadToken,
   ])
@@ -542,6 +603,65 @@ function App() {
       : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
   }
 
+  function ensureLemonSqueezySetup() {
+    if (typeof window.createLemonSqueezy === 'function') {
+      window.createLemonSqueezy()
+    }
+
+    if (!window.LemonSqueezy?.Setup || !window.LemonSqueezy?.Url?.Open) {
+      return false
+    }
+
+    if (!lemonSqueezySetupRef.current) {
+      window.LemonSqueezy.Setup({
+        eventHandler: event => {
+          if (event.event !== 'Checkout.Success') {
+            return
+          }
+
+          const orderData = event.data
+          const paidOrderId =
+            orderData?.id === undefined || orderData?.id === null
+              ? ''
+              : String(orderData.id)
+          const paidOrderIdentifier = String(orderData?.identifier || '')
+          const paidCheckoutEmailSource = getLemonOrderEmail(orderData)
+          const paidCheckoutEmail = normalizeCheckoutEmail(
+            paidCheckoutEmailSource
+          )
+          const successUrl = new URL(
+            humanRestoreSuccessPath,
+            window.location.origin
+          )
+
+          if (paidOrderId) {
+            successUrl.searchParams.set('order_id', paidOrderId)
+          }
+
+          if (paidOrderIdentifier) {
+            successUrl.searchParams.set('order_identifier', paidOrderIdentifier)
+          }
+
+          if (paidCheckoutEmail) {
+            successUrl.searchParams.set('email', paidCheckoutEmail)
+          }
+
+          trackProductEvent('complete_human_restore_checkout', {
+            has_checkout_email: Boolean(paidCheckoutEmail),
+            has_order_id: Boolean(paidOrderId),
+            has_order_identifier: Boolean(paidOrderIdentifier),
+          })
+
+          window.LemonSqueezy?.Url?.Close?.()
+          window.location.assign(successUrl.toString())
+        },
+      })
+      lemonSqueezySetupRef.current = true
+    }
+
+    return true
+  }
+
   async function handleLaunchHumanRestoreCheckout() {
     if (checkoutLaunchStatus === 'loading') {
       return
@@ -572,6 +692,12 @@ function App() {
         )
       }
 
+      if (ensureLemonSqueezySetup()) {
+        window.LemonSqueezy?.Url.Open(responseBody.checkoutUrl)
+        setCheckoutLaunchStatus('idle')
+        return
+      }
+
       window.location.assign(responseBody.checkoutUrl)
     } catch (error) {
       setCheckoutLaunchStatus('error')
@@ -582,6 +708,10 @@ function App() {
       )
     }
   }
+
+  useEffect(() => {
+    ensureLemonSqueezySetup()
+  }, [])
 
   useEffect(() => {
     let isActive = true

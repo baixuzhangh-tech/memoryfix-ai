@@ -13,6 +13,10 @@ function normalizeEmail(value) {
     .toLowerCase()
 }
 
+function normalizeIdentifier(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
 function getOrderDetails(payload) {
   const attributes = payload?.data?.attributes
   const firstOrderItem = attributes?.first_order_item
@@ -32,7 +36,20 @@ function getOrderDetails(payload) {
     status: attributes.status || '',
     testMode: Boolean(attributes.test_mode),
     variantId: firstOrderItem?.variant_id,
+    identifier: attributes.identifier || '',
   }
+}
+
+function getListOrderDetails(payload) {
+  const orderItems = Array.isArray(payload?.data) ? payload.data : []
+
+  return orderItems
+    .map(item =>
+      getOrderDetails({
+        data: item,
+      })
+    )
+    .filter(Boolean)
 }
 
 export default async function handler(req, res) {
@@ -44,17 +61,22 @@ export default async function handler(req, res) {
   const orderId = Array.isArray(req.query.orderId)
     ? req.query.orderId[0]
     : req.query.orderId
+  const orderIdentifier = Array.isArray(req.query.orderIdentifier)
+    ? req.query.orderIdentifier[0]
+    : req.query.orderIdentifier
   const checkoutEmail = Array.isArray(req.query.checkoutEmail)
     ? req.query.checkoutEmail[0]
     : req.query.checkoutEmail
   const apiKey = process.env.LEMON_SQUEEZY_API_KEY
+  const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const uploadTokenSecret = process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
   const configuredVariantId = process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
 
-  if (!orderId || !checkoutEmail) {
+  if ((!orderId && !orderIdentifier) || !checkoutEmail) {
     json(res, 400, {
-      error: 'Order ID and checkout email are required for secure upload access.',
+      error:
+        'Order reference and checkout email are required for secure upload access.',
     })
     return
   }
@@ -67,26 +89,61 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(
-      `https://api.lemonsqueezy.com/v1/orders/${encodeURIComponent(orderId)}`,
-      {
-        headers: {
-          Accept: 'application/vnd.api+json',
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-      }
-    )
-
-    if (!response.ok) {
-      json(res, 404, {
-        error: 'We could not confirm this order for direct secure upload.',
-      })
-      return
+    const requestHeaders = {
+      Accept: 'application/vnd.api+json',
+      'Content-Type': 'application/vnd.api+json',
+      Authorization: `Bearer ${apiKey}`,
     }
 
-    const payload = await response.json().catch(() => null)
-    const order = getOrderDetails(payload)
+    let order = null
+
+    if (orderId) {
+      const response = await fetch(
+        `https://api.lemonsqueezy.com/v1/orders/${encodeURIComponent(orderId)}`,
+        {
+          headers: requestHeaders,
+        }
+      )
+
+      if (!response.ok) {
+        json(res, 404, {
+          error: 'We could not confirm this order for direct secure upload.',
+        })
+        return
+      }
+
+      const payload = await response.json().catch(() => null)
+      order = getOrderDetails(payload)
+    } else {
+      const requestUrl = new URL('https://api.lemonsqueezy.com/v1/orders')
+
+      requestUrl.searchParams.set('filter[user_email]', checkoutEmail)
+
+      if (storeId) {
+        requestUrl.searchParams.set('filter[store_id]', storeId)
+      }
+
+      const response = await fetch(requestUrl.toString(), {
+        headers: requestHeaders,
+      })
+
+      if (!response.ok) {
+        json(res, 404, {
+          error: 'We could not confirm this order for direct secure upload.',
+        })
+        return
+      }
+
+      const payload = await response.json().catch(() => null)
+      const matchedOrder = getListOrderDetails(payload).find(candidate => {
+        return (
+          normalizeIdentifier(candidate?.identifier) ===
+          normalizeIdentifier(orderIdentifier)
+        )
+      })
+
+      order = matchedOrder || null
+    }
 
     if (!order || !order.checkoutEmail || order.status !== 'paid') {
       json(res, 404, {
