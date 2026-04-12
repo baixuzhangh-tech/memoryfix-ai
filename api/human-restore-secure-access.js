@@ -14,7 +14,42 @@ function normalizeEmail(value) {
 }
 
 function normalizeIdentifier(value) {
-  return String(value || '').trim().toLowerCase()
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function normalizeCustomData(payload, attributes) {
+  return (
+    payload?.meta?.custom_data ||
+    attributes?.meta?.custom_data ||
+    attributes?.custom_data ||
+    null
+  )
+}
+
+function isOrderCreatedAfterCheckoutStart(order, checkoutStartedAt) {
+  if (!checkoutStartedAt || !order?.createdAt) {
+    return false
+  }
+
+  const checkoutStartedAtMs = Date.parse(checkoutStartedAt)
+  const orderCreatedAtMs = Date.parse(order.createdAt)
+
+  if (
+    !Number.isFinite(checkoutStartedAtMs) ||
+    !Number.isFinite(orderCreatedAtMs)
+  ) {
+    return false
+  }
+
+  const fiveMinutesMs = 5 * 60 * 1000
+  const thirtyMinutesMs = 30 * 60 * 1000
+
+  return (
+    orderCreatedAtMs >= checkoutStartedAtMs - fiveMinutesMs &&
+    orderCreatedAtMs <= checkoutStartedAtMs + thirtyMinutesMs
+  )
 }
 
 function getOrderDetails(payload) {
@@ -37,7 +72,7 @@ function getOrderDetails(payload) {
     testMode: Boolean(attributes.test_mode),
     variantId: firstOrderItem?.variant_id,
     identifier: attributes.identifier || '',
-    customData: attributes.meta?.custom_data || null,
+    customData: normalizeCustomData(payload, attributes),
   }
 }
 
@@ -74,6 +109,9 @@ export default async function handler(req, res) {
   const mode = Array.isArray(req.query.mode)
     ? req.query.mode[0]
     : req.query.mode
+  const checkoutStartedAt = Array.isArray(req.query.checkoutStartedAt)
+    ? req.query.checkoutStartedAt[0]
+    : req.query.checkoutStartedAt
   const apiKey = process.env.LEMON_SQUEEZY_API_KEY
   const storeId = process.env.LEMON_SQUEEZY_STORE_ID
   const uploadTokenSecret = process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET
@@ -82,8 +120,7 @@ export default async function handler(req, res) {
 
   if (!orderId && !orderIdentifier && !checkoutRef && mode !== 'recent') {
     json(res, 400, {
-      error:
-        'Order reference is required for secure upload access.',
+      error: 'Order reference is required for secure upload access.',
     })
     return
   }
@@ -155,7 +192,11 @@ export default async function handler(req, res) {
         matchedOrder =
           candidates.find(
             candidate => candidate?.customData?.checkout_ref === checkoutRef
-          ) || null
+          ) ||
+          candidates.find(candidate =>
+            isOrderCreatedAfterCheckoutStart(candidate, checkoutStartedAt)
+          ) ||
+          null
       } else if (orderIdentifier) {
         matchedOrder =
           candidates.find(
@@ -165,7 +206,9 @@ export default async function handler(req, res) {
           ) || null
       } else if (mode === 'recent') {
         matchedOrder =
-          candidates.find(candidate => candidate?.status === 'paid') || null
+          candidates.find(candidate =>
+            isOrderCreatedAfterCheckoutStart(candidate, checkoutStartedAt)
+          ) || null
       }
 
       order = matchedOrder
@@ -173,7 +216,8 @@ export default async function handler(req, res) {
 
     if (!order || !order.checkoutEmail || order.status !== 'paid') {
       json(res, 404, {
-        error: 'This paid order could not be verified for direct secure upload.',
+        error:
+          'This paid order could not be verified for direct secure upload.',
       })
       return
     }

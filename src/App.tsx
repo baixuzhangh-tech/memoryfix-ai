@@ -15,6 +15,13 @@ import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
 import trackProductEvent from './analytics'
 import {
+  appendHumanRestoreCheckoutRef,
+  clearHumanRestoreStoredCheckoutContext,
+  createHumanRestoreCheckoutRef,
+  readHumanRestoreCheckoutContext,
+  rememberHumanRestorePendingCheckout,
+} from './humanRestoreCheckoutContext'
+import {
   humanRestorePostPaymentSteps,
   humanRestoreTrustNotes,
 } from './humanRestoreContent'
@@ -313,6 +320,9 @@ function App() {
   const [inlineSecureOrder, setInlineSecureOrder] = useState<
     SecureOrderResponse['order'] | null
   >(null)
+  const [browserCheckoutContext] = useState(() =>
+    readHumanRestoreCheckoutContext()
+  )
 
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
   const currentSearchParams = new URLSearchParams(window.location.search)
@@ -326,56 +336,12 @@ function App() {
     currentSearchParams.get('customer_email') ||
     currentSearchParams.get('email') ||
     ''
-  let storedCheckoutOrderId = ''
-  let storedCheckoutEmail = ''
-  let hasPendingCheckout = false
-
-  if (
-    isHumanRestoreSuccessPage &&
-    !currentSearchParams.get('order_id') &&
-    !currentSearchParams.get('checkout_ref')
-  ) {
-    try {
-      const successData = JSON.parse(
-        localStorage.getItem('ls_checkout_success') || '{}'
-      )
-      const isSuccessRecent =
-        successData.timestamp &&
-        Date.now() - successData.timestamp < 30 * 60 * 1000
-
-      if (isSuccessRecent && successData.orderId) {
-        storedCheckoutOrderId = String(successData.orderId)
-        storedCheckoutEmail = String(successData.email || '')
-        localStorage.removeItem('ls_checkout_success')
-      }
-    } catch {
-      // localStorage may be unavailable
-    }
-
-    if (!storedCheckoutOrderId) {
-      try {
-        const pendingData = JSON.parse(
-          localStorage.getItem('pending_human_restore_checkout') || '{}'
-        )
-        const isPendingRecent =
-          pendingData.timestamp &&
-          Date.now() - pendingData.timestamp < 30 * 60 * 1000
-
-        if (isPendingRecent) {
-          hasPendingCheckout = true
-          localStorage.removeItem('pending_human_restore_checkout')
-        }
-      } catch {
-        // localStorage may be unavailable
-      }
-    }
-  }
 
   const maskedCheckoutEmail = maskEmailAddress(
-    defaultCheckoutEmail || storedCheckoutEmail
+    defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
   )
   const directAccessOrderId =
-    currentSearchParams.get('order_id') || storedCheckoutOrderId
+    currentSearchParams.get('order_id') || browserCheckoutContext.storedOrderId
   const directAccessOrderIdentifier =
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('orderIdentifier') ||
@@ -383,12 +349,16 @@ function App() {
   const directAccessCheckoutRef =
     currentSearchParams.get('checkout_ref') ||
     (isHumanRestoreSuccessPage
-      ? sessionStorage.getItem('pending_checkout_ref') || ''
+      ? browserCheckoutContext.pendingCheckoutRef || ''
       : '')
-  const effectiveCheckoutEmail = defaultCheckoutEmail || storedCheckoutEmail
+  const directAccessCheckoutStartedAt = isHumanRestoreSuccessPage
+    ? browserCheckoutContext.pendingCheckoutStartedAt || ''
+    : ''
+  const effectiveCheckoutEmail =
+    defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
   const defaultOrderReference =
     currentSearchParams.get('order_id') ||
-    storedCheckoutOrderId ||
+    browserCheckoutContext.storedOrderId ||
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('order') ||
     currentSearchParams.get('checkout_id') ||
@@ -506,7 +476,7 @@ function App() {
       directAccessOrderId ||
       directAccessOrderIdentifier ||
       directAccessCheckoutRef ||
-      hasPendingCheckout
+      browserCheckoutContext.hasPendingCheckout
 
     if (!hasAnyOrderRef) {
       setDirectUploadStatus('unavailable')
@@ -540,12 +510,19 @@ function App() {
       requestUrl.searchParams.set('checkoutRef', directAccessCheckoutRef)
     }
 
+    if (directAccessCheckoutStartedAt) {
+      requestUrl.searchParams.set(
+        'checkoutStartedAt',
+        directAccessCheckoutStartedAt
+      )
+    }
+
     if (effectiveCheckoutEmail) {
       requestUrl.searchParams.set('checkoutEmail', effectiveCheckoutEmail)
     }
 
     if (
-      hasPendingCheckout &&
+      browserCheckoutContext.hasPendingCheckout &&
       !directAccessOrderId &&
       !directAccessOrderIdentifier &&
       !directAccessCheckoutRef
@@ -576,6 +553,7 @@ function App() {
           setDirectUploadToken(nextUploadToken)
           setDirectUploadUrl(responseBody.uploadUrl)
           setDirectUploadStatus('ready')
+          clearHumanRestoreStoredCheckoutContext()
           return
         }
 
@@ -597,9 +575,10 @@ function App() {
   }, [
     effectiveCheckoutEmail,
     directAccessCheckoutRef,
+    directAccessCheckoutStartedAt,
     directAccessOrderId,
     directAccessOrderIdentifier,
-    hasPendingCheckout,
+    browserCheckoutContext.hasPendingCheckout,
     isHumanRestoreSuccessPage,
     secureUploadToken,
   ])
@@ -796,7 +775,11 @@ function App() {
         checkoutUrl = responseBody.checkoutUrl
         checkoutRef = responseBody.checkoutRef || ''
       } else if (legacyHumanRestoreUrl) {
-        checkoutUrl = legacyHumanRestoreUrl
+        checkoutRef = createHumanRestoreCheckoutRef()
+        checkoutUrl = appendHumanRestoreCheckoutRef(
+          legacyHumanRestoreUrl,
+          checkoutRef
+        )
       } else {
         throw new Error(
           responseBody?.error || 'Secure checkout could not be created.'
@@ -804,7 +787,11 @@ function App() {
       }
     } catch (error) {
       if (legacyHumanRestoreUrl) {
-        checkoutUrl = legacyHumanRestoreUrl
+        checkoutRef = createHumanRestoreCheckoutRef()
+        checkoutUrl = appendHumanRestoreCheckoutRef(
+          legacyHumanRestoreUrl,
+          checkoutRef
+        )
       } else {
         setCheckoutLaunchStatus('error')
         setCheckoutLaunchError(
@@ -822,24 +809,7 @@ function App() {
       return
     }
 
-    try {
-      if (checkoutRef) {
-        sessionStorage.setItem('pending_checkout_ref', checkoutRef)
-      } else {
-        sessionStorage.removeItem('pending_checkout_ref')
-      }
-    } catch {
-      // sessionStorage may be unavailable
-    }
-
-    try {
-      localStorage.setItem(
-        'pending_human_restore_checkout',
-        JSON.stringify({ checkoutRef, timestamp: Date.now() })
-      )
-    } catch {
-      // localStorage may be unavailable
-    }
+    rememberHumanRestorePendingCheckout({ checkoutRef })
 
     if (ensureLemonSqueezySetup()) {
       trackProductEvent('click_human_restore', {

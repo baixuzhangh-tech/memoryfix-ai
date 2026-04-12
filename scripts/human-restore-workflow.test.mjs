@@ -6,7 +6,14 @@ import adminJobsHandler from '../api/admin/human-restore-jobs.js'
 import adminProcessHandler from '../api/admin/human-restore-process.js'
 import cleanupHandler from '../api/cron/human-restore-cleanup.js'
 import { createOrderUploadToken } from '../api/_lib/human-restore.js'
+import checkoutHandler from '../api/human-restore-checkout.js'
+import secureAccessHandler from '../api/human-restore-secure-access.js'
 import uploadHandler from '../api/human-restore-upload.js'
+import {
+  appendHumanRestoreCheckoutRef,
+  readHumanRestoreCheckoutContext,
+  rememberHumanRestorePendingCheckout,
+} from '../src/humanRestoreCheckoutContext.js'
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
@@ -23,6 +30,8 @@ function createMockState() {
     events: [],
     falStatusCalls: 0,
     jobs: [],
+    lemonCheckouts: [],
+    lemonOrders: [],
     nextEmailId: 1,
     nextJobId: 1,
     storage: new Map(),
@@ -237,6 +246,57 @@ function installMockFetch(state) {
       })
     }
 
+    if (url.hostname === 'api.lemonsqueezy.com') {
+      if (url.pathname === '/v1/variants') {
+        return makeJsonResponse({
+          data: [
+            {
+              attributes: {
+                product_id: 456,
+                slug: '092746e8-e559-4bca-96d0-abe3df4df268',
+              },
+              id: '123',
+              type: 'variants',
+            },
+          ],
+        })
+      }
+
+      if (url.pathname === '/v1/products/456') {
+        return makeJsonResponse({
+          data: {
+            attributes: {
+              store_id: 789,
+            },
+            id: '456',
+            type: 'products',
+          },
+        })
+      }
+
+      if (url.pathname === '/v1/checkouts' && method === 'POST') {
+        const body = JSON.parse(getBodyText(options))
+
+        state.lemonCheckouts.push(body)
+
+        return makeJsonResponse({
+          data: {
+            attributes: {
+              url: 'https://artgen.lemonsqueezy.com/checkout/buy/generated',
+            },
+            id: 'checkout-1',
+            type: 'checkouts',
+          },
+        })
+      }
+
+      if (url.pathname === '/v1/orders') {
+        return makeJsonResponse({
+          data: state.lemonOrders,
+        })
+      }
+    }
+
     return makeJsonResponse(
       { error: `Unexpected fetch: ${method} ${url.toString()}` },
       { status: 500 }
@@ -340,6 +400,9 @@ function installEnv() {
     HUMAN_RESTORE_INBOX: 'intake@example.com',
     HUMAN_RESTORE_SUPPORT_EMAIL: 'support@example.com',
     HUMAN_RESTORE_UPLOAD_TOKEN_SECRET: 'upload-secret',
+    LEMON_SQUEEZY_API_KEY: 'lemon-key',
+    LEMON_SQUEEZY_CHECKOUT_URL:
+      'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268',
     OPENAI_API_KEY: 'openai-key',
     OPENAI_IMAGE_EDIT_MODEL: 'gpt-image-1.5',
     RESEND_API_KEY: 'resend-key',
@@ -353,9 +416,104 @@ function installEnv() {
 
 async function main() {
   installEnv()
+  delete process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
+  delete process.env.LEMON_SQUEEZY_STORE_ID
 
   const state = createMockState()
   installMockFetch(state)
+
+  const memoryStorage = new Map()
+  const mockStorage = {
+    getItem(key) {
+      return memoryStorage.get(key) || null
+    },
+    removeItem(key) {
+      memoryStorage.delete(key)
+    },
+    setItem(key, value) {
+      memoryStorage.set(key, String(value))
+    },
+  }
+  const checkoutRef = 'checkout-ref-123'
+  const startedAtMs = Date.now()
+
+  rememberHumanRestorePendingCheckout({
+    checkoutRef,
+    localStorageRef: mockStorage,
+    sessionStorageRef: mockStorage,
+    timestamp: startedAtMs,
+  })
+
+  const recoveredContext = readHumanRestoreCheckoutContext({
+    localStorageRef: mockStorage,
+    now: startedAtMs + 1000,
+    sessionStorageRef: mockStorage,
+  })
+
+  assert.equal(recoveredContext.hasPendingCheckout, true)
+  assert.equal(recoveredContext.pendingCheckoutRef, checkoutRef)
+  assert.equal(
+    appendHumanRestoreCheckoutRef(
+      'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268',
+      checkoutRef
+    ),
+    'https://artgen.lemonsqueezy.com/checkout/buy/092746e8-e559-4bca-96d0-abe3df4df268?checkout%5Bcustom%5D%5Bflow%5D=human_restore_inline_upload&checkout%5Bcustom%5D%5Bcheckout_ref%5D=checkout-ref-123'
+  )
+
+  const checkoutResponse = await invoke(checkoutHandler, {
+    method: 'POST',
+  })
+
+  assert.equal(checkoutResponse.statusCode, 200)
+  assert.equal(checkoutResponse.body.ok, true)
+  assert.equal(state.lemonCheckouts.length, 1)
+  assert.equal(state.lemonCheckouts[0].data.relationships.store.data.id, '789')
+  assert.equal(
+    state.lemonCheckouts[0].data.relationships.variant.data.id,
+    '123'
+  )
+
+  const serverCheckoutRef =
+    state.lemonCheckouts[0].data.attributes.checkout_data.custom.checkout_ref
+  const orderCreatedAt = new Date(startedAtMs + 5000).toISOString()
+
+  state.lemonOrders.push({
+    attributes: {
+      created_at: orderCreatedAt,
+      first_order_item: {
+        product_name: 'Human-assisted Restore',
+        variant_id: 123,
+      },
+      identifier: 'order-identifier-123',
+      meta: {
+        custom_data: {
+          checkout_ref: serverCheckoutRef,
+        },
+      },
+      order_number: 1001,
+      status: 'paid',
+      test_mode: true,
+      urls: {
+        receipt: 'https://receipt.test/order-123',
+      },
+      user_email: 'buyer@example.com',
+      user_name: 'Buyer',
+    },
+    id: 'order-123',
+    type: 'orders',
+  })
+
+  const secureAccessResponse = await invoke(secureAccessHandler, {
+    method: 'GET',
+    query: {
+      checkoutRef: serverCheckoutRef,
+      checkoutStartedAt: new Date(startedAtMs).toISOString(),
+    },
+  })
+
+  assert.equal(secureAccessResponse.statusCode, 200)
+  assert.equal(secureAccessResponse.body.ok, true)
+  assert.match(secureAccessResponse.body.uploadUrl, /\/human-restore\/upload/)
 
   const token = createOrderUploadToken({
     tokenSecret: process.env.HUMAN_RESTORE_UPLOAD_TOKEN_SECRET,
