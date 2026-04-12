@@ -36,6 +36,7 @@ function buildDeliveryEmail({
       <div style="margin:24px 0;text-align:center">
         <p style="font-size:14px;color:#9b6b3c;font-weight:bold;letter-spacing:2px;text-transform:uppercase">Before & After</p>
         <img src="${escapeHtml(comparisonUrl)}" alt="Before and after comparison" style="max-width:100%;border-radius:12px;border:2px solid #e6d2b7" />
+        <p style="margin-top:8px;font-size:13px"><a href="${escapeHtml(comparisonUrl)}" style="color:#9b6b3c" download>Download comparison image</a></p>
       </div>
     `
     : ''
@@ -62,8 +63,9 @@ function buildDeliveryEmail({
   `
   const text = [
     'Your restored photo is ready.',
-    `Download: ${downloadUrl}`,
-    `This private download link expires in about ${expiresDays} days.`,
+    `Download restored photo: ${downloadUrl}`,
+    comparisonUrl ? `Before & after comparison: ${comparisonUrl}` : '',
+    `This private link expires in about ${expiresDays} days.`,
     reviewNote ? `Note from our team: ${reviewNote}` : '',
     `Ref: ${job.submission_reference} · Support: ${supportEmail}`,
   ]
