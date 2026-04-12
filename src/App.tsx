@@ -14,6 +14,10 @@ import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
 import trackProductEvent from './analytics'
+import {
+  humanRestorePostPaymentSteps,
+  humanRestoreTrustNotes,
+} from './humanRestoreContent'
 import * as m from './paraglide/messages'
 import {
   languageTag,
@@ -665,23 +669,23 @@ function App() {
   const shouldAutoFallbackToBackupForm =
     directUploadStatus === 'unavailable' || inlineSecureOrderStatus === 'error'
 
-  let successHeroTitle = 'Payment received. Upload your photo.'
+  let successHeroTitle = 'Payment received. Next: upload your photo.'
   let successHeroDescription = maskedCheckoutEmail
-    ? `Upload your photo on this page now. We also sent the secure link to ${maskedCheckoutEmail} only as backup access.`
-    : 'Upload your photo on this page now. We also sent the secure link to your checkout email only as backup access.'
+    ? `Upload your photo on this page now. We also sent the secure link to ${maskedCheckoutEmail} as backup access.`
+    : 'Upload your photo on this page now. We also sent the secure link to your checkout email as backup access.'
 
   if (isInlineSecureUploadReady) {
-    successHeroTitle = 'Payment received. Upload your photo.'
+    successHeroTitle = 'Payment received. Next: upload your photo.'
     successHeroDescription = maskedCheckoutEmail
-      ? `Your paid order is confirmed and already linked to this page. Upload below now. The secure email sent to ${maskedCheckoutEmail} is only a backup.`
-      : 'Your paid order is confirmed and already linked to this page. Upload below now. The secure email is only a backup.'
+      ? `Your paid order is confirmed and already linked to this page. Upload below now. The secure email sent to ${maskedCheckoutEmail} is your backup.`
+      : 'Your paid order is confirmed and already linked to this page. Upload below now. The secure email is your backup.'
   } else if (isInlineUploadPreparing) {
     successHeroTitle = 'Payment received. Preparing your upload form.'
     successHeroDescription = maskedCheckoutEmail
       ? `We are verifying this checkout and preparing the upload form on this page. The secure link in ${maskedCheckoutEmail} is only your backup.`
       : 'We are verifying this checkout and preparing the upload form on this page. The secure link in your checkout email is only your backup.'
   } else if (shouldAutoFallbackToBackupForm) {
-    successHeroTitle = 'Payment received. Upload your photo.'
+    successHeroTitle = 'Payment received. Use the backup upload form.'
     successHeroDescription = maskedCheckoutEmail
       ? `We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure link sent to ${maskedCheckoutEmail} is also available if you leave this page.`
       : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
@@ -1045,32 +1049,76 @@ function App() {
         )}
         {mainView === 'success' && (
           <div className="mx-auto flex max-w-5xl flex-col px-4 py-10 md:px-8">
-            <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-10">
-              <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-                Payment received
-              </p>
-              <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-5xl">
-                {successHeroTitle}
-              </h1>
-              <p className="mt-4 max-w-3xl text-lg leading-8 text-[#66574d]">
-                {successHeroDescription}
-              </p>
+            <section className="overflow-hidden rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] shadow-2xl shadow-[#8a4f1d]/10">
+              <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
+                <div className="bg-white/80 p-8 md:p-10">
+                  <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+                    Secure post-payment upload
+                  </p>
+                  <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-5xl">
+                    {successHeroTitle}
+                  </h1>
+                  <p className="mt-4 max-w-3xl text-lg leading-8 text-[#66574d]">
+                    {successHeroDescription}
+                  </p>
 
-              <div className="mt-6 flex flex-wrap gap-3">
-                <div className="rounded-full border border-[#b8d99f] bg-[#f4ffe8] px-4 py-2 text-sm font-bold text-[#355322]">
-                  Paid order confirmed
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <div className="rounded-full border border-[#b8d99f] bg-[#f4ffe8] px-4 py-2 text-sm font-bold text-[#355322]">
+                      Paid order confirmed
+                    </div>
+                    {maskedCheckoutEmail && (
+                      <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
+                        {maskedCheckoutEmail}
+                      </div>
+                    )}
+                    {defaultOrderReference && (
+                      <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
+                        Order {defaultOrderReference}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {maskedCheckoutEmail && (
-                  <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
-                    {maskedCheckoutEmail}
+
+                <div className="grid content-between gap-5 bg-[#211915] p-8 text-white md:p-10">
+                  <div>
+                    <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#e8cfae]">
+                      What happens next
+                    </p>
+                    <p className="mt-3 text-3xl font-black tracking-tight">
+                      One paid order. One upload. Human-reviewed delivery.
+                    </p>
                   </div>
-                )}
-                {defaultOrderReference && (
-                  <div className="rounded-full border border-[#e6d2b7] bg-white/75 px-4 py-2 text-sm font-bold text-[#5b4a40]">
-                    Order {defaultOrderReference}
+                  <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-5">
+                    <p className="text-sm font-black uppercase tracking-[0.18em] text-[#e8cfae]">
+                      Privacy boundary
+                    </p>
+                    <p className="mt-3 text-sm leading-7 text-[#f6eadb]">
+                      Local browser repair still does not upload photos. This
+                      paid assisted workflow uses cloud processing and review
+                      only after you choose checkout and submit a photo here.
+                    </p>
                   </div>
-                )}
+                </div>
               </div>
+            </section>
+
+            <section className="mt-6 grid gap-4 md:grid-cols-4">
+              {humanRestorePostPaymentSteps.map(step => (
+                <article
+                  key={step.label}
+                  className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/80 p-5 shadow-lg shadow-[#8a4f1d]/5"
+                >
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                    {step.label}
+                  </p>
+                  <h2 className="mt-3 text-lg font-black leading-tight text-[#211915]">
+                    {step.title}
+                  </h2>
+                  <p className="mt-3 text-sm leading-6 text-[#66574d]">
+                    {step.description}
+                  </p>
+                </article>
+              ))}
             </section>
 
             {isInlineUploadPreparing && (
@@ -1109,13 +1157,18 @@ function App() {
               </section>
             )}
 
-            <section className="mt-6 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-6 shadow-xl shadow-[#8a4f1d]/10 md:p-8">
-              <p className="max-w-3xl text-sm leading-7 text-[#66574d]">
-                {maskedCheckoutEmail
-                  ? `If you leave this page, the secure backup link is also waiting in ${maskedCheckoutEmail}. You do not need to pay again if direct upload is temporarily unavailable here.`
-                  : 'If you leave this page, the same secure upload link is also in your checkout email as backup access. You do not need to pay again if direct upload is temporarily unavailable here.'}
-              </p>
-              <div className="mt-4 flex">
+            <section className="mt-6 grid gap-4 rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-6 shadow-xl shadow-[#8a4f1d]/10 md:grid-cols-[1fr_auto] md:items-center md:p-8">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+                  Need to come back later?
+                </p>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-[#66574d]">
+                  {maskedCheckoutEmail
+                    ? `The secure backup link is also waiting in ${maskedCheckoutEmail}. Do not pay again if direct upload is temporarily unavailable here.`
+                    : 'The same secure upload link is also in your checkout email as backup access. Do not pay again if direct upload is temporarily unavailable here.'}
+                </p>
+              </div>
+              <div className="flex">
                 <a
                   href="/"
                   className="inline-flex justify-center rounded-full border border-[#d7b98c] px-6 py-3 text-center font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-[#fffaf3]"
@@ -1123,6 +1176,20 @@ function App() {
                   Back to homepage
                 </a>
               </div>
+            </section>
+
+            <section className="mt-6 grid gap-4 md:grid-cols-3">
+              {humanRestoreTrustNotes.map(note => (
+                <article
+                  key={note.title}
+                  className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5 text-sm leading-6 text-[#66574d]"
+                >
+                  <h2 className="text-base font-black text-[#211915]">
+                    {note.title}
+                  </h2>
+                  <p className="mt-2">{note.description}</p>
+                </article>
+              ))}
             </section>
           </div>
         )}

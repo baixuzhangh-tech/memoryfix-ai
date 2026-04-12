@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import trackProductEvent from '../analytics'
+import {
+  humanRestorePostPaymentSteps,
+  humanRestoreTrustNotes,
+} from '../humanRestoreContent'
 import HumanRestoreUploadForm from './HumanRestoreUploadForm'
 
 function formatOrderDate(value: string) {
@@ -103,56 +107,61 @@ export default function SecureHumanRestoreUploadPage(
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col px-4 py-10 md:px-8">
-      <section className="rounded-[2rem] border border-[#e6d2b7] bg-white/80 p-8 shadow-2xl shadow-[#8a4f1d]/10 md:p-12">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
-          Secure upload
-        </p>
-        <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
-          Your paid order is verified and ready for upload.
-        </h1>
-        <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
-          This private link is already tied to your paid Human-assisted Restore
-          order. Upload your photo and notes below to start restoration. No
-          account or extra payment is required.
-        </p>
+      <section className="overflow-hidden rounded-[2rem] border border-[#e6d2b7] bg-[#fffaf3] shadow-2xl shadow-[#8a4f1d]/10">
+        <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="bg-white/80 p-8 md:p-12">
+            <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#9b6b3c]">
+              Secure upload
+            </p>
+            <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-[#211915] sm:text-6xl">
+              Your paid order is verified and ready for upload.
+            </h1>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-[#66574d]">
+              This private link is already tied to your paid Human-assisted
+              Restore order. Upload your photo and notes below to start
+              restoration. No account or extra payment is required.
+            </p>
+          </div>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-3">
-          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
-              Status
-            </p>
-            <p className="mt-3 text-lg font-black text-[#1f3413]">
-              Paid order confirmed
-            </p>
-            <p className="mt-2 text-sm leading-6">
-              Your payment already matches this upload link.
-            </p>
-          </article>
-          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
-              Step 2
-            </p>
-            <p className="mt-3 text-lg font-black text-[#1f3413]">
-              Upload your best source photo
-            </p>
-            <p className="mt-2 text-sm leading-6">
-              Add the cleanest scan or original image you have, plus repair
-              notes.
-            </p>
-          </article>
-          <article className="rounded-[1.5rem] border border-[#cfe6bc] bg-[#f4ffe8] p-5 text-[#355322]">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#5c8b32]">
-              Step 3
-            </p>
-            <p className="mt-3 text-lg font-black text-[#1f3413]">
-              Receive confirmation and delivery by email
-            </p>
-            <p className="mt-2 text-sm leading-6">
-              We send a confirmation after upload, then final delivery during
-              beta is usually within 48 hours.
-            </p>
-          </article>
+          <div className="grid content-between gap-5 bg-[#211915] p-8 text-white md:p-12">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#e8cfae]">
+                Paid workflow
+              </p>
+              <p className="mt-3 text-3xl font-black tracking-tight">
+                Cloud restore draft, then human review before delivery.
+              </p>
+            </div>
+            <div className="rounded-[1.5rem] border border-white/15 bg-white/10 p-5">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-[#e8cfae]">
+                Privacy boundary
+              </p>
+              <p className="mt-3 text-sm leading-7 text-[#f6eadb]">
+                Free local repair keeps photos on your device. This paid upload
+                is only for the assisted service you already purchased.
+              </p>
+            </div>
+          </div>
         </div>
+      </section>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-4">
+        {humanRestorePostPaymentSteps.map(step => (
+          <article
+            key={step.label}
+            className="rounded-[1.5rem] border border-[#e6d2b7] bg-white/80 p-5 shadow-lg shadow-[#8a4f1d]/5"
+          >
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
+              {step.label}
+            </p>
+            <h2 className="mt-3 text-lg font-black leading-tight text-[#211915]">
+              {step.title}
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-[#66574d]">
+              {step.description}
+            </p>
+          </article>
+        ))}
       </section>
 
       {status === 'loading' && (
@@ -244,6 +253,20 @@ export default function SecureHumanRestoreUploadPage(
             }}
             secureUploadToken={token}
           />
+
+          <section className="mt-6 grid gap-4 md:grid-cols-3">
+            {humanRestoreTrustNotes.map(note => (
+              <article
+                key={note.title}
+                className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-5 text-sm leading-6 text-[#66574d]"
+              >
+                <h2 className="text-base font-black text-[#211915]">
+                  {note.title}
+                </h2>
+                <p className="mt-2">{note.description}</p>
+              </article>
+            ))}
+          </section>
         </>
       )}
     </div>

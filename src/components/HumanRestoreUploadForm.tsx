@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import trackProductEvent from '../analytics'
+import { humanRestoreAfterUploadSteps } from '../humanRestoreContent'
 
 type HumanRestoreUploadFormProps = {
   defaultEmail: string
@@ -192,7 +193,7 @@ export default function HumanRestoreUploadForm(
         </h2>
         <p className="mt-4 leading-7 text-[#66574d]">
           {isSecureUpload
-            ? 'Choose your best source photo, add any repair notes that matter, and submit once.'
+            ? 'Choose your best source photo, add repair notes that matter, and submit once. After upload, the paid workflow prepares a restoration draft for human review before delivery.'
             : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the order number if you have it so we can match the paid order quickly.'}
         </p>
       </div>
@@ -216,8 +217,8 @@ export default function HumanRestoreUploadForm(
 
       <div className="mt-6 rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] px-5 py-4 text-sm leading-6 text-[#66574d]">
         {isSecureUpload
-          ? 'This upload is attached directly to your paid order. We use it only to complete your restoration and send your confirmation and delivery emails.'
-          : 'Use this backup form only if direct secure upload is unavailable. We use it only to match and complete your paid restoration order.'}
+          ? 'This upload is attached directly to your paid order. Unlike free local repair, this assisted service sends the photo to our cloud restoration workflow and human review queue so we can deliver the approved result by email.'
+          : 'Use this backup form only if direct secure upload is unavailable. Unlike free local repair, this assisted service sends the photo to our cloud restoration workflow and human review queue so we can match and complete your paid order.'}
       </div>
 
       <form className="mt-8 grid gap-6" onSubmit={handleSubmit}>
@@ -312,9 +313,19 @@ export default function HumanRestoreUploadForm(
             </p>
             <p className="leading-7">
               {isSecureUpload
-                ? 'Your photo is attached to this paid order. We will send a confirmation email and usually deliver within 48 hours during beta.'
-                : 'Your photo was received for paid order matching. We will send a confirmation email and usually deliver within 48 hours during beta.'}
+                ? 'Your photo is attached to this paid order. Next we prepare a restoration draft, review the result, and usually deliver within 48 hours during beta.'
+                : 'Your photo was received for paid order matching. Next we prepare a restoration draft, review the result, and usually deliver within 48 hours during beta.'}
             </p>
+            <div className="grid gap-2 rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4 text-sm">
+              {humanRestoreAfterUploadSteps.map((step, index) => (
+                <p key={step} className="leading-6">
+                  <span className="font-black text-[#1f3413]">
+                    {index + 1}.
+                  </span>{' '}
+                  {step}
+                </p>
+              ))}
+            </div>
             {submissionReference && (
               <div className="rounded-[1.25rem] border border-[#b8d99f] bg-white/60 px-4 py-4 text-sm">
                 <p className="font-black uppercase tracking-[0.14em]">
