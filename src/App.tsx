@@ -160,22 +160,8 @@ type DirectSecureAccessResponse = {
   uploadUrl?: string
 }
 
-type CreateCheckoutResponse = {
-  checkoutRef?: string
-  checkoutUrl?: string
-  error?: string
-  ok?: boolean
-}
-
-type LemonCheckoutSuccessData = {
-  email?: string
-  id?: number | string
-  identifier?: string
-  userEmail?: string
-}
-
 type LemonSqueezyEvent = {
-  data?: LemonCheckoutSuccessData
+  data?: Record<string, unknown>
   event: string
 }
 
@@ -287,14 +273,6 @@ function normalizeCheckoutEmail(value: unknown) {
     .toLowerCase()
 }
 
-function getLemonOrderEmail(orderData: LemonCheckoutSuccessData | undefined) {
-  const snakeCaseEmailKey = 'user_email'
-  const orderDataRecord = orderData as Record<string, unknown> | null
-  const snakeCaseEmail = String(orderDataRecord?.[snakeCaseEmailKey] || '')
-
-  return snakeCaseEmail || orderData?.userEmail || orderData?.email || ''
-}
-
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
@@ -331,8 +309,36 @@ function App() {
     currentSearchParams.get('customer_email') ||
     currentSearchParams.get('email') ||
     ''
-  const maskedCheckoutEmail = maskEmailAddress(defaultCheckoutEmail)
-  const directAccessOrderId = currentSearchParams.get('order_id') || ''
+  let storedCheckoutOrderId = ''
+  let storedCheckoutEmail = ''
+
+  if (
+    isHumanRestoreSuccessPage &&
+    !currentSearchParams.get('order_id') &&
+    !currentSearchParams.get('checkout_ref')
+  ) {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem('ls_checkout_success') || '{}'
+      )
+      const isRecent =
+        stored.timestamp && Date.now() - stored.timestamp < 30 * 60 * 1000
+
+      if (isRecent && stored.orderId) {
+        storedCheckoutOrderId = String(stored.orderId)
+        storedCheckoutEmail = String(stored.email || '')
+        localStorage.removeItem('ls_checkout_success')
+      }
+    } catch {
+      // localStorage may be unavailable
+    }
+  }
+
+  const maskedCheckoutEmail = maskEmailAddress(
+    defaultCheckoutEmail || storedCheckoutEmail
+  )
+  const directAccessOrderId =
+    currentSearchParams.get('order_id') || storedCheckoutOrderId
   const directAccessOrderIdentifier =
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('orderIdentifier') ||
@@ -342,8 +348,10 @@ function App() {
     (isHumanRestoreSuccessPage
       ? sessionStorage.getItem('pending_checkout_ref') || ''
       : '')
+  const effectiveCheckoutEmail = defaultCheckoutEmail || storedCheckoutEmail
   const defaultOrderReference =
     currentSearchParams.get('order_id') ||
+    storedCheckoutOrderId ||
     currentSearchParams.get('order_identifier') ||
     currentSearchParams.get('order') ||
     currentSearchParams.get('checkout_id') ||
@@ -477,8 +485,8 @@ function App() {
       requestUrl.searchParams.set('checkoutRef', directAccessCheckoutRef)
     }
 
-    if (defaultCheckoutEmail) {
-      requestUrl.searchParams.set('checkoutEmail', defaultCheckoutEmail)
+    if (effectiveCheckoutEmail) {
+      requestUrl.searchParams.set('checkoutEmail', effectiveCheckoutEmail)
     }
 
     fetch(requestUrl.toString())
@@ -523,7 +531,7 @@ function App() {
       isActive = false
     }
   }, [
-    defaultCheckoutEmail,
+    effectiveCheckoutEmail,
     directAccessCheckoutRef,
     directAccessOrderId,
     directAccessOrderIdentifier,
@@ -634,16 +642,33 @@ function App() {
             return
           }
 
-          const orderData = event.data
-          const paidOrderId =
-            orderData?.id === undefined || orderData?.id === null
-              ? ''
-              : String(orderData.id)
-          const paidOrderIdentifier = String(orderData?.identifier || '')
-          const paidCheckoutEmailSource = getLemonOrderEmail(orderData)
+          const orderResource = event.data as
+            | Record<string, unknown>
+            | undefined
+          const orderAttributes =
+            (orderResource?.attributes as Record<string, unknown>) || {}
+          const paidOrderId = orderResource?.id ? String(orderResource.id) : ''
+          const paidOrderIdentifier = orderAttributes.identifier
+            ? String(orderAttributes.identifier)
+            : ''
           const paidCheckoutEmail = normalizeCheckoutEmail(
-            paidCheckoutEmailSource
+            orderAttributes.user_email
           )
+
+          try {
+            localStorage.setItem(
+              'ls_checkout_success',
+              JSON.stringify({
+                orderId: paidOrderId,
+                email: paidCheckoutEmail,
+                identifier: paidOrderIdentifier,
+                timestamp: Date.now(),
+              })
+            )
+          } catch {
+            // localStorage may be unavailable
+          }
+
           const successUrl = new URL(
             humanRestoreSuccessPath,
             window.location.origin
@@ -667,8 +692,7 @@ function App() {
             has_order_identifier: Boolean(paidOrderIdentifier),
           })
 
-          window.LemonSqueezy?.Url?.Close?.()
-          window.location.assign(successUrl.toString())
+          window.location.href = successUrl.toString()
         },
       })
       lemonSqueezySetupRef.current = true
@@ -684,55 +708,28 @@ function App() {
 
     setCheckoutLaunchStatus('loading')
     setCheckoutLaunchError('')
-    trackProductEvent('click_human_restore', {
-      destination: 'server_checkout',
-    })
 
-    try {
-      const response = await fetch('/api/human-restore-checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-      })
-      const responseBody = (await response
-        .json()
-        .catch(() => null)) as CreateCheckoutResponse | null
+    const checkoutUrl = legacyHumanRestoreUrl
 
-      if (!response.ok || !responseBody?.checkoutUrl) {
-        throw new Error(
-          responseBody?.error ||
-            'Secure checkout could not be opened right now. Please try again.'
-        )
-      }
-
-      if (responseBody.checkoutRef) {
-        try {
-          sessionStorage.setItem(
-            'pending_checkout_ref',
-            responseBody.checkoutRef
-          )
-        } catch {
-          // sessionStorage may be unavailable
-        }
-      }
-
-      if (ensureLemonSqueezySetup()) {
-        window.LemonSqueezy?.Url.Open(responseBody.checkoutUrl)
-        setCheckoutLaunchStatus('idle')
-        return
-      }
-
-      window.location.assign(responseBody.checkoutUrl)
-    } catch (error) {
+    if (!checkoutUrl) {
       setCheckoutLaunchStatus('error')
-      setCheckoutLaunchError(
-        error instanceof Error
-          ? error.message
-          : 'Secure checkout could not be opened right now. Please try again.'
-      )
+      setCheckoutLaunchError('Checkout URL is not configured.')
+      return
     }
+
+    if (ensureLemonSqueezySetup()) {
+      trackProductEvent('click_human_restore', {
+        destination: 'lemonjs_overlay',
+      })
+      window.LemonSqueezy?.Url.Open(checkoutUrl)
+      setCheckoutLaunchStatus('idle')
+      return
+    }
+
+    trackProductEvent('click_human_restore', {
+      destination: 'direct_redirect',
+    })
+    window.location.assign(checkoutUrl)
   }
 
   useEffect(() => {
