@@ -88,6 +88,10 @@ create index if not exists human_restore_jobs_status_created_idx
 create index if not exists human_restore_jobs_checkout_email_idx
   on public.human_restore_jobs (checkout_email);
 
+create index if not exists human_restore_jobs_order_id_idx
+  on public.human_restore_jobs (order_id)
+  where order_id is not null;
+
 create index if not exists human_restore_jobs_expires_idx
   on public.human_restore_jobs (expires_at)
   where deleted_at is null;

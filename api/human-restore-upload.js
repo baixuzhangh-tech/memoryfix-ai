@@ -9,6 +9,8 @@ import {
   verifyOrderUploadToken,
 } from './_lib/human-restore.js'
 import {
+  countJobsByOrderId,
+  countRecentJobsByEmail,
   getHumanRestoreBuckets,
   insertEvent,
   insertJob,
@@ -24,6 +26,8 @@ export const config = {
 }
 
 const maxUploadSizeBytes = 15 * 1024 * 1024
+const maxSubmissionsPerOrder = 1
+const maxFallbackSubmissionsPerDay = 2
 const allowedImageTypes = new Set([
   'image/jpeg',
   'image/png',
@@ -214,9 +218,40 @@ export default async function handler(req, res) {
       return
     }
 
+    if (!isSecureUpload && process.env.HUMAN_RESTORE_ALLOW_FALLBACK_UPLOAD === 'false') {
+      json(res, 403, {
+        error: 'Direct uploads are disabled. Please use the secure upload link from your order confirmation email.',
+      })
+      return
+    }
+
     if (!checkoutEmail) {
       json(res, 400, { error: 'Checkout email is required.' })
       return
+    }
+
+    if (isSecureUpload && tokenVerification?.payload?.orderId) {
+      const existingCount = await countJobsByOrderId(
+        String(tokenVerification.payload.orderId)
+      )
+
+      if (existingCount >= maxSubmissionsPerOrder) {
+        json(res, 409, {
+          error: `This order already has a photo submission. Each order includes ${maxSubmissionsPerOrder} photo restoration. If you need to replace your photo, please contact support.`,
+        })
+        return
+      }
+    }
+
+    if (!isSecureUpload) {
+      const recentCount = await countRecentJobsByEmail(checkoutEmail, 24)
+
+      if (recentCount >= maxFallbackSubmissionsPerDay) {
+        json(res, 429, {
+          error: 'You have reached the upload limit for today. Please try again in 24 hours or contact support.',
+        })
+        return
+      }
     }
 
     if (!/^\S+@\S+\.\S+$/.test(checkoutEmail)) {

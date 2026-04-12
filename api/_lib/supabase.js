@@ -142,6 +142,38 @@ export async function getJob(jobId) {
   return Array.isArray(payload) ? payload[0] || null : null
 }
 
+export async function countJobsByOrderId(orderId) {
+  if (!orderId) {
+    return 0
+  }
+
+  const params = new URLSearchParams({
+    order_id: `eq.${orderId}`,
+    status: 'not.in.(failed,deleted)',
+    select: 'id',
+  })
+  const payload = await supabaseRest(`/human_restore_jobs?${params.toString()}`)
+
+  return Array.isArray(payload) ? payload.length : 0
+}
+
+export async function countRecentJobsByEmail(email, hours = 24) {
+  if (!email) {
+    return 0
+  }
+
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
+  const params = new URLSearchParams({
+    checkout_email: `eq.${email}`,
+    created_at: `gte.${since}`,
+    status: 'not.in.(failed,deleted)',
+    select: 'id',
+  })
+  const payload = await supabaseRest(`/human_restore_jobs?${params.toString()}`)
+
+  return Array.isArray(payload) ? payload.length : 0
+}
+
 export async function listJobs({ status = 'active', limit = 25 } = {}) {
   const params = new URLSearchParams({
     limit: String(limit),
