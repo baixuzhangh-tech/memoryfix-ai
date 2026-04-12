@@ -4,6 +4,7 @@ import { ArrowLeftIcon, InformationCircleIcon } from '@heroicons/react/outline'
 import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
 import AdminReviewPage from './components/AdminReviewPage'
+import LegalPage, { isLegalPage } from './components/LegalPage'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
 import HumanRestoreCheckoutForm from './components/HumanRestoreCheckoutForm'
@@ -359,6 +360,7 @@ function App() {
   const isHumanRestoreSecureUploadPage =
     currentPath === humanRestoreSecureUploadPath
   const isAdminReviewPage = currentPath === adminReviewPath
+  const isLegalRoute = isLegalPage(currentPath)
   const secureUploadToken = currentSearchParams.get('token') || ''
   const defaultCheckoutEmail =
     currentSearchParams.get('checkout_email') ||
@@ -403,8 +405,13 @@ function App() {
     directAccessCheckoutRef ||
     ''
 
-  let mainView: 'admin' | 'editor' | 'success' | 'secure-upload' | 'home' =
-    'home'
+  let mainView:
+    | 'admin'
+    | 'editor'
+    | 'success'
+    | 'secure-upload'
+    | 'legal'
+    | 'home' = 'home'
 
   if (file) {
     mainView = 'editor'
@@ -414,6 +421,8 @@ function App() {
     mainView = 'secure-upload'
   } else if (isHumanRestoreSuccessPage) {
     mainView = 'success'
+  } else if (isLegalRoute) {
+    mainView = 'legal'
   }
 
   useEffect(() => {
@@ -1026,7 +1035,8 @@ function App() {
             file ||
             isHumanRestoreSuccessPage ||
             isHumanRestoreSecureUploadPage ||
-            isAdminReviewPage
+            isAdminReviewPage ||
+            isLegalRoute
               ? ''
               : 'opacity-50 pointer-events-none',
             'pl-1 pr-1',
@@ -1036,7 +1046,8 @@ function App() {
             if (
               isHumanRestoreSuccessPage ||
               isHumanRestoreSecureUploadPage ||
-              isAdminReviewPage
+              isAdminReviewPage ||
+              isLegalRoute
             ) {
               window.location.assign('/')
               return
@@ -1049,7 +1060,8 @@ function App() {
             <span className="hidden select-none sm:inline">
               {isHumanRestoreSuccessPage ||
               isHumanRestoreSecureUploadPage ||
-              isAdminReviewPage
+              isAdminReviewPage ||
+              isLegalRoute
                 ? 'Back home'
                 : m.start_new()}
             </span>
@@ -1072,10 +1084,11 @@ function App() {
           {!file &&
             !isHumanRestoreSuccessPage &&
             !isHumanRestoreSecureUploadPage &&
-            !isAdminReviewPage && (
+            !isAdminReviewPage &&
+            !isLegalRoute && (
               <>
                 <a
-                  href="#privacy"
+                  href="/privacy"
                   className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
                 >
                   Privacy
@@ -1087,7 +1100,7 @@ function App() {
                   Pricing
                 </a>
                 <a
-                  href="#terms"
+                  href="/terms"
                   className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
                 >
                   Terms
@@ -1130,6 +1143,7 @@ function App() {
       >
         {mainView === 'editor' && file && <Editor file={file} />}
         {mainView === 'admin' && <AdminReviewPage />}
+        {mainView === 'legal' && <LegalPage path={currentPath} />}
         {mainView === 'secure-upload' && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
@@ -1598,11 +1612,14 @@ function App() {
                 project and keeps the browser-side core under GPL-3.0.
               </div>
               <div className="flex flex-wrap gap-3 font-bold text-[#211915]">
-                <a href="#privacy" className="underline">
+                <a href="/privacy" className="underline">
                   Privacy
                 </a>
-                <a href="#terms" className="underline">
+                <a href="/terms" className="underline">
                   Terms
+                </a>
+                <a href="/refund" className="underline">
+                  Refund
                 </a>
                 <a href="#open-source" className="underline">
                   Open Source

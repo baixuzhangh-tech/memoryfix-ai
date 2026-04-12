@@ -1,4 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /admin/
+Disallow: /human-restore/upload
+Disallow: /human-restore/success
 
 Sitemap: https://artgen.site/sitemap.xml
