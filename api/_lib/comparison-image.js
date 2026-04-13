@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 
-const labelHeight = 28
+const labelHeight = 36
 const dividerWidth = 3
 const maxDimension = 560
 const bgColor = { r: 34, g: 25, b: 21 }
@@ -8,15 +8,15 @@ const dividerColor = { r: 230, g: 210, b: 183 }
 
 function createLabelSvg(text, width) {
   return Buffer.from(`
-    <svg width="${width}" height="${labelHeight}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${labelHeight}">
       <rect width="${width}" height="${labelHeight}" fill="rgb(${bgColor.r},${bgColor.g},${bgColor.b})" />
       <text
         x="${width / 2}"
         y="${labelHeight / 2 + 1}"
         text-anchor="middle"
         dominant-baseline="central"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="13"
+        font-family="DejaVu Sans, Liberation Sans, Noto Sans, sans-serif"
+        font-size="15"
         font-weight="bold"
         letter-spacing="3"
         fill="rgb(${dividerColor.r},${dividerColor.g},${dividerColor.b})"
