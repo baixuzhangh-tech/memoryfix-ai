@@ -1,11 +1,16 @@
 import { requireAdmin } from '../_lib/admin.js'
 import { json, readRawBody } from '../_lib/human-restore.js'
+import { generateRetoucherToken, hashToken } from '../_lib/retoucher-auth.js'
 import {
   createJobSignedUrls,
   getJob,
   insertEvent,
+  insertRetoucher,
+  listAssignableJobs,
+  listRetouchers,
   updateOrderByJobId,
   updateJob,
+  updateRetoucher,
 } from '../_lib/supabase.js'
 
 export const config = {
@@ -20,6 +25,7 @@ const allowedStatuses = new Set([
   'ai_failed',
   'needs_review',
   'manual_review',
+  'assigned',
   'delivered',
   'failed',
 ])
@@ -29,11 +35,24 @@ export default async function handler(req, res) {
     return
   }
 
-  if (req.method !== 'PATCH') {
-    json(res, 405, { error: 'Method not allowed.' })
-    return
+  // PATCH → existing job update
+  if (req.method === 'PATCH') {
+    return handleJobUpdate(req, res)
   }
 
+  // POST → retoucher management actions
+  if (req.method === 'POST') {
+    return handleRetoucherAction(req, res)
+  }
+
+  json(res, 405, { error: 'Method not allowed. Use PATCH or POST.' })
+}
+
+// ---------------------------------------------------------------------------
+// PATCH: update job status / review note (existing)
+// ---------------------------------------------------------------------------
+
+async function handleJobUpdate(req, res) {
   try {
     const rawBody = await readRawBody(req)
     const body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}
@@ -92,4 +111,129 @@ export default async function handler(req, res) {
           : 'Could not update restore job.',
     })
   }
+}
+
+// ---------------------------------------------------------------------------
+// POST: retoucher management (create / list / assign / activate / deactivate)
+// ---------------------------------------------------------------------------
+
+async function handleRetoucherAction(req, res) {
+  try {
+    const rawBody = await readRawBody(req)
+    const body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}
+    const action = body.action || req.query?.action || ''
+
+    switch (action) {
+      case 'create_retoucher':
+        return await rtCreate(body, res)
+      case 'list_retouchers':
+        return await rtList(res)
+      case 'deactivate_retoucher':
+        return await rtSetActive(body, res, false)
+      case 'activate_retoucher':
+        return await rtSetActive(body, res, true)
+      case 'assign_retoucher':
+        return await rtAssign(body, res)
+      case 'assignable_jobs':
+        return await rtAssignableJobs(res)
+      default:
+        json(res, 400, {
+          error:
+            'action is required: create_retoucher | list_retouchers | deactivate_retoucher | activate_retoucher | assign_retoucher | assignable_jobs',
+        })
+    }
+  } catch (error) {
+    json(res, 500, {
+      error:
+        error instanceof Error ? error.message : 'Retoucher management error.',
+    })
+  }
+}
+
+async function rtCreate(body, res) {
+  const name = String(body.name || '').trim()
+
+  if (!name) {
+    return json(res, 400, { error: 'name is required.' })
+  }
+
+  const plainToken = generateRetoucherToken()
+  const tokenHash = hashToken(plainToken)
+
+  const retoucher = await insertRetoucher({
+    name,
+    token_hash: tokenHash,
+  })
+
+  json(res, 200, {
+    ok: true,
+    retoucher: {
+      id: retoucher.id,
+      name: retoucher.name,
+      active: retoucher.active,
+    },
+    token: plainToken,
+    warning:
+      'Save this token now. It cannot be retrieved later. Share it with the retoucher for portal access.',
+  })
+}
+
+async function rtList(res) {
+  const retouchers = await listRetouchers({ activeOnly: false })
+  json(res, 200, { ok: true, retouchers })
+}
+
+async function rtSetActive(body, res, active) {
+  const retoucherId = body.retoucherId
+
+  if (!retoucherId) {
+    return json(res, 400, { error: 'retoucherId is required.' })
+  }
+
+  const updated = await updateRetoucher(retoucherId, { active })
+  json(res, 200, { ok: true, retoucher: updated })
+}
+
+async function rtAssign(body, res) {
+  const jobId = body.jobId
+  const retoucherId = body.retoucherId
+  const retoucherName = body.retoucherName || ''
+
+  if (!jobId || !retoucherId) {
+    return json(res, 400, { error: 'jobId and retoucherId are required.' })
+  }
+
+  const job = await getJob(jobId)
+
+  if (!job) {
+    return json(res, 404, { error: 'Job not found.' })
+  }
+
+  if (job.status === 'delivered' || job.status === 'deleted') {
+    return json(res, 400, {
+      error: `Cannot assign a job with status "${job.status}".`,
+    })
+  }
+
+  const now = new Date().toISOString()
+  const updatedJob = await updateJob(jobId, {
+    retoucher_id: retoucherId,
+    retoucher_name: retoucherName,
+    retoucher_assigned_at: now,
+    status: 'assigned',
+  })
+
+  await updateOrderByJobId(jobId, { status: 'assigned' }).catch(() => null)
+
+  await insertEvent(jobId, 'retoucher_assigned', {
+    retoucher_id: retoucherId,
+    retoucher_name: retoucherName,
+  })
+
+  json(res, 200, { ok: true, job: updatedJob })
+}
+
+async function rtAssignableJobs(res) {
+  const jobs = await listAssignableJobs()
+  json(res, 200, { ok: true, jobs })
 }
