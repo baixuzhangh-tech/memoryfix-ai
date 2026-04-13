@@ -1181,126 +1181,132 @@ function App() {
 
     if (!paddle?.Initialize && !paddle?.Setup) {
       console.warn(
-        '[Paddle] setupPaddle failed: window.Paddle =',
-        typeof paddle,
-        'Initialize =',
-        typeof paddle?.Initialize,
-        'Setup =',
-        typeof paddle?.Setup
+        '[Paddle] setupPaddle: no Initialize/Setup.',
+        'Paddle =',
+        typeof paddle
       )
       return false
     }
 
     if (!paddleSetupRef.current) {
       if (!isPaddleClientTokenConfigured(paddleClientToken)) {
+        console.warn('[Paddle] setupPaddle: token not configured')
         return false
       }
 
-      if (paddleEnvironment === 'sandbox') {
-        paddle.Environment.set('sandbox')
-      }
+      try {
+        if (paddleEnvironment === 'sandbox' && paddle?.Environment) {
+          paddle.Environment.set('sandbox')
+        }
 
-      const setupOptions: {
-        eventCallback: (event: PaddleEvent) => void
-        token: string
-      } = {
-        token: paddleClientToken,
-        eventCallback: event => {
-          if (event.name !== 'checkout.completed') {
-            return
-          }
+        const setupOptions: {
+          eventCallback: (event: PaddleEvent) => void
+          token: string
+        } = {
+          token: paddleClientToken,
+          eventCallback: event => {
+            if (event.name !== 'checkout.completed') {
+              return
+            }
 
-          const eventData = event.data || {}
-          const paidTransactionId =
-            eventData.transactionId || eventData.id || ''
-          const paidCheckoutEmail = normalizeCheckoutEmail(
-            eventData.customer?.email
-          )
-          const customData = (eventData.customData || {}) as Record<
-            string,
-            unknown
-          >
-          const pendingContext = readHumanRestoreCheckoutContext()
-          const pendingCheckoutRef = pendingContext.pendingCheckoutRef || ''
-          const pendingOrderId = pendingContext.pendingOrderId || ''
-          const isLocalRepairPackCheckout =
-            readPendingLocalRepairPackCheckout() ||
-            customData.memoryfix_plan === 'local_repair_pack'
-
-          if (isLocalRepairPackCheckout) {
-            clearPendingLocalRepairPackCheckout()
-            const nextUsage = addLocalRepairPackCredits()
-            setLocalRepairUsage(nextUsage)
-            setLocalPackCheckoutStatus('success')
-            setLocalPackCheckoutError('')
-            setShowLocalRepairLimitModal(false)
-            window.Paddle?.Checkout.close()
-            trackProductEvent('complete_local_repair_pack_checkout', {
-              added_credits: localRepairPackCredits,
-              has_order_id: Boolean(paidTransactionId),
-              paid_credits_remaining: nextUsage.paidCredits,
-            })
-            window.setTimeout(() => {
-              document
-                .getElementById('local-repair-start')
-                ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            }, 250)
-            return
-          }
-
-          try {
-            localStorage.setItem(
-              'ls_checkout_success',
-              JSON.stringify({
-                orderId: paidTransactionId,
-                email: paidCheckoutEmail,
-                identifier: paidTransactionId,
-                timestamp: Date.now(),
-              })
+            const eventData = event.data || {}
+            const paidTransactionId =
+              eventData.transactionId || eventData.id || ''
+            const paidCheckoutEmail = normalizeCheckoutEmail(
+              eventData.customer?.email
             )
-          } catch {
-            // localStorage may be unavailable
-          }
+            const customData = (eventData.customData || {}) as Record<
+              string,
+              unknown
+            >
+            const pendingContext = readHumanRestoreCheckoutContext()
+            const pendingCheckoutRef = pendingContext.pendingCheckoutRef || ''
+            const pendingOrderId = pendingContext.pendingOrderId || ''
+            const isLocalRepairPackCheckout =
+              readPendingLocalRepairPackCheckout() ||
+              customData.memoryfix_plan === 'local_repair_pack'
 
-          const successUrl = new URL(
-            humanRestoreSuccessPath,
-            window.location.origin
-          )
+            if (isLocalRepairPackCheckout) {
+              clearPendingLocalRepairPackCheckout()
+              const nextUsage = addLocalRepairPackCredits()
+              setLocalRepairUsage(nextUsage)
+              setLocalPackCheckoutStatus('success')
+              setLocalPackCheckoutError('')
+              setShowLocalRepairLimitModal(false)
+              window.Paddle?.Checkout.close()
+              trackProductEvent('complete_local_repair_pack_checkout', {
+                added_credits: localRepairPackCredits,
+                has_order_id: Boolean(paidTransactionId),
+                paid_credits_remaining: nextUsage.paidCredits,
+              })
+              window.setTimeout(() => {
+                document
+                  .getElementById('local-repair-start')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }, 250)
+              return
+            }
 
-          if (pendingOrderId) {
-            successUrl.searchParams.set('order_id', pendingOrderId)
-          } else if (paidTransactionId) {
-            successUrl.searchParams.set('order_id', paidTransactionId)
-          }
+            try {
+              localStorage.setItem(
+                'ls_checkout_success',
+                JSON.stringify({
+                  orderId: paidTransactionId,
+                  email: paidCheckoutEmail,
+                  identifier: paidTransactionId,
+                  timestamp: Date.now(),
+                })
+              )
+            } catch {
+              // localStorage may be unavailable
+            }
 
-          if (pendingOrderId && paidTransactionId) {
-            successUrl.searchParams.set('provider_order_id', paidTransactionId)
-          }
+            const successUrl = new URL(
+              humanRestoreSuccessPath,
+              window.location.origin
+            )
 
-          if (paidCheckoutEmail) {
-            successUrl.searchParams.set('email', paidCheckoutEmail)
-          }
+            if (pendingOrderId) {
+              successUrl.searchParams.set('order_id', pendingOrderId)
+            } else if (paidTransactionId) {
+              successUrl.searchParams.set('order_id', paidTransactionId)
+            }
 
-          if (pendingCheckoutRef) {
-            successUrl.searchParams.set('checkout_ref', pendingCheckoutRef)
-          }
+            if (pendingOrderId && paidTransactionId) {
+              successUrl.searchParams.set(
+                'provider_order_id',
+                paidTransactionId
+              )
+            }
 
-          trackProductEvent('complete_human_restore_checkout', {
-            has_checkout_email: Boolean(paidCheckoutEmail),
-            has_checkout_ref: Boolean(pendingCheckoutRef),
-            has_order_id: Boolean(paidTransactionId),
-          })
+            if (paidCheckoutEmail) {
+              successUrl.searchParams.set('email', paidCheckoutEmail)
+            }
 
-          window.location.href = successUrl.toString()
-        },
+            if (pendingCheckoutRef) {
+              successUrl.searchParams.set('checkout_ref', pendingCheckoutRef)
+            }
+
+            trackProductEvent('complete_human_restore_checkout', {
+              has_checkout_email: Boolean(paidCheckoutEmail),
+              has_checkout_ref: Boolean(pendingCheckoutRef),
+              has_order_id: Boolean(paidTransactionId),
+            })
+
+            window.location.href = successUrl.toString()
+          },
+        }
+
+        if (paddle.Initialize) {
+          paddle.Initialize(setupOptions)
+        } else {
+          paddle.Setup?.(setupOptions)
+        }
+        paddleSetupRef.current = true
+      } catch (err) {
+        console.error('[Paddle] setupPaddle error:', err)
+        return false
       }
-
-      if (paddle.Initialize) {
-        paddle.Initialize(setupOptions)
-      } else {
-        paddle.Setup?.(setupOptions)
-      }
-      paddleSetupRef.current = true
     }
 
     return true
