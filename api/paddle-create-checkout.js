@@ -69,10 +69,15 @@ export default async function handler(req, res) {
         response.status,
         JSON.stringify(payload)
       )
+      const detail =
+        payload?.error?.detail ||
+        payload?.error?.message ||
+        (typeof payload?.error === 'string' ? payload.error : null) ||
+        'Could not create Paddle checkout session.'
       return res.status(502).json({
-        error:
-          payload?.error?.detail ||
-          'Could not create Paddle checkout session.',
+        error: detail,
+        paddleStatus: response.status,
+        paddleError: payload?.error || null,
       })
     }
 
