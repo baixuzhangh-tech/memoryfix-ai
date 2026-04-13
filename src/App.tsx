@@ -1165,8 +1165,12 @@ function App() {
       }
 
       window.setTimeout(() => {
+        console.warn(
+          '[Paddle] Script load timeout, Paddle available:',
+          Boolean(window.Paddle)
+        )
         finish(Boolean(window.Paddle?.Initialize || window.Paddle?.Setup))
-      }, 5000)
+      }, 10000)
     })
 
     return paddleScriptLoadPromiseRef.current
@@ -1176,6 +1180,14 @@ function App() {
     const paddle = window.Paddle
 
     if (!paddle?.Initialize && !paddle?.Setup) {
+      console.warn(
+        '[Paddle] setupPaddle failed: window.Paddle =',
+        typeof paddle,
+        'Initialize =',
+        typeof paddle?.Initialize,
+        'Setup =',
+        typeof paddle?.Setup
+      )
       return false
     }
 
