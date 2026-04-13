@@ -157,7 +157,7 @@ Use these settings for the first launch:
 - Build command: `npm run build`
 - Output directory: `dist`
 - Install command: `npm install --ignore-scripts`
-- Paddle checkout: set `VITE_PADDLE_SELLER_ID`, `VITE_PADDLE_HUMAN_RESTORE_PRICE_ID`, and `VITE_PADDLE_LOCAL_PACK_PRICE_ID` after Paddle onboarding is approved
+- Paddle checkout: set `VITE_PADDLE_CLIENT_TOKEN`, `VITE_PADDLE_HUMAN_RESTORE_PRICE_ID`, and `VITE_PADDLE_LOCAL_PACK_PRICE_ID` after Paddle onboarding is approved
 - Paid CTA fallback: set `VITE_HUMAN_RESTORE_CONTACT_EMAIL` so customers see a safe early-access contact while Paddle is pending
 - Local repair quota: the browser-local MVP uses `localStorage` for 3 free starts and purchased local credits on the same device
 - Success page path: `/human-restore/success`

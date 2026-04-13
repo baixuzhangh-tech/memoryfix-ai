@@ -480,8 +480,6 @@ function installEnv() {
 
 async function main() {
   installEnv()
-  delete process.env.LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID
-  delete process.env.LEMON_SQUEEZY_STORE_ID
 
   const state = createMockState()
   installMockFetch(state)

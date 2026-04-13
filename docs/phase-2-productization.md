@@ -21,7 +21,7 @@
 - 增加 Privacy / Terms / Open Source 发布前信任说明区
 - 增加编辑器 3 步新手引导与空历史提示
 - 增加 Vercel / Cloudflare Pages 静态部署配置
-- 增加早鸟付费链接环境变量 `VITE_EARLY_ACCESS_URL`
+- 增加早鸟付费入口，后续已升级为 Paddle Billing checkout
 - 更新 `index.html` 的 title 和 description
 - 更新 README，明确二开来源和隐私承诺边界
 - `npm run build` 通过
@@ -55,6 +55,6 @@ Human-assisted Restore = future opt-in workflow for stronger results.
 
 1. 将项目推送到 GitHub，并连接 Vercel 或 Cloudflare Pages
 2. 接入 Plausible / Umami / Google Analytics 事件追踪
-3. 创建 $19/photo Human-assisted Restore 付款链接并配置 `VITE_EARLY_ACCESS_URL`
+3. 创建 $19.90/photo Human-assisted Restore Paddle 产品并配置 Paddle client token / price IDs
 4. 调研 Human-assisted Restore 的人工交付和云端模型方案
 5. 将当前 trust notes 升级为律师审核后的正式 Privacy / Terms 页面

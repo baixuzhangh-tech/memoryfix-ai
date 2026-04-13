@@ -21,6 +21,8 @@ import {
 import {
   countJobsByOrderId,
   countRecentJobsByEmail,
+  getOrder,
+  getOrderByProviderOrderId,
   getHumanRestoreBuckets,
   insertEvent,
   insertJob,
@@ -39,72 +41,6 @@ const maxUploadSizeBytes = 15 * 1024 * 1024
 const maxSubmissionsPerOrder = 1
 const maxFallbackSubmissionsPerDay = 2
 
-async function verifyLemonSqueezyOrder({ email, orderNumber }) {
-  const apiKey = process.env.LEMON_SQUEEZY_API_KEY
-  const storeId = process.env.LEMON_SQUEEZY_STORE_ID
-
-  if (!apiKey) {
-    return { verified: false, reason: 'Order verification is not configured.' }
-  }
-
-  const url = new URL('https://api.lemonsqueezy.com/v1/orders')
-
-  url.searchParams.set('filter[user_email]', email)
-
-  if (storeId) {
-    url.searchParams.set('filter[store_id]', storeId)
-  }
-
-  url.searchParams.set('page[size]', '10')
-  url.searchParams.set('sort', '-createdAt')
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      Accept: 'application/vnd.api+json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-  })
-
-  if (!response.ok) {
-    return { verified: false, reason: 'Could not reach payment provider.' }
-  }
-
-  const payload = await response.json().catch(() => null)
-  const orders = Array.isArray(payload?.data) ? payload.data : []
-  const normalizedOrderNum = String(orderNumber).trim()
-  const match = orders.find(o => {
-    const attrs = o?.attributes || o?.data?.attributes
-
-    if (!attrs) {
-      return false
-    }
-
-    return (
-      String(attrs.order_number) === normalizedOrderNum &&
-      attrs.status === 'paid'
-    )
-  })
-
-  if (!match) {
-    return { verified: false, reason: 'No matching paid order found for this email and order number.' }
-  }
-
-  const attrs = match.attributes || match.data?.attributes
-  const firstItem = attrs?.first_order_item
-
-  return {
-    verified: true,
-    order: {
-      checkoutEmail: attrs.user_email || email,
-      customerName: attrs.user_name || '',
-      orderId: String(match.id),
-      orderNumber: String(attrs.order_number),
-      productName: firstItem?.product_name || 'Human-assisted Restore',
-      receiptUrl: attrs.urls?.receipt || '',
-      testMode: Boolean(attrs.test_mode),
-    },
-  }
-}
 const allowedImageTypes = new Set([
   'image/jpeg',
   'image/png',
@@ -115,6 +51,117 @@ const allowedImageTypes = new Set([
 
 function shouldAutoProcessAfterUpload() {
   return process.env.HUMAN_RESTORE_AUTO_PROCESS_AFTER_UPLOAD !== 'false'
+}
+
+function normalizeEmail(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function isPaidOrderStatus(status) {
+  return [
+    'paid',
+    'uploaded',
+    'processing',
+    'ai_queued',
+    'ai_failed',
+    'needs_review',
+    'manual_review',
+    'delivered',
+  ].includes(status)
+}
+
+function looksLikeUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '')
+  )
+}
+
+function localOrderToUploadOrder(localOrder) {
+  if (!localOrder) {
+    return null
+  }
+
+  return {
+    checkoutEmail: localOrder.checkout_email || '',
+    customerName: localOrder.customer_name || '',
+    localOrderId: localOrder.id,
+    orderId: localOrder.payment_provider_order_id || localOrder.id,
+    orderNumber:
+      localOrder.order_number ||
+      localOrder.payment_provider_order_id ||
+      localOrder.id,
+    productName: localOrder.product_name || 'Human-assisted Restore',
+    receiptUrl: localOrder.receipt_url || '',
+    testMode: Boolean(localOrder.test_mode),
+  }
+}
+
+async function verifyPaddlePaidOrder({ email, orderReference }) {
+  const normalizedEmail = normalizeEmail(email)
+  const reference = String(orderReference || '').trim()
+  let localOrder = null
+
+  if (reference) {
+    if (looksLikeUuid(reference)) {
+      localOrder = await getOrder(reference)
+    }
+
+    if (!localOrder) {
+      localOrder = await getOrderByProviderOrderId(reference)
+    }
+  }
+
+  if (!localOrder) {
+    return {
+      verified: false,
+      reason:
+        'No paid Paddle order matched this checkout email and transaction reference. Please use the secure upload link from your payment confirmation or contact support.',
+    }
+  }
+
+  if (normalizeEmail(localOrder.checkout_email) !== normalizedEmail) {
+    return {
+      verified: false,
+      reason: 'Checkout email does not match this paid order.',
+    }
+  }
+
+  if (!isPaidOrderStatus(localOrder.status)) {
+    return {
+      verified: false,
+      reason:
+        'This order is not paid yet. Please wait for Paddle confirmation and try again.',
+    }
+  }
+
+  const configuredPriceId = process.env.PADDLE_HUMAN_RESTORE_PRICE_ID
+
+  if (
+    configuredPriceId &&
+    localOrder.variant_id &&
+    String(localOrder.variant_id) !== String(configuredPriceId)
+  ) {
+    return {
+      verified: false,
+      reason: 'This paid order is not for Human-assisted Restore.',
+    }
+  }
+
+  if (localOrder.job_id) {
+    return {
+      verified: false,
+      reason:
+        'This order already has a photo submission. If you need to replace the photo, please contact support.',
+    }
+  }
+
+  return {
+    verified: true,
+    localOrder,
+    order: localOrderToUploadOrder(localOrder),
+  }
 }
 
 async function sendMerchantNotificationEmail({
@@ -140,7 +187,7 @@ async function sendMerchantNotificationEmail({
       ['Submission reference', submissionReference],
       ['Upload source', uploadSource],
       ['Checkout email', checkoutEmail],
-      ['Order number', orderReference || 'Not provided'],
+      ['Payment reference', orderReference || 'Not provided'],
       ['Job ID', jobId],
       ['Stored file', photo.filename],
     ]),
@@ -165,7 +212,7 @@ async function sendMerchantNotificationEmail({
     `Submission reference: ${submissionReference}`,
     `Upload source: ${uploadSource}`,
     `Checkout email: ${checkoutEmail}`,
-    `Order number: ${orderReference || 'Not provided'}`,
+    `Payment reference: ${orderReference || 'Not provided'}`,
     `Job ID: ${jobId}`,
     `Stored file: ${photo.filename}`,
     `Repair notes: ${notes || 'No extra notes provided.'}`,
@@ -201,7 +248,7 @@ async function sendCustomerConfirmationEmail({
     emailDetailBlock([
       ['Submission reference', submissionReference],
       ['Checkout email', checkoutEmail],
-      ['Order number', orderReference || 'Not provided'],
+      ['Payment reference', orderReference || 'Not provided'],
     ]),
     emailParagraph('<strong style="color:#211915">What happens next:</strong>'),
     emailStepsList([
@@ -227,7 +274,7 @@ async function sendCustomerConfirmationEmail({
     'We received your photo for MemoryFix AI Human-assisted Restore.',
     `Submission reference: ${submissionReference}`,
     `Checkout email: ${checkoutEmail}`,
-    `Order number: ${orderReference || 'Not provided'}`,
+    `Payment reference: ${orderReference || 'Not provided'}`,
     'Next steps:',
     '- We match this upload to your paid order.',
     '- We review the image and your notes.',
@@ -310,7 +357,7 @@ export default async function handler(req, res) {
 
     if (!isSecureUpload && process.env.HUMAN_RESTORE_ALLOW_FALLBACK_UPLOAD === 'false') {
       json(res, 403, {
-        error: 'Direct uploads are disabled. Please use the secure upload link from your order confirmation email.',
+        error: 'Direct uploads are disabled. Please use the secure upload link from your Paddle confirmation email.',
       })
       return
     }
@@ -338,14 +385,14 @@ export default async function handler(req, res) {
     if (!isSecureUpload) {
       if (!orderReference) {
         json(res, 400, {
-          error: 'Order number is required. You can find it in your payment confirmation email from Lemon Squeezy.',
+          error: 'Paddle transaction reference is required. You can find it in your payment confirmation email.',
         })
         return
       }
 
-      const verification = await verifyLemonSqueezyOrder({
+      const verification = await verifyPaddlePaidOrder({
         email: checkoutEmail,
-        orderNumber: orderReference,
+        orderReference,
       })
 
       if (!verification.verified) {
@@ -511,7 +558,7 @@ export default async function handler(req, res) {
 
     json(res, 200, {
       ok: true,
-      orderBound: isSecureUpload,
+      orderBound: isSecureUpload || Boolean(verifiedOrder),
       submissionReference,
       confirmationEmailSent,
       merchantEmailSent,

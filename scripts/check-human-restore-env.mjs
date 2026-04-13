@@ -8,10 +8,15 @@ const requiredVariables = [
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'RESEND_API_KEY',
-  'LEMON_SQUEEZY_API_KEY',
-  'LEMON_SQUEEZY_STORE_ID',
-  'LEMON_SQUEEZY_WEBHOOK_SECRET',
-  'LEMON_SQUEEZY_HUMAN_RESTORE_VARIANT_ID',
+  'VITE_PADDLE_CLIENT_TOKEN',
+  'VITE_PADDLE_ENVIRONMENT',
+  'VITE_PADDLE_HUMAN_RESTORE_PRICE_ID',
+  'VITE_PADDLE_LOCAL_PACK_PRICE_ID',
+  'PADDLE_API_KEY',
+  'PADDLE_WEBHOOK_SECRET',
+  'PADDLE_HUMAN_RESTORE_PRICE_ID',
+  'PADDLE_LOCAL_PACK_PRICE_ID',
+  'PADDLE_ENVIRONMENT',
   'HUMAN_RESTORE_INBOX',
   'HUMAN_RESTORE_FROM_EMAIL',
   'HUMAN_RESTORE_SUPPORT_EMAIL',
@@ -21,6 +26,7 @@ const requiredVariables = [
 ]
 
 const placeholderPatterns = [
+  /your_/i,
   /^your_/i,
   /^replace_/i,
   /example\.com$/i,
@@ -94,6 +100,53 @@ const hasFal = Boolean(env.FAL_KEY)
 const hasOpenAI = Boolean(env.OPENAI_API_KEY)
 const hasReplicate = Boolean(env.REPLICATE_API_TOKEN)
 const aiProblems = []
+const paddleProblems = []
+
+if (
+  env.VITE_PADDLE_CLIENT_TOKEN &&
+  !/^test_|^live_/.test(env.VITE_PADDLE_CLIENT_TOKEN)
+) {
+  paddleProblems.push(
+    'VITE_PADDLE_CLIENT_TOKEN should be a Paddle client-side token starting with test_ or live_.'
+  )
+}
+
+if (
+  env.VITE_PADDLE_ENVIRONMENT &&
+  !['sandbox', 'production'].includes(env.VITE_PADDLE_ENVIRONMENT)
+) {
+  paddleProblems.push(
+    'VITE_PADDLE_ENVIRONMENT should be sandbox or production.'
+  )
+}
+
+if (
+  env.PADDLE_ENVIRONMENT &&
+  !['sandbox', 'production'].includes(env.PADDLE_ENVIRONMENT)
+) {
+  paddleProblems.push('PADDLE_ENVIRONMENT should be sandbox or production.')
+}
+
+for (const key of [
+  'VITE_PADDLE_HUMAN_RESTORE_PRICE_ID',
+  'VITE_PADDLE_LOCAL_PACK_PRICE_ID',
+  'PADDLE_HUMAN_RESTORE_PRICE_ID',
+  'PADDLE_LOCAL_PACK_PRICE_ID',
+]) {
+  if (env[key] && !String(env[key]).startsWith('pri_')) {
+    paddleProblems.push(`${key} should be a Paddle price ID starting with pri_.`)
+  }
+}
+
+if (
+  env.VITE_PADDLE_ENVIRONMENT &&
+  env.PADDLE_ENVIRONMENT &&
+  env.VITE_PADDLE_ENVIRONMENT !== env.PADDLE_ENVIRONMENT
+) {
+  paddleProblems.push(
+    'VITE_PADDLE_ENVIRONMENT and PADDLE_ENVIRONMENT should match.'
+  )
+}
 
 if (provider === 'fal' && !hasFal && !hasOpenAI && !hasReplicate) {
   aiProblems.push(
@@ -111,7 +164,7 @@ if (provider === 'fal' && !hasFal && !hasOpenAI && !hasReplicate) {
   aiProblems.push('Set FAL_KEY, OPENAI_API_KEY, or REPLICATE_API_TOKEN for cloud restoration.')
 }
 
-if (missing.length || placeholders.length || aiProblems.length) {
+if (missing.length || placeholders.length || aiProblems.length || paddleProblems.length) {
   console.error('Human Restore environment is not ready.')
 
   if (missing.length) {
@@ -123,6 +176,10 @@ if (missing.length || placeholders.length || aiProblems.length) {
   }
 
   for (const problem of aiProblems) {
+    console.error(problem)
+  }
+
+  for (const problem of paddleProblems) {
     console.error(problem)
   }
 

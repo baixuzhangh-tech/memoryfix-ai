@@ -102,7 +102,7 @@ create table if not exists public.human_restore_orders (
       'deleted'
     )
   ),
-  payment_provider text not null default 'lemon_squeezy',
+  payment_provider text not null default 'paddle',
   checkout_id text,
   checkout_url text,
   payment_provider_order_id text unique,

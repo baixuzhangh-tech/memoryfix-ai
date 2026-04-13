@@ -233,7 +233,7 @@ export default function HumanRestoreUploadForm(
         >
           {isSecureUpload
             ? 'Choose the clearest scan or original image. Add a short note, then submit once to start human-reviewed restoration.'
-            : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the order number if you have it so we can match the paid order quickly.'}
+            : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the Paddle transaction reference if you have it so we can match the paid order quickly.'}
         </p>
       </div>
 
@@ -286,7 +286,7 @@ export default function HumanRestoreUploadForm(
 
             <label className="grid gap-2" htmlFor={orderReferenceFieldId}>
               <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
-                Order number
+                Paddle reference
               </span>
               <input
                 id={orderReferenceFieldId}
@@ -296,9 +296,10 @@ export default function HumanRestoreUploadForm(
                   setOrderReference(event.currentTarget.value)
                 }}
                 className={inputClassName}
-                placeholder="Optional, but recommended"
+                placeholder="Transaction ID from your Paddle receipt"
                 autoComplete="off"
                 disabled={status === 'submitting'}
+                required
               />
             </label>
           </div>
