@@ -299,6 +299,11 @@ type PaddleEvent = {
   name?: string
 }
 
+type CheckoutLaunchResult = {
+  error?: string
+  ok: boolean
+}
+
 declare global {
   interface Window {
     Paddle?: {
@@ -1327,29 +1332,30 @@ function App() {
   function handleHumanRestoreCheckoutCreated(payload: {
     checkoutRef: string
     orderId: string
-  }) {
+  }): CheckoutLaunchResult {
     const { checkoutRef, orderId } = payload
 
     if (!paddleHumanRestorePriceId) {
+      const errorMessage = 'Paddle checkout is not configured.'
       setCheckoutLaunchStatus('error')
-      setCheckoutLaunchError('Paddle checkout is not configured.')
-      return
+      setCheckoutLaunchError(errorMessage)
+      return { error: errorMessage, ok: false }
     }
 
     rememberHumanRestorePendingCheckout({ checkoutRef, orderId })
-    setShowHumanRestoreCheckout(false)
+    setCheckoutLaunchStatus('loading')
 
     if (!ensurePaddleSetup()) {
+      const errorMessage =
+        'Secure checkout could not load. Please refresh, disable checkout-blocking extensions, and try again. Your photo is already saved, so you can retry without uploading again.'
       setCheckoutLaunchStatus('error')
-      setCheckoutLaunchError(
-        'Secure checkout could not load. Please refresh and try again.'
-      )
+      setCheckoutLaunchError(errorMessage)
       trackProductEvent('click_human_restore', {
         checkout_ref_created: Boolean(checkoutRef),
         destination: 'paddle_unavailable',
         local_order_created: Boolean(orderId),
       })
-      return
+      return { error: errorMessage, ok: false }
     }
 
     const successUrl = new URL(humanRestoreSuccessPath, window.location.origin)
@@ -1361,20 +1367,48 @@ function App() {
       destination: 'paddle_overlay',
       local_order_created: Boolean(orderId),
     })
-    window.Paddle?.Checkout.open({
-      items: [{ priceId: paddleHumanRestorePriceId, quantity: 1 }],
-      customData: {
-        checkout_ref: checkoutRef,
-        flow: 'human_restore_preupload',
-        human_restore_order_id: orderId,
-      },
-      settings: {
-        displayMode: 'overlay',
-        theme: 'light',
-        successUrl: successUrl.toString(),
-      },
-    })
-    setCheckoutLaunchStatus('idle')
+
+    try {
+      if (!window.Paddle?.Checkout?.open) {
+        throw new Error('Paddle checkout is not available in this browser.')
+      }
+
+      window.Paddle.Checkout.open({
+        items: [{ priceId: paddleHumanRestorePriceId, quantity: 1 }],
+        customData: {
+          checkout_ref: checkoutRef,
+          flow: 'human_restore_preupload',
+          human_restore_order_id: orderId,
+        },
+        settings: {
+          displayMode: 'overlay',
+          theme: 'light',
+          successUrl: successUrl.toString(),
+        },
+      })
+      setCheckoutLaunchStatus('idle')
+      setCheckoutLaunchError('')
+      return { ok: true }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Paddle checkout could not open. Please refresh and retry.'
+
+      setCheckoutLaunchStatus('error')
+      setCheckoutLaunchError(
+        `${errorMessage} Your photo is already saved, so you can retry checkout without uploading again.`
+      )
+      trackProductEvent('click_human_restore', {
+        checkout_ref_created: Boolean(checkoutRef),
+        destination: 'paddle_open_failed',
+        local_order_created: Boolean(orderId),
+      })
+      return {
+        error: `${errorMessage} Your photo is already saved, so you can retry checkout without uploading again.`,
+        ok: false,
+      }
+    }
   }
 
   useEffect(() => {

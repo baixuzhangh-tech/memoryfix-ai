@@ -8,12 +8,29 @@ type HumanRestoreCheckoutResponse = {
   orderId?: string
 }
 
-type HumanRestoreCheckoutFormProps = {
-  onCancel: () => void
-  onCheckoutCreated: (payload: { checkoutRef: string; orderId: string }) => void
+type HumanRestoreCheckoutPayload = {
+  checkoutRef: string
+  orderId: string
 }
 
-type SubmissionStatus = 'idle' | 'submitting' | 'error'
+type CheckoutLaunchResult = {
+  error?: string
+  ok: boolean
+}
+
+type HumanRestoreCheckoutFormProps = {
+  onCancel: () => void
+  onCheckoutCreated: (
+    payload: HumanRestoreCheckoutPayload
+  ) => CheckoutLaunchResult | Promise<CheckoutLaunchResult>
+}
+
+type SubmissionStatus =
+  | 'idle'
+  | 'submitting'
+  | 'opening'
+  | 'checkout-ready'
+  | 'error'
 
 const maxUploadSizeBytes = 15 * 1024 * 1024
 const allowedImageTypes = new Set([
@@ -38,12 +55,20 @@ export default function HumanRestoreCheckoutForm(
   const { onCancel, onCheckoutCreated } = props
   const [notes, setNotes] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [checkoutPayload, setCheckoutPayload] =
+    useState<HumanRestoreCheckoutPayload | null>(null)
   const [status, setStatus] = useState<SubmissionStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const notesFieldId = 'human-restore-precheckout-notes'
   const photoFieldId = 'human-restore-precheckout-photo'
+  const isBusy = status === 'submitting' || status === 'opening'
+  const hasSavedCheckout = Boolean(checkoutPayload)
 
   function onSelectFile(file: File | null) {
+    if (hasSavedCheckout) {
+      return
+    }
+
     setStatus('idle')
     setErrorMessage('')
 
@@ -69,8 +94,52 @@ export default function HumanRestoreCheckoutForm(
     setSelectedFile(file)
   }
 
+  async function openSavedCheckout(
+    payload: HumanRestoreCheckoutPayload,
+    source: 'after_upload' | 'retry'
+  ) {
+    setStatus('opening')
+    setErrorMessage('')
+
+    try {
+      const launchResult = await onCheckoutCreated(payload)
+
+      if (!launchResult.ok) {
+        throw new Error(
+          launchResult.error ||
+            'Paddle checkout could not open. Please retry in a moment.'
+        )
+      }
+
+      setStatus('checkout-ready')
+      trackProductEvent('open_human_restore_checkout_requested', {
+        checkout_ref_created: Boolean(payload.checkoutRef),
+        local_order_created: Boolean(payload.orderId),
+        source,
+      })
+    } catch (error) {
+      setStatus('error')
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Paddle checkout could not open. Please retry in a moment.'
+      )
+
+      trackProductEvent('open_human_restore_checkout_failed', {
+        checkout_ref_created: Boolean(payload.checkoutRef),
+        local_order_created: Boolean(payload.orderId),
+        source,
+      })
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+
+    if (checkoutPayload) {
+      await openSavedCheckout(checkoutPayload, 'retry')
+      return
+    }
 
     if (!selectedFile) {
       setStatus('error')
@@ -111,10 +180,13 @@ export default function HumanRestoreCheckoutForm(
         order_id_created: Boolean(responseBody.orderId),
       })
 
-      onCheckoutCreated({
+      const nextCheckoutPayload = {
         checkoutRef: responseBody.checkoutRef || '',
         orderId: responseBody.orderId,
-      })
+      }
+
+      setCheckoutPayload(nextCheckoutPayload)
+      await openSavedCheckout(nextCheckoutPayload, 'after_upload')
     } catch (error) {
       setStatus('error')
       setErrorMessage(
@@ -128,6 +200,23 @@ export default function HumanRestoreCheckoutForm(
       })
     }
   }
+
+  let submitButtonText = 'Continue to secure checkout'
+
+  if (status === 'submitting') {
+    submitButtonText = 'Saving photo...'
+  } else if (status === 'opening') {
+    submitButtonText = 'Opening secure checkout...'
+  } else if (checkoutPayload) {
+    submitButtonText = 'Reopen secure checkout'
+  }
+
+  const checkoutHelperText = checkoutPayload
+    ? 'Your upload is already saved. Reopen Paddle checkout from this same order instead of uploading again.'
+    : 'After the upload is saved, Paddle opens for secure payment. You will not need to upload this photo again after payment.'
+  const checkoutErrorTitle = checkoutPayload
+    ? 'Photo saved. Checkout did not open'
+    : 'Checkout not ready'
 
   return (
     <section className="max-w-4xl">
@@ -169,6 +258,17 @@ export default function HumanRestoreCheckoutForm(
         ))}
       </div>
 
+      {checkoutPayload && (
+        <div className="mt-6 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-4 text-sm leading-6 text-[#355322]">
+          <p className="font-black">Photo saved before payment</p>
+          <p className="mt-1">
+            Your source photo and notes are attached to a pending order for 48
+            hours. If Paddle did not appear, use the button below to reopen
+            checkout. Do not upload the same photo again.
+          </p>
+        </div>
+      )}
+
       <form className="mt-7 grid gap-5" onSubmit={handleSubmit}>
         <label className="grid gap-2" htmlFor={photoFieldId}>
           <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
@@ -182,7 +282,7 @@ export default function HumanRestoreCheckoutForm(
               onSelectFile(event.currentTarget.files?.[0] ?? null)
             }}
             className="rounded-[1.5rem] border-2 border-dashed border-[#d7b98c] bg-[#fffaf3] px-4 py-5 text-base text-[#211915] file:mr-4 file:rounded-full file:border-0 file:bg-[#211915] file:px-5 file:py-3 file:font-black file:text-white"
-            disabled={status === 'submitting'}
+            disabled={isBusy || hasSavedCheckout}
             required
           />
           <p className="text-sm leading-6 text-[#66574d]">
@@ -208,7 +308,7 @@ export default function HumanRestoreCheckoutForm(
             }}
             className="min-h-[136px] rounded-[1.5rem] border border-[#d7b98c] bg-[#fffaf3] px-4 py-4 text-base leading-7 text-[#211915] outline-none transition focus:border-[#211915]"
             placeholder="Tell us what matters most: scratches, missing details, color fading, faces, keeping the result natural, or any family context that will help."
-            disabled={status === 'submitting'}
+            disabled={isBusy || hasSavedCheckout}
           />
         </label>
 
@@ -221,24 +321,21 @@ export default function HumanRestoreCheckoutForm(
 
         {errorMessage && (
           <div className="rounded-[1.5rem] border border-[#f0b5a9] bg-[#fff1ed] px-5 py-4 text-sm leading-6 text-[#8a2f1d]">
-            <p className="font-black">Checkout not ready</p>
+            <p className="font-black">{checkoutErrorTitle}</p>
             <p className="mt-1">{errorMessage}</p>
           </div>
         )}
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <p className="max-w-2xl text-xs leading-6 text-[#66574d]">
-            After the upload is saved, Paddle opens for secure payment. You will
-            not need to upload this photo again after payment.
+            {checkoutHelperText}
           </p>
           <button
             type="submit"
-            disabled={status === 'submitting'}
+            disabled={isBusy}
             className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820] disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {status === 'submitting'
-              ? 'Saving photo and opening checkout...'
-              : 'Continue to secure checkout'}
+            {submitButtonText}
           </button>
         </div>
       </form>
