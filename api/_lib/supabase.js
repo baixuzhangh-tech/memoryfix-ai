@@ -211,7 +211,7 @@ export async function getRecentPaidOrderByEmail(email, hoursBack = 48) {
   const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString()
   const params = new URLSearchParams({
     checkout_email: `eq.${email}`,
-    'payment_confirmed_at': 'not.is.null',
+    payment_confirmed_at: 'not.is.null',
     created_at: `gte.${since}`,
     limit: '1',
     order: 'payment_confirmed_at.desc',
@@ -496,4 +496,77 @@ export async function deleteObject({ bucket, path }) {
       prefixes: [path],
     }),
   })
+}
+
+// ---------------------------------------------------------------------------
+// Retoucher helpers
+// ---------------------------------------------------------------------------
+
+export async function insertRetoucher(retoucher) {
+  const payload = await supabaseRest('/human_restore_retouchers', {
+    method: 'POST',
+    body: retoucher,
+    prefer: 'return=representation',
+  })
+
+  return Array.isArray(payload) ? payload[0] : payload
+}
+
+export async function listRetouchers({ activeOnly = true } = {}) {
+  const params = new URLSearchParams({
+    order: 'created_at.desc',
+    select: 'id,name,active,created_at',
+  })
+
+  if (activeOnly) {
+    params.set('active', 'eq.true')
+  }
+
+  return supabaseRest(`/human_restore_retouchers?${params.toString()}`)
+}
+
+export async function updateRetoucher(retoucherId, patch) {
+  const payload = await supabaseRest(
+    `/human_restore_retouchers?id=eq.${encodeURIComponent(retoucherId)}`,
+    {
+      method: 'PATCH',
+      body: {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      },
+      prefer: 'return=representation',
+    }
+  )
+
+  return Array.isArray(payload) ? payload[0] : payload
+}
+
+export async function listJobsByRetoucher(retoucherId, { status } = {}) {
+  const params = new URLSearchParams({
+    retoucher_id: `eq.${retoucherId}`,
+    order: 'retoucher_assigned_at.desc',
+    select:
+      'id,submission_reference,status,notes,original_file_name,original_file_type,original_file_size,original_storage_bucket,original_storage_path,retoucher_assigned_at,retoucher_uploaded_at,created_at',
+  })
+
+  if (status) {
+    params.set('status', `eq.${status}`)
+  } else {
+    params.set('status', 'in.(assigned,delivered)')
+  }
+
+  return supabaseRest(`/human_restore_jobs?${params.toString()}`)
+}
+
+export async function listAssignableJobs({ limit = 50 } = {}) {
+  const params = new URLSearchParams({
+    retoucher_id: 'is.null',
+    status: 'in.(uploaded,needs_review,manual_review,ai_failed)',
+    order: 'created_at.desc',
+    limit: String(limit),
+    select:
+      'id,submission_reference,status,notes,original_file_name,original_file_size,checkout_email,created_at',
+  })
+
+  return supabaseRest(`/human_restore_jobs?${params.toString()}`)
 }

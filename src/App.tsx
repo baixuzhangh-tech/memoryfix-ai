@@ -4,6 +4,7 @@ import { ArrowLeftIcon, InformationCircleIcon } from '@heroicons/react/outline'
 import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
 import AdminReviewPage from './components/AdminReviewPage'
+import RetoucherPortal from './components/RetoucherPortal'
 import LegalPage, { isLegalPage } from './components/LegalPage'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
@@ -257,6 +258,7 @@ function isPaddlePriceIdConfigured(value: string) {
 const humanRestoreSecureUploadPath = '/human-restore/upload'
 const humanRestoreSuccessPath = '/human-restore/success'
 const adminReviewPath = '/admin/review'
+const retoucherPortalPath = '/retoucher'
 
 const siteUrl = 'https://artgen.site'
 const homePageTitle = 'MemoryFix AI - Private Old Photo Repair'
@@ -273,6 +275,9 @@ const humanRestoreSecureUploadDescription =
 const adminReviewTitle = 'Admin Review - MemoryFix AI'
 const adminReviewDescription =
   'Private MemoryFix AI review queue for paid Human-assisted Restore orders.'
+const retoucherPortalTitle = 'Retoucher Portal - MemoryFix AI'
+const retoucherPortalDescription =
+  'MemoryFix AI retoucher workspace for assigned photo restoration tasks.'
 
 type DirectSecureAccessResponse = {
   error?: string
@@ -634,6 +639,7 @@ function App() {
   const isHumanRestoreSecureUploadPage =
     currentPath === humanRestoreSecureUploadPath
   const isAdminReviewPage = currentPath === adminReviewPath
+  const isRetoucherPortalPage = currentPath === retoucherPortalPath
   const isLegalRoute = isLegalPage(currentPath)
   const secureUploadToken = currentSearchParams.get('token') || ''
   const defaultCheckoutEmail =
@@ -692,6 +698,7 @@ function App() {
   let mainView:
     | 'admin'
     | 'editor'
+    | 'retoucher'
     | 'success'
     | 'secure-upload'
     | 'legal'
@@ -699,6 +706,8 @@ function App() {
 
   if (file) {
     mainView = 'editor'
+  } else if (isRetoucherPortalPage) {
+    mainView = 'retoucher'
   } else if (isAdminReviewPage) {
     mainView = 'admin'
   } else if (isHumanRestoreSecureUploadPage) {
@@ -712,12 +721,17 @@ function App() {
   useEffect(() => {
     const isHumanRestoreOrderPage =
       isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
-    const isPrivatePage = isHumanRestoreOrderPage || isAdminReviewPage
+    const isPrivatePage =
+      isHumanRestoreOrderPage || isAdminReviewPage || isRetoucherPortalPage
     let pageTitle = homePageTitle
     let pageDescription = homePageDescription
     let pagePath = '/'
 
-    if (isAdminReviewPage) {
+    if (isRetoucherPortalPage) {
+      pageTitle = retoucherPortalTitle
+      pageDescription = retoucherPortalDescription
+      pagePath = retoucherPortalPath
+    } else if (isAdminReviewPage) {
       pageTitle = adminReviewTitle
       pageDescription = adminReviewDescription
       pagePath = adminReviewPath
@@ -750,6 +764,7 @@ function App() {
     isAdminReviewPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
+    isRetoucherPortalPage,
   ])
 
   useEffect(() => {
@@ -764,6 +779,8 @@ function App() {
       pageViewEvent = 'view_human_restore_success'
     } else if (isAdminReviewPage) {
       pageViewEvent = 'view_admin_review'
+    } else if (isRetoucherPortalPage) {
+      pageViewEvent = 'view_retoucher_portal'
     }
 
     trackProductEvent(pageViewEvent)
@@ -775,6 +792,7 @@ function App() {
     isAdminReviewPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
+    isRetoucherPortalPage,
   ])
 
   useEffect(() => {
@@ -1659,6 +1677,7 @@ function App() {
             isHumanRestoreSuccessPage ||
             isHumanRestoreSecureUploadPage ||
             isAdminReviewPage ||
+            isRetoucherPortalPage ||
             isLegalRoute
               ? ''
               : 'opacity-50 pointer-events-none',
@@ -1670,6 +1689,7 @@ function App() {
               isHumanRestoreSuccessPage ||
               isHumanRestoreSecureUploadPage ||
               isAdminReviewPage ||
+              isRetoucherPortalPage ||
               isLegalRoute
             ) {
               window.location.assign('/')
@@ -1684,6 +1704,7 @@ function App() {
               {isHumanRestoreSuccessPage ||
               isHumanRestoreSecureUploadPage ||
               isAdminReviewPage ||
+              isRetoucherPortalPage ||
               isLegalRoute
                 ? 'Back home'
                 : m.start_new()}
@@ -1708,6 +1729,7 @@ function App() {
             !isHumanRestoreSuccessPage &&
             !isHumanRestoreSecureUploadPage &&
             !isAdminReviewPage &&
+            !isRetoucherPortalPage &&
             !isLegalRoute && (
               <>
                 <a
@@ -1766,6 +1788,7 @@ function App() {
       >
         {mainView === 'editor' && file && <Editor file={file} />}
         {mainView === 'admin' && <AdminReviewPage />}
+        {mainView === 'retoucher' && <RetoucherPortal />}
         {mainView === 'legal' && <LegalPage path={currentPath} />}
         {mainView === 'secure-upload' && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
