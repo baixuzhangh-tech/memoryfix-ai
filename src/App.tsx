@@ -1170,7 +1170,7 @@ function App() {
           Boolean(window.Paddle)
         )
         finish(Boolean(window.Paddle?.Initialize || window.Paddle?.Setup))
-      }, 10000)
+      }, 30000)
     })
 
     return paddleScriptLoadPromiseRef.current
@@ -1466,7 +1466,6 @@ function App() {
           settings: {
             displayMode: 'overlay',
             theme: 'light',
-            successUrl: successUrl.toString(),
           },
         })
         setCheckoutLaunchStatus('idle')
@@ -1502,10 +1501,19 @@ function App() {
       } | null
 
       if (fallbackResponse.ok && fallbackBody?.checkoutUrl) {
+        const checkoutWindow = window.open(fallbackBody.checkoutUrl, '_blank')
+
+        if (checkoutWindow) {
+          setCheckoutLaunchStatus('idle')
+          setCheckoutLaunchError('')
+          return { ok: true }
+        }
+
         setCheckoutLaunchStatus('idle')
-        setCheckoutLaunchError('')
-        window.location.href = fallbackBody.checkoutUrl
-        return { ok: true }
+        setCheckoutLaunchError(
+          'Popup was blocked. Please allow popups for this site, then click Pay with Paddle again.'
+        )
+        return { ok: false }
       }
 
       throw new Error(
