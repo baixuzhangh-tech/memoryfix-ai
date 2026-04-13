@@ -20,10 +20,21 @@ type RestoreJob = {
   product_name?: string | null
   result_model?: string | null
   result_signed_url?: string
+  retoucher_id?: string | null
+  retoucher_name?: string | null
+  retoucher_assigned_at?: string | null
+  retoucher_uploaded_at?: string | null
   review_note?: string | null
   status: string
   submission_reference: string
   test_mode?: boolean
+}
+
+type Retoucher = {
+  id: string
+  name: string
+  active: boolean
+  created_at: string
 }
 
 type AdminApiResponse = {
@@ -40,6 +51,7 @@ const statusOptions = [
   { label: 'AI failed', value: 'ai_failed' },
   { label: 'Needs review', value: 'needs_review' },
   { label: 'Manual review', value: 'manual_review' },
+  { label: 'Assigned', value: 'assigned' },
   { label: 'Delivered', value: 'delivered' },
   { label: 'All', value: 'all' },
 ]
@@ -102,6 +114,10 @@ function getStatusClassName(status: string) {
     return 'border-[#b7d7e6] bg-[#eef8ff] text-[#214c63]'
   }
 
+  if (status === 'assigned') {
+    return 'border-[#c8b5e6] bg-[#f5f0ff] text-[#4a2f7a]'
+  }
+
   return 'border-[#e6d2b7] bg-[#fffaf3] text-[#5b4a40]'
 }
 
@@ -119,6 +135,8 @@ export default function AdminReviewPage() {
   const [message, setMessage] = useState('')
   const [busyJobId, setBusyJobId] = useState('')
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
+  const [retouchers, setRetouchers] = useState<Retoucher[]>([])
+  const [assignRetoucherId, setAssignRetoucherId] = useState('')
 
   const selectedJob = useMemo(
     () => jobs.find(job => job.id === selectedJobId) || jobs[0] || null,
@@ -232,6 +250,40 @@ export default function AdminReviewPage() {
     )
   }
 
+  async function loadRetouchers() {
+    if (!adminToken) return
+    try {
+      const body = await adminFetch('/api/admin/human-restore-job', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'list_retouchers' }),
+      })
+      const list = (body as any).retouchers || []
+      setRetouchers(list.filter((r: Retoucher) => r.active))
+    } catch {
+      // Retoucher list is optional
+    }
+  }
+
+  function assignToRetoucher(job: RestoreJob, retoucherId: string) {
+    const rt = retouchers.find(r => r.id === retoucherId)
+    runAction(
+      job.id,
+      () =>
+        adminFetch('/api/admin/human-restore-job', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'assign_retoucher',
+            jobId: job.id,
+            retoucherId,
+            retoucherName: rt?.name || '',
+          }),
+        }),
+      `Job assigned to ${
+        rt?.name || 'retoucher'
+      }. They can now see it in the portal.`
+    )
+  }
+
   function markManual(job: RestoreJob) {
     runAction(
       job.id,
@@ -282,6 +334,7 @@ export default function AdminReviewPage() {
   useEffect(() => {
     if (adminToken) {
       loadJobs(statusFilter)
+      loadRetouchers()
     }
   }, [adminToken, statusFilter])
 
@@ -655,6 +708,38 @@ export default function AdminReviewPage() {
                 Mark failed
               </button>
             </div>
+
+            {retouchers.length > 0 && selectedJob.status !== 'delivered' && (
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-[1.5rem] border border-[#c8b5e6] bg-[#f5f0ff] p-4">
+                <span className="text-sm font-black text-[#4a2f7a]">
+                  {selectedJob.retoucher_name
+                    ? `Assigned to: ${selectedJob.retoucher_name}`
+                    : 'Assign to retoucher:'}
+                </span>
+                <select
+                  value={assignRetoucherId}
+                  onChange={e => setAssignRetoucherId(e.currentTarget.value)}
+                  className="rounded-full border border-[#c8b5e6] bg-white px-4 py-2 text-sm font-bold text-[#4a2f7a] outline-none"
+                >
+                  <option value="">Select retoucher...</option>
+                  {retouchers.map(rt => (
+                    <option key={rt.id} value={rt.id}>
+                      {rt.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!assignRetoucherId || busyJobId === selectedJob.id}
+                  onClick={() =>
+                    assignToRetoucher(selectedJob, assignRetoucherId)
+                  }
+                  className="rounded-full bg-[#4a2f7a] px-5 py-2 text-sm font-black text-white transition hover:-translate-y-0.5 disabled:opacity-60"
+                >
+                  {selectedJob.retoucher_id ? 'Reassign' : 'Assign'}
+                </button>
+              </div>
+            )}
           </section>
         )}
       </div>
