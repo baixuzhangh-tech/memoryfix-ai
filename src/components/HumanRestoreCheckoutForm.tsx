@@ -186,7 +186,11 @@ export default function HumanRestoreCheckoutForm(
       }
 
       setCheckoutPayload(nextCheckoutPayload)
-      await openSavedCheckout(nextCheckoutPayload, 'after_upload')
+      setStatus('checkout-ready')
+      trackProductEvent('human_restore_order_saved_payment_ready', {
+        checkout_ref_created: Boolean(nextCheckoutPayload.checkoutRef),
+        local_order_created: Boolean(nextCheckoutPayload.orderId),
+      })
     } catch (error) {
       setStatus('error')
       setErrorMessage(
@@ -208,11 +212,11 @@ export default function HumanRestoreCheckoutForm(
   } else if (status === 'opening') {
     submitButtonText = 'Opening secure checkout...'
   } else if (checkoutPayload) {
-    submitButtonText = 'Reopen secure checkout'
+    submitButtonText = 'Pay with Paddle'
   }
 
   const checkoutHelperText = checkoutPayload
-    ? 'Your upload is already saved. Reopen Paddle checkout from this same order instead of uploading again.'
+    ? 'Your upload is saved. Click Pay with Paddle to open secure checkout from this same order.'
     : 'After the upload is saved, Paddle opens for secure payment. You will not need to upload this photo again after payment.'
   const checkoutErrorTitle = checkoutPayload
     ? 'Photo saved. Checkout did not open'
@@ -263,8 +267,8 @@ export default function HumanRestoreCheckoutForm(
           <p className="font-black">Photo saved before payment</p>
           <p className="mt-1">
             Your source photo and notes are attached to a pending order for 48
-            hours. If Paddle did not appear, use the button below to reopen
-            checkout. Do not upload the same photo again.
+            hours. Click Pay with Paddle below to open secure checkout. Do not
+            upload the same photo again.
           </p>
         </div>
       )}

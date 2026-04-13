@@ -244,6 +244,7 @@ const paddleHumanRestorePriceId =
   import.meta.env.VITE_PADDLE_HUMAN_RESTORE_PRICE_ID || ''
 const paddleLocalPackPriceId =
   import.meta.env.VITE_PADDLE_LOCAL_PACK_PRICE_ID || ''
+const paddleScriptUrl = 'https://cdn.paddle.com/paddle/v2/paddle.js'
 
 function isPaddleClientTokenConfigured(value: string) {
   return value.startsWith('test_') || value.startsWith('live_')
@@ -323,7 +324,11 @@ declare global {
         set: (env: string) => void
       }
       Initialized: boolean
-      Setup: (options: {
+      Initialize?: (options: {
+        eventCallback?: (event: PaddleEvent) => void
+        token: string
+      }) => void
+      Setup?: (options: {
         eventCallback?: (event: PaddleEvent) => void
         token: string
       }) => void
@@ -590,6 +595,7 @@ function App() {
     'human-restore' | 'local-pack' | null
   >(null)
   const paddleSetupRef = useRef(false)
+  const paddleScriptLoadPromiseRef = useRef<Promise<boolean> | null>(null)
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
@@ -1114,8 +1120,60 @@ function App() {
       : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
   }
 
-  function ensurePaddleSetup() {
-    if (!window.Paddle?.Setup) {
+  function loadPaddleScript() {
+    if (window.Paddle?.Checkout?.open) {
+      return Promise.resolve(true)
+    }
+
+    if (paddleScriptLoadPromiseRef.current) {
+      return paddleScriptLoadPromiseRef.current
+    }
+
+    paddleScriptLoadPromiseRef.current = new Promise(resolve => {
+      const existingScript = document.querySelector<HTMLScriptElement>(
+        `script[src="${paddleScriptUrl}"]`
+      )
+      const script = existingScript || document.createElement('script')
+      let settled = false
+
+      function finish(ok: boolean) {
+        if (settled) {
+          return
+        }
+
+        const didLoad = Boolean(ok && window.Paddle?.Checkout?.open)
+
+        settled = true
+
+        if (!didLoad) {
+          paddleScriptLoadPromiseRef.current = null
+          script.remove()
+        }
+
+        resolve(didLoad)
+      }
+
+      script.addEventListener('load', () => finish(true), { once: true })
+      script.addEventListener('error', () => finish(false), { once: true })
+
+      if (!existingScript) {
+        script.src = paddleScriptUrl
+        script.async = true
+        document.head.appendChild(script)
+      }
+
+      window.setTimeout(() => {
+        finish(Boolean(window.Paddle?.Checkout?.open))
+      }, 5000)
+    })
+
+    return paddleScriptLoadPromiseRef.current
+  }
+
+  function setupPaddle() {
+    const paddle = window.Paddle
+
+    if (!paddle?.Initialize && !paddle?.Setup) {
       return false
     }
 
@@ -1125,10 +1183,13 @@ function App() {
       }
 
       if (paddleEnvironment === 'sandbox') {
-        window.Paddle.Environment.set('sandbox')
+        paddle.Environment.set('sandbox')
       }
 
-      window.Paddle.Setup({
+      const setupOptions: {
+        eventCallback: (event: PaddleEvent) => void
+        token: string
+      } = {
         token: paddleClientToken,
         eventCallback: event => {
           if (event.name !== 'checkout.completed') {
@@ -1218,11 +1279,27 @@ function App() {
 
           window.location.href = successUrl.toString()
         },
-      })
+      }
+
+      if (paddle.Initialize) {
+        paddle.Initialize(setupOptions)
+      } else {
+        paddle.Setup?.(setupOptions)
+      }
       paddleSetupRef.current = true
     }
 
     return true
+  }
+
+  async function ensurePaddleReady() {
+    const isLoaded = await loadPaddleScript()
+
+    if (!isLoaded) {
+      return false
+    }
+
+    return setupPaddle()
   }
 
   function scrollToLocalRepairStart() {
@@ -1231,7 +1308,7 @@ function App() {
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
-  function handleLaunchLocalPackCheckout() {
+  async function handleLaunchLocalPackCheckout() {
     setLocalPackCheckoutError('')
     setLocalPackCheckoutStatus('opening')
 
@@ -1248,7 +1325,7 @@ function App() {
       return
     }
 
-    if (!ensurePaddleSetup()) {
+    if (!(await ensurePaddleReady())) {
       setLocalPackCheckoutStatus('error')
       setLocalPackCheckoutError(
         'Secure checkout could not load in this browser. Please refresh, disable checkout-blocking extensions, and try again.'
@@ -1329,10 +1406,10 @@ function App() {
     setShowHumanRestoreCheckout(true)
   }
 
-  function handleHumanRestoreCheckoutCreated(payload: {
+  async function handleHumanRestoreCheckoutCreated(payload: {
     checkoutRef: string
     orderId: string
-  }): CheckoutLaunchResult {
+  }): Promise<CheckoutLaunchResult> {
     const { checkoutRef, orderId } = payload
 
     if (!paddleHumanRestorePriceId) {
@@ -1345,7 +1422,7 @@ function App() {
     rememberHumanRestorePendingCheckout({ checkoutRef, orderId })
     setCheckoutLaunchStatus('loading')
 
-    if (!ensurePaddleSetup()) {
+    if (!(await ensurePaddleReady())) {
       const errorMessage =
         'Secure checkout could not load. Please refresh, disable checkout-blocking extensions, and try again. Your photo is already saved, so you can retry without uploading again.'
       setCheckoutLaunchStatus('error')
@@ -1412,7 +1489,13 @@ function App() {
   }
 
   useEffect(() => {
-    ensurePaddleSetup()
+    loadPaddleScript()
+      .then(isLoaded => {
+        if (isLoaded) {
+          setupPaddle()
+        }
+      })
+      .catch(() => null)
   }, [])
 
   useEffect(() => {
