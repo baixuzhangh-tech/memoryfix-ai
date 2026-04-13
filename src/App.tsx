@@ -1121,7 +1121,7 @@ function App() {
   }
 
   function loadPaddleScript() {
-    if (window.Paddle?.Checkout?.open) {
+    if (window.Paddle?.Initialize || window.Paddle?.Setup) {
       return Promise.resolve(true)
     }
 
@@ -1141,7 +1141,9 @@ function App() {
           return
         }
 
-        const didLoad = Boolean(ok && window.Paddle?.Checkout?.open)
+        const didLoad = Boolean(
+          ok && (window.Paddle?.Initialize || window.Paddle?.Setup)
+        )
 
         settled = true
 
@@ -1163,7 +1165,7 @@ function App() {
       }
 
       window.setTimeout(() => {
-        finish(Boolean(window.Paddle?.Checkout?.open))
+        finish(Boolean(window.Paddle?.Initialize || window.Paddle?.Setup))
       }, 5000)
     })
 
