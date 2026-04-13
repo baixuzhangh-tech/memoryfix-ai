@@ -1436,67 +1436,87 @@ function App() {
     rememberHumanRestorePendingCheckout({ checkoutRef, orderId })
     setCheckoutLaunchStatus('loading')
 
-    if (!(await ensurePaddleReady())) {
-      const errorMessage =
-        'Secure checkout could not load. Please refresh, disable checkout-blocking extensions, and try again. Your photo is already saved, so you can retry without uploading again.'
-      setCheckoutLaunchStatus('error')
-      setCheckoutLaunchError(errorMessage)
-      trackProductEvent('click_human_restore', {
-        checkout_ref_created: Boolean(checkoutRef),
-        destination: 'paddle_unavailable',
-        local_order_created: Boolean(orderId),
-      })
-      return { error: errorMessage, ok: false }
-    }
-
     const successUrl = new URL(humanRestoreSuccessPath, window.location.origin)
     successUrl.searchParams.set('order_id', orderId)
     successUrl.searchParams.set('checkout_ref', checkoutRef)
 
+    const paddleReady = await ensurePaddleReady()
+
+    if (paddleReady && window.Paddle?.Checkout?.open) {
+      trackProductEvent('click_human_restore', {
+        checkout_ref_created: Boolean(checkoutRef),
+        destination: 'paddle_overlay',
+        local_order_created: Boolean(orderId),
+      })
+
+      try {
+        window.Paddle.Checkout.open({
+          items: [{ priceId: paddleHumanRestorePriceId, quantity: 1 }],
+          customData: {
+            checkout_ref: checkoutRef,
+            flow: 'human_restore_preupload',
+            human_restore_order_id: orderId,
+          },
+          settings: {
+            displayMode: 'overlay',
+            theme: 'light',
+            successUrl: successUrl.toString(),
+          },
+        })
+        setCheckoutLaunchStatus('idle')
+        setCheckoutLaunchError('')
+        return { ok: true }
+      } catch {
+        // overlay failed, fall through to hosted checkout
+      }
+    }
+
     trackProductEvent('click_human_restore', {
       checkout_ref_created: Boolean(checkoutRef),
-      destination: 'paddle_overlay',
+      destination: 'paddle_hosted_fallback',
       local_order_created: Boolean(orderId),
     })
 
     try {
-      if (!window.Paddle?.Checkout?.open) {
-        throw new Error('Paddle checkout is not available in this browser.')
+      const fallbackResponse = await fetch('/api/paddle-create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          checkoutRef,
+          orderId,
+          priceId: paddleHumanRestorePriceId,
+          successUrl: successUrl.toString(),
+        }),
+      })
+      const fallbackBody = (await fallbackResponse
+        .json()
+        .catch(() => null)) as {
+        checkoutUrl?: string
+        error?: string
+      } | null
+
+      if (fallbackResponse.ok && fallbackBody?.checkoutUrl) {
+        setCheckoutLaunchStatus('idle')
+        setCheckoutLaunchError('')
+        window.location.href = fallbackBody.checkoutUrl
+        return { ok: true }
       }
 
-      window.Paddle.Checkout.open({
-        items: [{ priceId: paddleHumanRestorePriceId, quantity: 1 }],
-        customData: {
-          checkout_ref: checkoutRef,
-          flow: 'human_restore_preupload',
-          human_restore_order_id: orderId,
-        },
-        settings: {
-          displayMode: 'overlay',
-          theme: 'light',
-          successUrl: successUrl.toString(),
-        },
-      })
-      setCheckoutLaunchStatus('idle')
-      setCheckoutLaunchError('')
-      return { ok: true }
+      throw new Error(
+        fallbackBody?.error || 'Could not create checkout session.'
+      )
     } catch (error) {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : 'Paddle checkout could not open. Please refresh and retry.'
+          : 'Checkout could not open. Please retry.'
 
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError(
-        `${errorMessage} Your photo is already saved, so you can retry checkout without uploading again.`
+        `${errorMessage} Your photo is already saved, so you can retry without uploading again.`
       )
-      trackProductEvent('click_human_restore', {
-        checkout_ref_created: Boolean(checkoutRef),
-        destination: 'paddle_open_failed',
-        local_order_created: Boolean(orderId),
-      })
       return {
-        error: `${errorMessage} Your photo is already saved, so you can retry checkout without uploading again.`,
+        error: `${errorMessage} Your photo is already saved.`,
         ok: false,
       }
     }
