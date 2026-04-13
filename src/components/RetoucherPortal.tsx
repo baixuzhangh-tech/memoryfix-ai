@@ -75,8 +75,13 @@ export default function RetoucherPortal() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/retoucher/jobs', {
-        headers: { 'x-retoucher-token': token },
+      const res = await fetch('/api/retoucher-portal', {
+        method: 'POST',
+        headers: {
+          'x-retoucher-token': token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'jobs' }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -159,7 +164,7 @@ export default function RetoucherPortal() {
       formData.append('jobId', upload.jobId)
       formData.append('file', file)
 
-      const res = await fetch('/api/retoucher/upload-result', {
+      const res = await fetch('/api/retoucher-portal', {
         method: 'POST',
         headers: { 'x-retoucher-token': token },
         body: formData,
