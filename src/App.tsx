@@ -237,7 +237,7 @@ const paymentContactEmail =
   import.meta.env.VITE_HUMAN_RESTORE_CONTACT_EMAIL ||
   import.meta.env.VITE_SUPPORT_EMAIL ||
   'hello@artgen.site'
-const paddleSellerId = import.meta.env.VITE_PADDLE_SELLER_ID || ''
+const paddleClientToken = import.meta.env.VITE_PADDLE_CLIENT_TOKEN || ''
 const paddleEnvironment =
   import.meta.env.VITE_PADDLE_ENVIRONMENT || 'production'
 const paddleHumanRestorePriceId =
@@ -245,9 +245,8 @@ const paddleHumanRestorePriceId =
 const paddleLocalPackPriceId =
   import.meta.env.VITE_PADDLE_LOCAL_PACK_PRICE_ID || ''
 
-function isPaddleSellerIdConfigured(value: string) {
-  const sellerIdNumber = Number(value)
-  return Number.isFinite(sellerIdNumber) && sellerIdNumber > 0
+function isPaddleClientTokenConfigured(value: string) {
+  return value.startsWith('test_') || value.startsWith('live_')
 }
 
 function isPaddlePriceIdConfigured(value: string) {
@@ -321,7 +320,7 @@ declare global {
       Initialized: boolean
       Setup: (options: {
         eventCallback?: (event: PaddleEvent) => void
-        seller: number
+        token: string
       }) => void
     }
   }
@@ -644,11 +643,11 @@ function App() {
   const paidLocalRepairCreditsRemaining = localRepairUsage.paidCredits
   const canStartLocalRepair =
     freeLocalRepairsRemaining > 0 || paidLocalRepairCreditsRemaining > 0
-  const isPaddleSellerReady = isPaddleSellerIdConfigured(paddleSellerId)
+  const isPaddleClientReady = isPaddleClientTokenConfigured(paddleClientToken)
   const isLocalPackPaymentReady =
-    isPaddleSellerReady && isPaddlePriceIdConfigured(paddleLocalPackPriceId)
+    isPaddleClientReady && isPaddlePriceIdConfigured(paddleLocalPackPriceId)
   const isHumanRestorePaymentReady =
-    isPaddleSellerReady && isPaddlePriceIdConfigured(paddleHumanRestorePriceId)
+    isPaddleClientReady && isPaddlePriceIdConfigured(paddleHumanRestorePriceId)
 
   const maskedCheckoutEmail = maskEmailAddress(
     defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
@@ -1116,9 +1115,7 @@ function App() {
     }
 
     if (!paddleSetupRef.current) {
-      const sellerIdNum = Number(paddleSellerId)
-
-      if (!Number.isFinite(sellerIdNum) || sellerIdNum <= 0) {
+      if (!isPaddleClientTokenConfigured(paddleClientToken)) {
         return false
       }
 
@@ -1127,7 +1124,7 @@ function App() {
       }
 
       window.Paddle.Setup({
-        seller: sellerIdNum,
+        token: paddleClientToken,
         eventCallback: event => {
           if (event.name !== 'checkout.completed') {
             return
