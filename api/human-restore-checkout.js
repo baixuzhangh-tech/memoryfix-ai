@@ -15,6 +15,7 @@ import {
 } from './_lib/supabase.js'
 import {
   validateContentPolicyAcceptance,
+  validateHumanRestoreImageSafety,
   validateHumanRestoreSubmissionText,
 } from './_lib/content-policy.js'
 
@@ -104,6 +105,18 @@ export default async function handler(req, res) {
 
     if (policyError) {
       json(res, 400, { error: policyError })
+      return
+    }
+
+    const imageSafetyError = await validateHumanRestoreImageSafety({
+      contentType: file.contentType,
+      data: file.data,
+      fileName: file.filename,
+      notes,
+    })
+
+    if (imageSafetyError) {
+      json(res, 400, { error: imageSafetyError })
       return
     }
 

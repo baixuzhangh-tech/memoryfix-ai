@@ -90,6 +90,7 @@ FAL_KEY= 或 OPENAI_API_KEY=
 13. `/acceptable-use`、`/delivery`、`/privacy`、`/terms`、`/refund` 均可访问。
 14. Human Restore 上传表单拒绝未勾选内容政策的提交。
 15. 明显 NSFW、deepfake、face-swap、身份操纵、伪造证件类备注会被后端拒绝。
+16. 配置 `OPENAI_API_KEY` 时，JPG / PNG / WebP 上传图会先经过 OpenAI moderation。
 
 ## 首个付费用户验证
 

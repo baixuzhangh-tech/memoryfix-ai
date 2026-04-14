@@ -324,6 +324,22 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'api.openai.com') {
+      if (url.pathname === '/v1/moderations') {
+        const bodyText = getBodyText(options)
+        const flaggedImage = Buffer.from('flagged-image').toString('base64')
+
+        return makeJsonResponse({
+          results: [
+            {
+              categories: {
+                sexual: bodyText.includes(flaggedImage),
+              },
+              flagged: bodyText.includes(flaggedImage),
+            },
+          ],
+        })
+      }
+
       return makeJsonResponse({
         data: [
           {
@@ -538,6 +554,27 @@ async function main() {
     rejectedPolicyResponse.body.error,
     /deepfake, face-swap, or identity manipulation/i
   )
+
+  const rejectedImageMultipart = createMultipartBody(
+    {
+      notes: 'Please remove scratches only.',
+      contentPolicyAccepted: 'true',
+    },
+    {
+      contentType: 'image/jpeg',
+      data: Buffer.from('flagged-image'),
+      fieldName: 'photo',
+      filename: 'unsafe.jpg',
+    }
+  )
+  const rejectedImageResponse = await invoke(checkoutHandler, {
+    body: rejectedImageMultipart.body,
+    headers: { 'content-type': rejectedImageMultipart.contentType },
+    method: 'POST',
+  })
+
+  assert.equal(rejectedImageResponse.statusCode, 400)
+  assert.match(rejectedImageResponse.body.error, /Acceptable Use Policy/i)
 
   const checkoutMultipart = createMultipartBody(
     {

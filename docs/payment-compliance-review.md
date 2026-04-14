@@ -20,13 +20,14 @@
 - 首页 footer 增加 Refund、Acceptable Use、Delivery、Support 入口。
 - Human Restore 上传前必须勾选权利确认与内容政策。
 - 后端对明显违规的备注/文件名做基础拦截。
+- 有 `OPENAI_API_KEY` 时，后端会调用 OpenAI moderation 对 JPG / PNG / WebP 上传图片做自动安全审核。
 - 支付相关公开文案改为 payment provider / secure checkout，避免绑定单一支付服务。
 
 ## 审核风险与说明
 
 - AI 图片产品天然高风险。审核材料中应强调“old photo restoration only”，不要描述成开放式 AI image generation。
 - 人脸修复容易被误判为 face manipulation。审核材料中应强调“不换脸、不冒充、不改变身份，只修复用户有权提交的旧照片”。
-- 如果审核员要求 NSFW image moderation proof，当前系统已有上传前承诺、文本拦截、人工审核，但还没有自动图像 NSFW 分类 API。必要时可接入 OpenAI moderation 或专门图像安全模型。
+- 如果审核员要求 NSFW image moderation proof，可以说明当前系统已有上传前承诺、文本拦截、OpenAI 图像 moderation、人工审核四层防护。
 - Creem 若仍排队或拒绝，建议同时准备 Paddle、Stripe Atlas/US entity、Polar、或 PayPal 作为备用路径。
 
 ## 申请时建议填写

@@ -1,4 +1,5 @@
 const acceptedValues = new Set(['1', 'true', 'yes', 'on', 'accepted'])
+const moderationImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 const prohibitedPatterns = [
   {
@@ -68,4 +69,83 @@ export function validateHumanRestoreSubmissionText({
   }
 
   return `We cannot accept requests involving ${match.category}. Please submit only lawful old-photo restoration requests that follow our Acceptable Use Policy.`
+}
+
+function shouldModerateImages() {
+  if (process.env.HUMAN_RESTORE_IMAGE_MODERATION === 'false') {
+    return false
+  }
+
+  return Boolean(process.env.OPENAI_API_KEY)
+}
+
+function shouldFailOpen() {
+  return process.env.HUMAN_RESTORE_IMAGE_MODERATION_FAIL_OPEN === 'true'
+}
+
+export async function validateHumanRestoreImageSafety({
+  contentType = '',
+  data,
+  fileName = '',
+  notes = '',
+} = {}) {
+  if (!shouldModerateImages()) {
+    return ''
+  }
+
+  if (!moderationImageTypes.has(contentType)) {
+    return ''
+  }
+
+  try {
+    const encodedImage = Buffer.from(data).toString('base64')
+    const response = await fetch('https://api.openai.com/v1/moderations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: [
+          {
+            text: `Old-photo restoration request. File: ${fileName}. Notes: ${
+              notes || 'No notes provided.'
+            }`,
+            type: 'text',
+          },
+          {
+            image_url: {
+              url: `data:${contentType};base64,${encodedImage}`,
+            },
+            type: 'image_url',
+          },
+        ],
+        model: process.env.OPENAI_MODERATION_MODEL || 'omni-moderation-latest',
+      }),
+    })
+
+    const payload = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      if (shouldFailOpen()) {
+        return ''
+      }
+
+      return 'We could not complete the safety check for this image. Please try again in a moment or contact support.'
+    }
+
+    const result = payload?.results?.[0]
+
+    if (!result?.flagged) {
+      return ''
+    }
+
+    return 'We cannot accept this image because it appears to violate our Acceptable Use Policy.'
+  } catch {
+    if (shouldFailOpen()) {
+      return ''
+    }
+
+    return 'We could not complete the safety check for this image. Please try again in a moment or contact support.'
+  }
 }
