@@ -21,6 +21,8 @@ type UploadState = {
 }
 
 const TOKEN_KEY = 'retoucher_token'
+const MAX_DIRECT_UPLOAD_BYTES = 3.5 * 1024 * 1024
+const MAX_DELIVERY_EDGE = 2600
 
 function savedToken(): string {
   try {
@@ -69,6 +71,46 @@ async function readApiResponse(res: Response): Promise<any> {
         : text.slice(0, 180) || '请求失败，请稍后重试。',
     }
   }
+}
+
+async function prepareDeliveryImage(file: File): Promise<File> {
+  if (file.size <= MAX_DIRECT_UPLOAD_BYTES) {
+    return file
+  }
+
+  const imageBitmap = await createImageBitmap(file)
+  const scale = Math.min(
+    1,
+    MAX_DELIVERY_EDGE / Math.max(imageBitmap.width, imageBitmap.height)
+  )
+  const width = Math.max(1, Math.round(imageBitmap.width * scale))
+  const height = Math.max(1, Math.round(imageBitmap.height * scale))
+  const canvas = document.createElement('canvas')
+
+  canvas.width = width
+  canvas.height = height
+  canvas.getContext('2d')?.drawImage(imageBitmap, 0, 0, width, height)
+  imageBitmap.close()
+
+  const baseName = file.name.replace(/\.[^.]+$/, '') || 'restored-photo'
+  const qualities = [0.9, 0.82, 0.74, 0.66]
+
+  for (const quality of qualities) {
+    const blob = await new Promise<Blob | null>(resolve => {
+      canvas.toBlob(resolve, 'image/jpeg', quality)
+    })
+
+    if (blob && blob.size <= MAX_DIRECT_UPLOAD_BYTES) {
+      return new File([blob], `${baseName}-delivery.jpg`, {
+        lastModified: Date.now(),
+        type: 'image/jpeg',
+      })
+    }
+  }
+
+  throw new Error(
+    '修复结果图片过大。请导出为 JPG，最长边不超过 2600px，文件小于 3.5MB 后再上传。'
+  )
 }
 
 export default function RetoucherPortal() {
@@ -176,9 +218,10 @@ export default function RetoucherPortal() {
     setUpload(prev => ({ ...prev, status: 'uploading', error: '' }))
 
     try {
+      const deliveryFile = await prepareDeliveryImage(file)
       const formData = new FormData()
       formData.append('jobId', upload.jobId)
-      formData.append('file', file)
+      formData.append('file', deliveryFile)
 
       const res = await fetch('/api/retoucher-portal', {
         method: 'POST',
