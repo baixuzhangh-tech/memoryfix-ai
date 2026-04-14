@@ -43,10 +43,12 @@ export default async function handler(req, res) {
 
     const updatedJob = await runRestoreJob({
       job,
+      modelPreset: body.modelPreset,
       provider: body.provider,
     })
 
     await insertEvent(updatedJob.id, 'ai_restore_processed', {
+      model_preset: body.modelPreset || null,
       provider: updatedJob.ai_provider,
       status: updatedJob.status,
     })

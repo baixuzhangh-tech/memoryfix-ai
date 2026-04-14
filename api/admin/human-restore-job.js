@@ -230,7 +230,7 @@ async function rtAssign(body, res) {
     retoucher_name: retoucherName,
   })
 
-  json(res, 200, { ok: true, job: updatedJob })
+  json(res, 200, { ok: true, job: await createJobSignedUrls(updatedJob) })
 }
 
 async function rtAssignableJobs(res) {

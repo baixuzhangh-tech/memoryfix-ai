@@ -9,14 +9,10 @@ import {
 
 const defaultFalModel = 'fal-ai/image-editing/photo-restoration'
 const defaultOpenAIImageModel = 'gpt-image-1.5'
-const defaultReplicateModel = 'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
-const defaultReplicatePromptModel = 'timothybrooks/instruct-pix2pix:30c1d0b916a6f8efce20493f5d61ee27491ab2a60437c13c588468b9810ec23f'
-
-const promptCapableReplicateModels = new Set([
-  'timothybrooks/instruct-pix2pix',
-  'stability-ai/sdxl',
-  'stability-ai/stable-diffusion',
-])
+const defaultReplicateCodeformerModel = 'lucataco/codeformer'
+const defaultReplicateGfpganModel =
+  'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
+const defaultReplicatePreset = 'codeformer'
 
 function wait(ms) {
   return new Promise(resolve => {
@@ -80,16 +76,45 @@ function buildShortPrompt(job) {
   return 'Restore this old photo naturally. Remove scratches, stains, dust, and age damage. Preserve the original people, faces, era, and character. Keep it photorealistic.'
 }
 
-function hasCustomerNotes(job) {
-  return String(job.notes || '').trim().length > 0
+function normalizeModelPreset(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+
+  return ['codeformer', 'gfpgan'].includes(normalized) ? normalized : ''
 }
 
-function getProvider(requestedProvider) {
+function getDefaultReplicatePreset() {
+  return (
+    normalizeModelPreset(process.env.REPLICATE_DEFAULT_PRESET) ||
+    defaultReplicatePreset
+  )
+}
+
+function clampNumber(value, min, max, fallback) {
+  const numericValue = Number(value)
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback
+  }
+
+  return Math.min(max, Math.max(min, numericValue))
+}
+
+function getProvider(requestedProvider, modelPreset) {
+  if (normalizeModelPreset(modelPreset) && process.env.REPLICATE_API_TOKEN) {
+    return 'replicate'
+  }
+
   if (requestedProvider) {
     return requestedProvider
   }
 
   const configuredProvider = process.env.AI_RESTORE_PROVIDER
+
+  if (configuredProvider === 'replicate' && process.env.REPLICATE_API_TOKEN) {
+    return 'replicate'
+  }
 
   if (configuredProvider === 'fal' && process.env.FAL_KEY) {
     return 'fal'
@@ -99,7 +124,7 @@ function getProvider(requestedProvider) {
     return 'openai'
   }
 
-  if (configuredProvider === 'replicate' && process.env.REPLICATE_API_TOKEN) {
+  if (process.env.REPLICATE_API_TOKEN) {
     return 'replicate'
   }
 
@@ -109,10 +134,6 @@ function getProvider(requestedProvider) {
 
   if (process.env.OPENAI_API_KEY) {
     return 'openai'
-  }
-
-  if (process.env.REPLICATE_API_TOKEN) {
-    return 'replicate'
   }
 
   return ''
@@ -348,7 +369,48 @@ async function pollFalRequest({ model, requestId }) {
   }
 }
 
-async function callReplicate({ job, prompt }) {
+function buildReplicateRequest({ imageUrl, modelPreset }) {
+  const preset =
+    normalizeModelPreset(modelPreset) || getDefaultReplicatePreset()
+
+  if (preset === 'gfpgan') {
+    return {
+      input: {
+        img: imageUrl,
+        scale: clampNumber(process.env.REPLICATE_GFPGAN_SCALE, 1, 10, 2),
+        version: process.env.REPLICATE_GFPGAN_VERSION || 'v1.4',
+      },
+      model:
+        process.env.REPLICATE_GFPGAN_MODEL ||
+        process.env.REPLICATE_RESTORE_MODEL ||
+        defaultReplicateGfpganModel,
+      preset,
+    }
+  }
+
+  return {
+    input: {
+      background_enhance:
+        process.env.REPLICATE_CODEFORMER_BACKGROUND_ENHANCE !== 'false',
+      codeformer_fidelity: clampNumber(
+        process.env.REPLICATE_CODEFORMER_FIDELITY,
+        0,
+        1,
+        0.7
+      ),
+      face_upsample:
+        process.env.REPLICATE_CODEFORMER_FACE_UPSAMPLE !== 'false',
+      image: imageUrl,
+      upscale: clampNumber(process.env.REPLICATE_CODEFORMER_UPSCALE, 1, 4, 2),
+    },
+    model:
+      process.env.REPLICATE_CODEFORMER_MODEL ||
+      defaultReplicateCodeformerModel,
+    preset: 'codeformer',
+  }
+}
+
+async function callReplicate({ job, modelPreset }) {
   const apiToken = process.env.REPLICATE_API_TOKEN
 
   if (!apiToken) {
@@ -360,31 +422,11 @@ async function callReplicate({ job, prompt }) {
     expiresIn: 60 * 30,
     path: job.original_storage_path,
   })
-  const customerHasNotes = hasCustomerNotes(job)
-  const configuredModel = process.env.REPLICATE_RESTORE_MODEL
-  const promptModel = process.env.REPLICATE_PROMPT_MODEL || defaultReplicatePromptModel
-
-  const model = configuredModel
-    ? configuredModel
-    : customerHasNotes
-      ? promptModel
-      : defaultReplicateModel
-
+  const request = buildReplicateRequest({ imageUrl, modelPreset })
+  const model = request.model
   const [owner, rest] = model.split('/')
   const [name, version] = (rest || '').split(':')
-  const modelKey = `${owner}/${name}`
-  const isPromptCapable =
-    promptCapableReplicateModels.has(modelKey) ||
-    model === promptModel
-
-  const input = isPromptCapable
-    ? {
-        image: imageUrl,
-        prompt: buildShortPrompt(job),
-        image_guidance_scale: 1.5,
-        guidance_scale: 7.5,
-      }
-    : { img: imageUrl }
+  const input = request.input
 
   const createBody = version
     ? { version, input }
@@ -460,8 +502,13 @@ async function callReplicate({ job, prompt }) {
   return {
     ...fetched,
     model,
+    modelPreset: request.preset,
     provider: 'replicate',
-    providerPayload: { prediction_id: payload?.id, source: 'prediction' },
+    providerPayload: {
+      model_preset: request.preset,
+      prediction_id: payload?.id,
+      source: 'prediction',
+    },
   }
 }
 
@@ -506,7 +553,8 @@ async function finishJobWithResult({ job, prompt, result }) {
   const extension = result.contentType?.includes('jpeg') ? 'jpg' : 'png'
   const resultPath = `${
     job.submission_reference
-  }/result-${Date.now()}.${extension}`
+  }/ai-draft-${Date.now()}.${extension}`
+  const now = new Date().toISOString()
 
   await uploadObject({
     bucket: buckets.results,
@@ -515,19 +563,37 @@ async function finishJobWithResult({ job, prompt, result }) {
     path: resultPath,
   })
 
+  const previousDraftBucket =
+    job.ai_draft_storage_bucket ||
+    (!job.final_storage_path ? job.result_storage_bucket : '')
+  const previousDraftPath =
+    job.ai_draft_storage_path ||
+    (!job.final_storage_path ? job.result_storage_path : '')
+
   if (
-    job.result_storage_bucket &&
-    job.result_storage_path &&
-    (job.result_storage_bucket !== buckets.results ||
-      job.result_storage_path !== resultPath)
+    previousDraftBucket &&
+    previousDraftPath &&
+    (previousDraftBucket !== buckets.results || previousDraftPath !== resultPath)
   ) {
     await deleteObject({
-      bucket: job.result_storage_bucket,
-      path: job.result_storage_path,
+      bucket: previousDraftBucket,
+      path: previousDraftPath,
     }).catch(() => null)
   }
 
   return updateJob(job.id, {
+    ai_draft_created_at: now,
+    ai_draft_error: null,
+    ai_draft_file_type: result.contentType || 'image/png',
+    ai_draft_model: result.model,
+    ai_draft_prompt: prompt,
+    ai_draft_provider: result.provider,
+    ai_draft_source:
+      result.modelPreset && result.provider === 'replicate'
+        ? `replicate_${result.modelPreset}`
+        : result.provider,
+    ai_draft_storage_bucket: buckets.results,
+    ai_draft_storage_path: resultPath,
     ai_error: null,
     ai_provider: result.provider,
     ai_provider_payload: result.providerPayload || {},
@@ -541,9 +607,17 @@ async function finishJobWithResult({ job, prompt, result }) {
   })
 }
 
-export async function runRestoreJob({ job, provider: requestedProvider }) {
-  const provider = getProvider(requestedProvider)
+export async function runRestoreJob({
+  job,
+  provider: requestedProvider,
+  modelPreset: requestedModelPreset,
+}) {
+  const provider = getProvider(requestedProvider, requestedModelPreset)
   const prompt = buildRestorePrompt(job)
+  const modelPreset =
+    provider === 'replicate'
+      ? normalizeModelPreset(requestedModelPreset) || getDefaultReplicatePreset()
+      : ''
 
   if (!provider) {
     throw new Error('No AI restoration provider is configured.')
@@ -564,6 +638,7 @@ export async function runRestoreJob({ job, provider: requestedProvider }) {
     if (polled.status === 'pending') {
       return updateJob(job.id, {
         ai_error: null,
+        ai_draft_error: null,
         status: 'processing',
       })
     }
@@ -572,8 +647,14 @@ export async function runRestoreJob({ job, provider: requestedProvider }) {
   }
 
   await updateJob(job.id, {
+    ai_draft_error: null,
     ai_error: null,
     ai_provider: provider,
+    ai_draft_provider: provider,
+    ai_draft_source:
+      provider === 'replicate' && modelPreset
+        ? `replicate_${modelPreset}`
+        : provider,
     status: 'processing',
   })
 
@@ -591,11 +672,19 @@ export async function runRestoreJob({ job, provider: requestedProvider }) {
             prompt,
           })
         : provider === 'replicate'
-          ? await callReplicate({ job, prompt })
+          ? await callReplicate({ job, modelPreset })
           : await callFal({ job, prompt })
 
     if (result.status === 'pending') {
       return updateJob(job.id, {
+        ai_draft_error: null,
+        ai_draft_model: result.model,
+        ai_draft_prompt: prompt,
+        ai_draft_provider: result.provider,
+        ai_draft_source:
+          result.modelPreset && result.provider === 'replicate'
+            ? `replicate_${result.modelPreset}`
+            : result.provider,
         ai_error: null,
         ai_provider: result.provider,
         ai_request_id: result.requestId,
@@ -608,6 +697,8 @@ export async function runRestoreJob({ job, provider: requestedProvider }) {
     return finishJobWithResult({ job, prompt, result })
   } catch (error) {
     return updateJob(job.id, {
+      ai_draft_error:
+        error instanceof Error ? error.message : 'AI restore failed.',
       ai_error: error instanceof Error ? error.message : 'AI restore failed.',
       status: 'ai_failed',
     })

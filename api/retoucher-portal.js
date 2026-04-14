@@ -24,8 +24,10 @@ import {
 import {
   createSignedUrl,
   downloadObject,
+  getAiDraftStorage,
   getDeliveryDownloadUrlSeconds,
   getHumanRestoreBuckets,
+  getFinalStorage,
   getJob,
   insertEvent,
   listJobsByRetoucher,
@@ -107,13 +109,33 @@ async function handleListJobs(req, res, retoucher, body) {
 
   const jobsWithUrls = await Promise.all(
     (jobs || []).map(async job => {
+      const aiDraftStorage = getAiDraftStorage(job)
+      const finalStorage = getFinalStorage(job)
       const originalSignedUrl = await createSignedUrl({
         bucket: job.original_storage_bucket,
         path: job.original_storage_path,
       })
+      const aiDraftSignedUrl =
+        aiDraftStorage?.bucket && aiDraftStorage?.path
+          ? await createSignedUrl({
+              bucket: aiDraftStorage.bucket,
+              path: aiDraftStorage.path,
+            })
+          : ''
+      const finalSignedUrl =
+        finalStorage?.bucket && finalStorage?.path
+          ? await createSignedUrl({
+              bucket: finalStorage.bucket,
+              path: finalStorage.path,
+            })
+          : ''
 
       return {
+        aiDraftDownloadUrl: aiDraftSignedUrl,
+        aiDraftModel: job.ai_draft_model || job.result_model || '',
+        aiDraftProvider: job.ai_draft_provider || job.ai_provider || '',
         id: job.id,
+        finalDownloadUrl: finalSignedUrl,
         submissionReference: job.submission_reference,
         status: job.status,
         notes: job.notes || '',
@@ -195,14 +217,18 @@ async function handleUploadResult(req, res, retoucher) {
 
   // 2. Update job with result + retoucher upload timestamp
   await updateJob(jobId, {
-    result_storage_bucket: buckets.results,
-    result_storage_path: resultPath,
-    result_file_type: fileContentType,
-    retoucher_uploaded_at: now,
-    status: 'delivered',
     auto_delivered: true,
     delivery_method: 'auto_retoucher',
     delivered_at: now,
+    delivery_source: 'human_uploaded_final',
+    final_file_type: fileContentType,
+    final_source: 'human_uploaded_final',
+    final_storage_bucket: buckets.results,
+    final_storage_path: resultPath,
+    final_uploaded_at: now,
+    final_uploaded_by: retoucher.name || retoucher.id,
+    retoucher_uploaded_at: now,
+    status: 'delivered',
   })
 
   // 3. Generate comparison image + signed URLs
@@ -352,6 +378,9 @@ function buildAutoDeliveryEmail({
   const bodyRows = [
     emailParagraph(
       'Thank you for choosing MemoryFix AI. Our team has carefully reviewed and restored your photo. We hope the result brings back wonderful memories.'
+    ),
+    emailParagraph(
+      'This version was manually refined and reviewed by our team before delivery.'
     ),
     comparisonSection,
     emailCtaButton(downloadUrl, 'Download Restored Photo'),

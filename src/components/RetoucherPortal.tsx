@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 type RetoucherJob = {
+  aiDraftDownloadUrl: string
+  aiDraftModel: string
+  aiDraftProvider: string
   id: string
+  finalDownloadUrl: string
   submissionReference: string
   status: string
   notes: string
@@ -342,6 +346,12 @@ export default function RetoucherPortal() {
                 </span>
                 <span>分配于 {formatDate(job.assignedAt)}</span>
               </div>
+              {(job.aiDraftModel || job.aiDraftProvider) && (
+                <p style={styles.metaNote}>
+                  AI 草稿：{job.aiDraftProvider || 'unknown'} /{' '}
+                  {job.aiDraftModel || 'unknown'}
+                </p>
+              )}
               {job.notes && <p style={styles.notes}>备注: {job.notes}</p>}
               <div style={styles.jobActions}>
                 <a
@@ -352,6 +362,16 @@ export default function RetoucherPortal() {
                 >
                   下载原片
                 </a>
+                {job.aiDraftDownloadUrl && (
+                  <a
+                    href={job.aiDraftDownloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.downloadBtn}
+                  >
+                    查看 AI 草稿
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={() => handleUploadClick(job)}
@@ -385,6 +405,18 @@ export default function RetoucherPortal() {
                     <span>{job.originalFileName}</span>
                     <span>交付于 {formatDate(job.uploadedAt || '')}</span>
                   </div>
+                  {job.finalDownloadUrl && (
+                    <div style={styles.jobActions}>
+                      <a
+                        href={job.finalDownloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={styles.downloadBtn}
+                      >
+                        查看最终图
+                      </a>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -564,6 +596,12 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#faf6f1',
     padding: '6px 10px',
     borderRadius: 6,
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  metaNote: {
+    fontSize: 12,
+    color: '#9b6b3c',
     marginTop: 8,
     marginBottom: 0,
   },

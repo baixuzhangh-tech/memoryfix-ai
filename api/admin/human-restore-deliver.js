@@ -14,9 +14,12 @@ import {
   emailShell,
 } from '../_lib/email-templates.js'
 import {
+  createJobSignedUrls,
   createSignedUrl,
   downloadObject,
+  getAiDraftStorage,
   getDeliveryDownloadUrlSeconds,
+  getFinalStorage,
   getHumanRestoreBuckets,
   getJob,
   insertEvent,
@@ -34,6 +37,7 @@ export const config = {
 
 function buildDeliveryEmail({
   comparisonUrl,
+  deliverySource,
   downloadUrl,
   expiresDays,
   job,
@@ -55,11 +59,20 @@ function buildDeliveryEmail({
         `<strong style="color:#211915">Note from our team:</strong><br/>${esc(reviewNote).replace(/\n/g, '<br/>')}`
       )
     : ''
+  const deliveryContext =
+    deliverySource === 'human_uploaded_final'
+      ? emailParagraph(
+          'Your photo was manually refined and reviewed by our team before delivery.'
+        )
+      : emailParagraph(
+          'We prepared an AI restoration draft, then reviewed and approved it before delivery.'
+        )
 
   const bodyRows = [
     emailParagraph(
       'Thank you for choosing MemoryFix AI. Our team has carefully reviewed and restored your photo. We hope the result brings back wonderful memories.'
     ),
+    deliveryContext,
     comparisonSection,
     emailCtaButton(downloadUrl, 'Download Restored Photo'),
     emailCtaFallback(downloadUrl, 'Click here to download'),
@@ -125,6 +138,7 @@ export default async function handler(req, res) {
     const rawBody = await readRawBody(req)
     const body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}
     const jobId = body.jobId
+    const requestedDeliverySource = String(body.deliverySource || '').trim()
     const reviewNote = String(body.reviewNote || '').trim()
 
     if (!jobId) {
@@ -139,9 +153,24 @@ export default async function handler(req, res) {
       return
     }
 
-    if (!job.result_storage_bucket || !job.result_storage_path) {
+    const aiDraftStorage = getAiDraftStorage(job)
+    const explicitFinalStorage = getFinalStorage(job)
+    const deliverySource =
+      requestedDeliverySource ||
+      (job.final_storage_bucket && job.final_storage_path
+        ? 'human_uploaded_final'
+        : 'ai_draft_human_approved')
+    const deliveryStorage =
+      deliverySource === 'human_uploaded_final'
+        ? explicitFinalStorage
+        : aiDraftStorage
+
+    if (!deliveryStorage) {
       json(res, 400, {
-        error: 'This job does not have an AI result ready for delivery.',
+        error:
+          deliverySource === 'human_uploaded_final'
+            ? 'This job does not have a final reviewed result ready for delivery.'
+            : 'This job does not have an AI draft ready for approval and delivery.',
       })
       return
     }
@@ -149,9 +178,9 @@ export default async function handler(req, res) {
     const expiresIn = getDeliveryDownloadUrlSeconds()
     const expiresDays = Math.max(1, Math.round(expiresIn / (24 * 60 * 60)))
     const downloadUrl = await createSignedUrl({
-      bucket: job.result_storage_bucket,
+      bucket: deliveryStorage.bucket,
       expiresIn,
-      path: job.result_storage_path,
+      path: deliveryStorage.path,
     })
 
     let comparisonUrl = ''
@@ -163,8 +192,8 @@ export default async function handler(req, res) {
           path: job.original_storage_path,
         }),
         downloadObject({
-          bucket: job.result_storage_bucket,
-          path: job.result_storage_path,
+          bucket: deliveryStorage.bucket,
+          path: deliveryStorage.path,
         }),
       ])
       const comparisonBuffer = await buildComparisonImage({
@@ -193,6 +222,7 @@ export default async function handler(req, res) {
 
     const emailContent = buildDeliveryEmail({
       comparisonUrl,
+      deliverySource,
       downloadUrl,
       expiresDays,
       job,
@@ -210,7 +240,24 @@ export default async function handler(req, res) {
         text: emailContent.text,
       },
     })
+    const deliveredAt = new Date().toISOString()
+    const finalPatch =
+      deliverySource === 'ai_draft_human_approved'
+        ? {
+            final_file_type:
+              deliveryStorage.contentType || job.ai_draft_file_type || null,
+            final_source: 'ai_draft_human_approved',
+            final_storage_bucket: deliveryStorage.bucket,
+            final_storage_path: deliveryStorage.path,
+            final_uploaded_at: deliveredAt,
+            final_uploaded_by: 'admin_review',
+          }
+        : {
+            final_source: job.final_source || 'human_uploaded_final',
+          }
     const updatedJob = await updateJob(jobId, {
+      ...finalPatch,
+      delivery_source: deliverySource,
       delivered_at: new Date().toISOString(),
       delivery_email_id: emailPayload?.id || null,
       review_note: reviewNote,
@@ -221,12 +268,13 @@ export default async function handler(req, res) {
     }).catch(() => null)
 
     await insertEvent(jobId, 'delivery_email_sent', {
+      delivery_source: deliverySource,
       delivery_email_id: emailPayload?.id || null,
       expires_in_seconds: expiresIn,
     })
 
     json(res, 200, {
-      job: updatedJob,
+      job: await createJobSignedUrls(updatedJob),
       ok: true,
     })
   } catch (error) {

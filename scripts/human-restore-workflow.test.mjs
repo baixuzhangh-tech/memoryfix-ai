@@ -9,6 +9,7 @@ import cleanupHandler from '../api/cron/human-restore-cleanup.js'
 import checkoutHandler from '../api/human-restore-checkout.js'
 import orderHandler from '../api/human-restore-order.js'
 import webhookHandler from '../api/paddle-webhook.js'
+import retoucherPortalHandler from '../api/retoucher-portal.js'
 import {
   readHumanRestoreCheckoutContext,
   rememberHumanRestorePendingCheckout,
@@ -32,6 +33,7 @@ function createMockState() {
     nextEmailId: 1,
     nextJobId: 1,
     orders: [],
+    retouchers: [],
     storage: new Map(),
   }
 }
@@ -86,12 +88,19 @@ function installMockFetch(state) {
         if (method === 'GET') {
           let jobs = [...state.jobs]
           const idFilter = url.searchParams.get('id')
+          const retoucherFilter = url.searchParams.get('retoucher_id')
           const statusFilter = url.searchParams.get('status')
           const deletedFilter = url.searchParams.get('deleted_at')
           const expiresFilter = url.searchParams.get('expires_at')
 
           if (idFilter?.startsWith('eq.')) {
             jobs = jobs.filter(job => job.id === idFilter.slice(3))
+          }
+
+          if (retoucherFilter?.startsWith('eq.')) {
+            jobs = jobs.filter(
+              job => job.retoucher_id === retoucherFilter.slice(3)
+            )
           }
 
           if (statusFilter?.startsWith('in.(')) {
@@ -230,6 +239,55 @@ function installMockFetch(state) {
         }
       }
 
+      if (url.pathname.startsWith('/rest/v1/human_restore_retouchers')) {
+        if (method === 'POST') {
+          const body = JSON.parse(getBodyText(options))
+          const now = new Date().toISOString()
+          const retoucher = {
+            active: true,
+            ...body,
+            created_at: now,
+            id: `retoucher-${state.retouchers.length + 1}`,
+            updated_at: now,
+          }
+
+          state.retouchers.push(retoucher)
+          return makeJsonResponse([retoucher])
+        }
+
+        if (method === 'GET') {
+          let retouchers = [...state.retouchers]
+          const activeFilter = url.searchParams.get('active')
+          const tokenHashFilter = url.searchParams.get('token_hash')
+
+          if (activeFilter === 'eq.true') {
+            retouchers = retouchers.filter(retoucher => retoucher.active)
+          }
+
+          if (tokenHashFilter?.startsWith('eq.')) {
+            retouchers = retouchers.filter(
+              retoucher => retoucher.token_hash === tokenHashFilter.slice(3)
+            )
+          }
+
+          return makeJsonResponse(retouchers)
+        }
+
+        if (method === 'PATCH') {
+          const idFilter = url.searchParams.get('id')
+          const id = idFilter?.startsWith('eq.') ? idFilter.slice(3) : ''
+          const patch = JSON.parse(getBodyText(options))
+          const retoucher = state.retouchers.find(candidate => candidate.id === id)
+
+          if (!retoucher) {
+            return makeJsonResponse({ message: 'not found' }, { status: 404 })
+          }
+
+          Object.assign(retoucher, patch)
+          return makeJsonResponse([retoucher])
+        }
+      }
+
       if (url.pathname.startsWith('/storage/v1/object/sign/')) {
         const segments = decodeStoragePath(
           url.pathname,
@@ -349,6 +407,34 @@ function installMockFetch(state) {
       })
     }
 
+    if (url.hostname === 'api.replicate.com') {
+      if (method === 'POST' && url.pathname.includes('/predictions')) {
+        const body = JSON.parse(getBodyText(options))
+        const preset = body.input?.codeformer_fidelity ? 'codeformer' : 'gfpgan'
+
+        return makeJsonResponse({
+          id: `prediction-${preset}`,
+          output: `https://replicate.test/${preset}.jpg`,
+          status: 'succeeded',
+        })
+      }
+
+      if (method === 'GET' && url.pathname.includes('/predictions/')) {
+        return makeJsonResponse({
+          id: 'prediction-polled',
+          output: 'https://replicate.test/codeformer.jpg',
+          status: 'succeeded',
+        })
+      }
+    }
+
+    if (url.hostname === 'replicate.test') {
+      return new Response(Buffer.from(`replicate-${url.pathname}`), {
+        headers: { 'Content-Type': 'image/jpeg' },
+        status: 200,
+      })
+    }
+
     if (
       url.hostname === 'api.paddle.com' ||
       url.hostname === 'sandbox-api.paddle.com'
@@ -465,7 +551,7 @@ function createSignedPaddleWebhookBody(payload) {
 
 function installEnv() {
   Object.assign(process.env, {
-    AI_RESTORE_PROVIDER: 'fal',
+    AI_RESTORE_PROVIDER: 'replicate',
     CRON_SECRET: 'cron-secret',
     FAL_KEY: 'fal-key',
     FAL_RESTORE_MAX_POLLS: '1',
@@ -485,6 +571,12 @@ function installEnv() {
     PADDLE_HUMAN_RESTORE_PRICE_ID: 'pri_human_restore_1990',
     PADDLE_LOCAL_PACK_PRICE_ID: 'pri_local_pack_990',
     PADDLE_WEBHOOK_SECRET: 'webhook-secret',
+    REPLICATE_API_TOKEN: 'replicate-key',
+    REPLICATE_CODEFORMER_FIDELITY: '0.7',
+    REPLICATE_CODEFORMER_MODEL: 'lucataco/codeformer',
+    REPLICATE_DEFAULT_PRESET: 'codeformer',
+    REPLICATE_GFPGAN_MODEL:
+      'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c',
     RESEND_API_KEY: 'resend-key',
     SITE_URL: 'https://artgen.site',
     SUPABASE_HUMAN_RESTORE_ORIGINALS_BUCKET: 'human-restore-originals',
@@ -672,6 +764,9 @@ async function main() {
   assert.equal(webhookResponse.body.preuploadedOrderProcessed, true)
   assert.equal(state.jobs.length, 1)
   assert.equal(state.jobs[0].status, 'needs_review')
+  assert.equal(state.jobs[0].ai_draft_model, 'lucataco/codeformer')
+  assert.equal(state.jobs[0].ai_draft_source, 'replicate_codeformer')
+  assert.ok(state.jobs[0].ai_draft_storage_path)
   assert.ok(state.jobs[0].result_storage_path)
   assert.equal(state.orders[0].status, 'needs_review')
   assert.equal(state.orders[0].checkout_email, 'buyer@example.com')
@@ -703,7 +798,27 @@ async function main() {
   assert.equal(listResponse.statusCode, 200)
   assert.equal(listResponse.body.jobs.length, 1)
   assert.ok(listResponse.body.jobs[0].original_signed_url)
+  assert.ok(listResponse.body.jobs[0].ai_draft_signed_url)
   assert.ok(listResponse.body.jobs[0].result_signed_url)
+
+  const retryGfpganResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        jobId: job.id,
+        modelPreset: 'gfpgan',
+        provider: 'replicate',
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(retryGfpganResponse.statusCode, 200)
+  assert.equal(retryGfpganResponse.body.job.status, 'needs_review')
+  assert.equal(
+    retryGfpganResponse.body.job.ai_draft_source,
+    'replicate_gfpgan'
+  )
 
   const retryOpenAIResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(JSON.stringify({ jobId: job.id, provider: 'openai' })),
@@ -744,17 +859,137 @@ async function main() {
   assert.equal(deliveryResponse.statusCode, 200)
   assert.equal(deliveryResponse.body.ok, true)
   assert.equal(state.jobs[0].status, 'delivered')
+  assert.equal(state.jobs[0].delivery_source, 'ai_draft_human_approved')
+  assert.equal(
+    state.jobs[0].final_storage_path,
+    state.jobs[0].ai_draft_storage_path
+  )
   assert.equal(state.emails.length, 3)
 
+  const retoucherOriginalPath = 'retoucher-job/original.jpg'
+  const retoucherDraftPath = 'retoucher-job/ai-draft.jpg'
+
+  state.storage.set(
+    storageKey('human-restore-originals', retoucherOriginalPath),
+    {
+      buffer: Buffer.from('retoucher-original'),
+      contentType: 'image/jpeg',
+    }
+  )
+  state.storage.set(
+    storageKey('human-restore-results', retoucherDraftPath),
+    {
+      buffer: Buffer.from('retoucher-draft'),
+      contentType: 'image/jpeg',
+    }
+  )
+  state.jobs.push({
+    ai_draft_file_type: 'image/jpeg',
+    ai_draft_model: 'lucataco/codeformer',
+    ai_draft_provider: 'replicate',
+    ai_draft_source: 'replicate_codeformer',
+    ai_draft_storage_bucket: 'human-restore-results',
+    ai_draft_storage_path: retoucherDraftPath,
+    checkout_email: 'retoucher-customer@example.com',
+    created_at: new Date().toISOString(),
+    id: 'job-retoucher',
+    notes: 'Repair scratches but keep the face natural.',
+    original_file_name: 'retoucher-original.jpg',
+    original_file_size: 1234,
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: retoucherOriginalPath,
+    status: 'needs_review',
+    submission_reference: 'MF-RET-TEST',
+    updated_at: new Date().toISOString(),
+  })
+
+  const createRetoucherResponse = await invoke(adminJobHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        action: 'create_retoucher',
+        name: 'Retoucher Test',
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(createRetoucherResponse.statusCode, 200)
+  const retoucherId = createRetoucherResponse.body.retoucher.id
+  const retoucherToken = createRetoucherResponse.body.token
+
+  const assignRetoucherResponse = await invoke(adminJobHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        action: 'assign_retoucher',
+        jobId: 'job-retoucher',
+        retoucherId,
+        retoucherName: 'Retoucher Test',
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(assignRetoucherResponse.statusCode, 200)
+  assert.equal(assignRetoucherResponse.body.job.status, 'assigned')
+
+  const retoucherJobsResponse = await invoke(retoucherPortalHandler, {
+    body: Buffer.from(JSON.stringify({ action: 'jobs' })),
+    headers: {
+      'content-type': 'application/json',
+      'x-retoucher-token': retoucherToken,
+    },
+    method: 'POST',
+  })
+
+  assert.equal(retoucherJobsResponse.statusCode, 200)
+  assert.equal(retoucherJobsResponse.body.jobs.length, 1)
+  assert.ok(retoucherJobsResponse.body.jobs[0].aiDraftDownloadUrl)
+
+  const retoucherUploadMultipart = createMultipartBody(
+    {
+      jobId: 'job-retoucher',
+    },
+    {
+      contentType: 'image/jpeg',
+      data: Buffer.from('retoucher-final'),
+      fieldName: 'file',
+      filename: 'retoucher-final.jpg',
+    }
+  )
+  const retoucherUploadResponse = await invoke(retoucherPortalHandler, {
+    body: retoucherUploadMultipart.body,
+    headers: {
+      'content-type': retoucherUploadMultipart.contentType,
+      'x-retoucher-token': retoucherToken,
+    },
+    method: 'POST',
+  })
+
+  assert.equal(retoucherUploadResponse.statusCode, 200)
+  const retoucherJob = state.jobs.find(candidate => candidate.id === 'job-retoucher')
+  assert.equal(retoucherJob.status, 'delivered')
+  assert.equal(retoucherJob.delivery_source, 'human_uploaded_final')
+  assert.equal(retoucherJob.ai_draft_storage_path, retoucherDraftPath)
+  assert.ok(retoucherJob.final_storage_path)
+  assert.notEqual(retoucherJob.final_storage_path, retoucherDraftPath)
+
   state.jobs[0].expires_at = new Date(Date.now() - 1000).toISOString()
+  retoucherJob.expires_at = new Date(Date.now() - 1000).toISOString()
   const cleanupResponse = await invoke(cleanupHandler, {
     headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
     method: 'GET',
   })
 
   assert.equal(cleanupResponse.statusCode, 200)
-  assert.deepEqual(cleanupResponse.body.deleted, [job.id])
+  assert.deepEqual(
+    cleanupResponse.body.deleted.sort(),
+    [job.id, retoucherJob.id].sort()
+  )
   assert.equal(state.jobs[0].status, 'deleted')
+  assert.equal(retoucherJob.status, 'deleted')
   assert.equal(state.storage.size, 0)
 
   console.log('Human Restore workflow smoke test passed.')

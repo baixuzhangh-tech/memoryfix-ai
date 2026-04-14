@@ -60,6 +60,22 @@ create table if not exists public.human_restore_jobs (
   ai_request_id text,
   ai_error text,
   ai_provider_payload jsonb not null default '{}'::jsonb,
+  ai_draft_provider text,
+  ai_draft_model text,
+  ai_draft_prompt text,
+  ai_draft_file_type text,
+  ai_draft_storage_bucket text,
+  ai_draft_storage_path text,
+  ai_draft_created_at timestamptz,
+  ai_draft_error text,
+  ai_draft_source text,
+  delivery_source text,
+  final_file_type text,
+  final_source text,
+  final_storage_bucket text,
+  final_storage_path text,
+  final_uploaded_at timestamptz,
+  final_uploaded_by text,
   result_model text,
   result_prompt text,
   result_file_type text,
@@ -130,6 +146,24 @@ create table if not exists public.human_restore_orders (
 
 alter table public.human_restore_jobs
   add column if not exists human_restore_order_id uuid references public.human_restore_orders(id) on delete set null;
+
+alter table public.human_restore_jobs
+  add column if not exists ai_draft_provider text,
+  add column if not exists ai_draft_model text,
+  add column if not exists ai_draft_prompt text,
+  add column if not exists ai_draft_file_type text,
+  add column if not exists ai_draft_storage_bucket text,
+  add column if not exists ai_draft_storage_path text,
+  add column if not exists ai_draft_created_at timestamptz,
+  add column if not exists ai_draft_error text,
+  add column if not exists ai_draft_source text,
+  add column if not exists delivery_source text,
+  add column if not exists final_file_type text,
+  add column if not exists final_source text,
+  add column if not exists final_storage_bucket text,
+  add column if not exists final_storage_path text,
+  add column if not exists final_uploaded_at timestamptz,
+  add column if not exists final_uploaded_by text;
 
 create index if not exists human_restore_jobs_status_created_idx
   on public.human_restore_jobs (status, created_at desc);

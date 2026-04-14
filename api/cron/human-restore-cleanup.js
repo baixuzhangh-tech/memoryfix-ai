@@ -26,6 +26,30 @@ function isAuthorized(req) {
   return headerToken === expectedSecret || queryToken === expectedSecret
 }
 
+async function deleteStoredJobFiles(job) {
+  const uniquePaths = new Set()
+
+  for (const [bucket, path] of [
+    [job.original_storage_bucket, job.original_storage_path],
+    [job.ai_draft_storage_bucket, job.ai_draft_storage_path],
+    [job.final_storage_bucket, job.final_storage_path],
+    [job.result_storage_bucket, job.result_storage_path],
+  ]) {
+    if (!bucket || !path) {
+      continue
+    }
+
+    const cacheKey = `${bucket}/${path}`
+
+    if (uniquePaths.has(cacheKey)) {
+      continue
+    }
+
+    uniquePaths.add(cacheKey)
+    await deleteObject({ bucket, path })
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     json(res, 405, { error: 'Method not allowed.' })
@@ -57,17 +81,7 @@ export default async function handler(req, res) {
     }
 
     for (const job of jobs) {
-      await deleteObject({
-        bucket: job.original_storage_bucket,
-        path: job.original_storage_path,
-      })
-
-      if (job.result_storage_bucket && job.result_storage_path) {
-        await deleteObject({
-          bucket: job.result_storage_bucket,
-          path: job.result_storage_path,
-        })
-      }
+      await deleteStoredJobFiles(job)
 
       await updateJob(job.id, {
         deleted_at: new Date().toISOString(),

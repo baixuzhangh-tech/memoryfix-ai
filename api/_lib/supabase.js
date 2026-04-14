@@ -273,6 +273,7 @@ export async function listJobs({ status = 'active', limit = 25 } = {}) {
             'ai_failed',
             'needs_review',
             'manual_review',
+            'assigned',
           ]
         : [status]
 
@@ -452,21 +453,115 @@ export async function createSignedUrl({
   return `${url}${prefix}${signedUrl}`
 }
 
+function buildStorageRef(bucket, path, contentType, extra = {}) {
+  if (!bucket || !path) {
+    return null
+  }
+
+  return {
+    bucket,
+    path,
+    contentType: contentType || 'application/octet-stream',
+    ...extra,
+  }
+}
+
+function getLegacyResultStorage(job) {
+  return buildStorageRef(
+    job.result_storage_bucket,
+    job.result_storage_path,
+    job.result_file_type,
+    {
+      model: job.result_model || '',
+      prompt: job.result_prompt || '',
+      provider: job.ai_provider || '',
+      source: 'legacy_result',
+    }
+  )
+}
+
+export function getAiDraftStorage(job) {
+  return (
+    buildStorageRef(
+      job.ai_draft_storage_bucket,
+      job.ai_draft_storage_path,
+      job.ai_draft_file_type,
+      {
+        createdAt: job.ai_draft_created_at || null,
+        model: job.ai_draft_model || job.result_model || '',
+        prompt: job.ai_draft_prompt || job.result_prompt || '',
+        provider: job.ai_draft_provider || job.ai_provider || '',
+        source: job.ai_draft_source || 'ai_draft',
+      }
+    ) || getLegacyResultStorage(job)
+  )
+}
+
+export function getFinalStorage(job) {
+  const explicitFinal = buildStorageRef(
+    job.final_storage_bucket,
+    job.final_storage_path,
+    job.final_file_type,
+    {
+      source: job.final_source || 'human_uploaded_final',
+      uploadedAt: job.final_uploaded_at || job.delivered_at || null,
+      uploadedBy: job.final_uploaded_by || null,
+    }
+  )
+
+  if (explicitFinal) {
+    return explicitFinal
+  }
+
+  if (String(job.delivery_source || '').startsWith('ai_draft')) {
+    return getAiDraftStorage(job)
+  }
+
+  if (job.status === 'delivered') {
+    return getLegacyResultStorage(job)
+  }
+
+  return null
+}
+
 export async function createJobSignedUrls(job) {
+  const signedUrlCache = new Map()
   const originalSignedUrl = await createSignedUrl({
     bucket: job.original_storage_bucket,
     path: job.original_storage_path,
   })
-  const resultSignedUrl =
-    job.result_storage_bucket && job.result_storage_path
-      ? await createSignedUrl({
-          bucket: job.result_storage_bucket,
-          path: job.result_storage_path,
+  const aiDraftStorage = getAiDraftStorage(job)
+  const finalStorage = getFinalStorage(job)
+
+  async function signStorage(storage) {
+    if (!storage?.bucket || !storage?.path) {
+      return ''
+    }
+
+    const cacheKey = `${storage.bucket}/${storage.path}`
+
+    if (!signedUrlCache.has(cacheKey)) {
+      signedUrlCache.set(
+        cacheKey,
+        createSignedUrl({
+          bucket: storage.bucket,
+          path: storage.path,
         })
-      : ''
+      )
+    }
+
+    return signedUrlCache.get(cacheKey)
+  }
+
+  const aiDraftSignedUrl = await signStorage(aiDraftStorage)
+  const finalSignedUrl = await signStorage(finalStorage)
+  const resultSignedUrl = aiDraftSignedUrl || finalSignedUrl
 
   return {
     ...job,
+    ai_draft_signed_url: aiDraftSignedUrl,
+    delivery_signed_url: finalSignedUrl || aiDraftSignedUrl,
+    final_signed_url: finalSignedUrl,
     original_signed_url: originalSignedUrl,
     result_signed_url: resultSignedUrl,
   }
@@ -546,7 +641,7 @@ export async function listJobsByRetoucher(retoucherId, { status } = {}) {
     retoucher_id: `eq.${retoucherId}`,
     order: 'retoucher_assigned_at.desc',
     select:
-      'id,submission_reference,status,notes,original_file_name,original_file_type,original_file_size,original_storage_bucket,original_storage_path,retoucher_assigned_at,retoucher_uploaded_at,created_at',
+      'id,submission_reference,status,notes,original_file_name,original_file_type,original_file_size,original_storage_bucket,original_storage_path,ai_provider,result_model,ai_draft_storage_bucket,ai_draft_storage_path,ai_draft_file_type,ai_draft_model,ai_draft_provider,final_storage_bucket,final_storage_path,final_file_type,final_source,final_uploaded_at,delivery_source,retoucher_assigned_at,retoucher_uploaded_at,created_at',
   })
 
   if (status) {

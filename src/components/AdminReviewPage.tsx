@@ -3,12 +3,20 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 type RestoreJob = {
+  ai_draft_model?: string | null
+  ai_draft_provider?: string | null
+  ai_draft_signed_url?: string
+  ai_draft_source?: string | null
   ai_error?: string | null
   ai_provider?: string | null
   checkout_email: string
   created_at: string
+  delivery_source?: string | null
   delivered_at?: string | null
   expires_at?: string | null
+  final_signed_url?: string
+  final_source?: string | null
+  final_uploaded_at?: string | null
   id: string
   notes?: string | null
   order_bound?: boolean
@@ -236,17 +244,30 @@ export default function AdminReviewPage() {
     }
   }
 
-  function processJob(job: RestoreJob, provider?: 'fal' | 'openai') {
+  function processJob(
+    job: RestoreJob,
+    provider?: 'fal' | 'openai' | 'replicate',
+    modelPreset?: 'codeformer' | 'gfpgan'
+  ) {
+    let successMessage =
+      'AI restore job updated. Review the result or refresh if it is still processing.'
+
+    if (provider) {
+      successMessage = `${provider} restore job updated. Review the result or refresh if it is still processing.`
+    }
+
+    if (modelPreset) {
+      successMessage = `${modelPreset} draft updated. Review the result or refresh if it is still processing.`
+    }
+
     runAction(
       job.id,
       () =>
         adminFetch('/api/admin/human-restore-process', {
           method: 'POST',
-          body: JSON.stringify({ jobId: job.id, provider }),
+          body: JSON.stringify({ jobId: job.id, modelPreset, provider }),
         }),
-      provider
-        ? `${provider} restore job updated. Review the result or refresh if it is still processing.`
-        : 'AI restore job updated. Review the result or refresh if it is still processing.'
+      successMessage
     )
   }
 
@@ -316,18 +337,24 @@ export default function AdminReviewPage() {
     )
   }
 
-  function deliverJob(job: RestoreJob) {
+  function deliverJob(
+    job: RestoreJob,
+    deliverySource: 'ai_draft_human_approved' | 'human_uploaded_final'
+  ) {
     runAction(
       job.id,
       () =>
         adminFetch('/api/admin/human-restore-deliver', {
           method: 'POST',
           body: JSON.stringify({
+            deliverySource,
             jobId: job.id,
             reviewNote: reviewNotes[job.id] || '',
           }),
         }),
-      'Delivery email sent. The job is now marked as delivered.'
+      deliverySource === 'human_uploaded_final'
+        ? 'Final reviewed image sent. The job is now marked as delivered.'
+        : 'Approved AI draft sent. The job is now marked as delivered.'
     )
   }
 
@@ -549,7 +576,7 @@ export default function AdminReviewPage() {
               </div>
             </div>
 
-            <div className="mt-8 grid gap-5 xl:grid-cols-2">
+            <div className="mt-8 grid gap-5 xl:grid-cols-3">
               <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="font-black">Original</h3>
@@ -581,10 +608,14 @@ export default function AdminReviewPage() {
 
               <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="font-black">AI result</h3>
-                  {selectedJob.result_signed_url && (
+                  <h3 className="font-black">AI draft</h3>
+                  {(selectedJob.ai_draft_signed_url ||
+                    selectedJob.result_signed_url) && (
                     <a
-                      href={selectedJob.result_signed_url}
+                      href={
+                        selectedJob.ai_draft_signed_url ||
+                        selectedJob.result_signed_url
+                      }
                       target="_blank"
                       rel="noreferrer"
                       className="text-sm font-black underline"
@@ -593,10 +624,14 @@ export default function AdminReviewPage() {
                     </a>
                   )}
                 </div>
-                {selectedJob.result_signed_url ? (
+                {selectedJob.ai_draft_signed_url ||
+                selectedJob.result_signed_url ? (
                   <img
-                    src={selectedJob.result_signed_url}
-                    alt="AI restored result"
+                    src={
+                      selectedJob.ai_draft_signed_url ||
+                      selectedJob.result_signed_url
+                    }
+                    alt="AI draft result"
                     className="max-h-[520px] w-full rounded-[1.25rem] object-contain"
                     crossOrigin="anonymous"
                     referrerPolicy="no-referrer"
@@ -604,6 +639,36 @@ export default function AdminReviewPage() {
                 ) : (
                   <div className="rounded-[1.25rem] border border-dashed border-[#d7b98c] p-8 text-center text-[#66574d]">
                     Run AI restore to generate a result for review.
+                  </div>
+                )}
+              </article>
+
+              <article className="rounded-[1.5rem] border border-[#e6d2b7] bg-[#fffaf3] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="font-black">Final delivery</h3>
+                  {selectedJob.final_signed_url && (
+                    <a
+                      href={selectedJob.final_signed_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-black underline"
+                    >
+                      Open
+                    </a>
+                  )}
+                </div>
+                {selectedJob.final_signed_url ? (
+                  <img
+                    src={selectedJob.final_signed_url}
+                    alt="Final reviewed result"
+                    className="max-h-[520px] w-full rounded-[1.25rem] object-contain"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="rounded-[1.25rem] border border-dashed border-[#d7b98c] p-8 text-center text-[#66574d]">
+                    No final delivery image yet. Approve the AI draft or wait
+                    for a retoucher upload.
                   </div>
                 )}
               </article>
@@ -624,10 +689,30 @@ export default function AdminReviewPage() {
                   <p className="mt-2">{selectedJob.ai_error}</p>
                 </div>
               )}
-              {(selectedJob.ai_provider || selectedJob.result_model) && (
+              {(selectedJob.ai_draft_provider ||
+                selectedJob.ai_provider ||
+                selectedJob.ai_draft_model ||
+                selectedJob.result_model) && (
                 <p className="text-sm leading-6 text-[#66574d]">
-                  Provider: {selectedJob.ai_provider || 'unknown'} · Model:{' '}
-                  {selectedJob.result_model || 'unknown'}
+                  AI draft:{' '}
+                  {selectedJob.ai_draft_provider ||
+                    selectedJob.ai_provider ||
+                    'unknown'}{' '}
+                  /{' '}
+                  {selectedJob.ai_draft_model ||
+                    selectedJob.result_model ||
+                    'unknown'}
+                </p>
+              )}
+              {(selectedJob.final_source || selectedJob.delivery_source) && (
+                <p className="text-sm leading-6 text-[#66574d]">
+                  Final source:{' '}
+                  {selectedJob.final_source ||
+                    selectedJob.delivery_source ||
+                    'unknown'}
+                  {selectedJob.final_uploaded_at
+                    ? ` · ${formatDate(selectedJob.final_uploaded_at)}`
+                    : ''}
                 </p>
               )}
             </div>
@@ -656,18 +741,28 @@ export default function AdminReviewPage() {
               <button
                 type="button"
                 disabled={busyJobId === selectedJob.id}
-                onClick={() => processJob(selectedJob)}
+                onClick={() =>
+                  processJob(selectedJob, 'replicate', 'codeformer')
+                }
                 className="rounded-full bg-[#211915] px-6 py-3 font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 disabled:opacity-60"
               >
                 {selectedJob.status === 'processing'
-                  ? 'Refresh AI result'
-                  : 'Run AI restore'}
+                  ? 'Refresh CodeFormer draft'
+                  : 'Run CodeFormer'}
+              </button>
+              <button
+                type="button"
+                disabled={busyJobId === selectedJob.id}
+                onClick={() => processJob(selectedJob, 'replicate', 'gfpgan')}
+                className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
+              >
+                Retry GFPGAN
               </button>
               <button
                 type="button"
                 disabled={busyJobId === selectedJob.id}
                 onClick={() => processJob(selectedJob, 'openai')}
-                className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
+                className="rounded-full border border-[#d7b98c] px-6 py-3 font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
               >
                 Retry with OpenAI
               </button>
@@ -683,13 +778,30 @@ export default function AdminReviewPage() {
                 type="button"
                 disabled={
                   busyJobId === selectedJob.id ||
-                  !selectedJob.result_signed_url ||
+                  !(
+                    selectedJob.ai_draft_signed_url ||
+                    selectedJob.result_signed_url
+                  ) ||
                   selectedJob.status === 'delivered'
                 }
-                onClick={() => deliverJob(selectedJob)}
+                onClick={() =>
+                  deliverJob(selectedJob, 'ai_draft_human_approved')
+                }
                 className="rounded-full border border-[#355322] bg-[#f4ffe8] px-6 py-3 font-black text-[#355322] transition hover:-translate-y-1 disabled:opacity-60"
               >
-                Approve & send
+                Approve AI draft & send
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busyJobId === selectedJob.id ||
+                  !selectedJob.final_signed_url ||
+                  selectedJob.status === 'delivered'
+                }
+                onClick={() => deliverJob(selectedJob, 'human_uploaded_final')}
+                className="rounded-full border border-[#355322] bg-[#eef8ff] px-6 py-3 font-black text-[#214c63] transition hover:-translate-y-1 disabled:opacity-60"
+              >
+                Send final upload
               </button>
               <button
                 type="button"
