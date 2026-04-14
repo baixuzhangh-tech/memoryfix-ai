@@ -55,6 +55,22 @@ function formatDate(iso: string): string {
   })
 }
 
+async function readApiResponse(res: Response): Promise<any> {
+  const text = await res.text()
+
+  if (!text) return {}
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {
+      error: res.ok
+        ? '服务器返回了无法识别的响应，请刷新后重试。'
+        : text.slice(0, 180) || '请求失败，请稍后重试。',
+    }
+  }
+}
+
 export default function RetoucherPortal() {
   const [token, setToken] = useState(savedToken)
   const [tokenInput, setTokenInput] = useState('')
@@ -83,7 +99,7 @@ export default function RetoucherPortal() {
         },
         body: JSON.stringify({ action: 'jobs' }),
       })
-      const data = await res.json()
+      const data = await readApiResponse(res)
       if (!res.ok) {
         if (res.status === 401) {
           setToken('')
@@ -169,7 +185,7 @@ export default function RetoucherPortal() {
         headers: { 'x-retoucher-token': token },
         body: formData,
       })
-      const data = await res.json()
+      const data = await readApiResponse(res)
 
       if (!res.ok) {
         throw new Error(data.error || 'Upload failed')

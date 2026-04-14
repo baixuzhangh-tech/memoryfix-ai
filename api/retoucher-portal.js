@@ -65,7 +65,17 @@ export default async function handler(req, res) {
 
     // JSON body → route by action
     const rawBody = await readRawBody(req)
-    const body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}
+    let body = {}
+
+    if (rawBody.length) {
+      try {
+        body = JSON.parse(rawBody.toString('utf8'))
+      } catch {
+        return json(res, 400, {
+          error: 'Invalid request body. Please refresh the retoucher portal and try again.',
+        })
+      }
+    }
     const action = body.action || req.query?.action || 'jobs'
 
     switch (action) {
