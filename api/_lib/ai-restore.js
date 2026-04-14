@@ -410,6 +410,50 @@ function buildReplicateRequest({ imageUrl, modelPreset }) {
   }
 }
 
+async function resolveReplicateModelVersion({ apiToken, model }) {
+  const [owner, rest] = String(model || '').split('/')
+  const [name, version] = String(rest || '').split(':')
+
+  if (!owner || !name) {
+    throw new Error('Replicate model must be formatted as owner/name[:version].')
+  }
+
+  if (version) {
+    return {
+      model: `${owner}/${name}`,
+      owner,
+      version,
+    }
+  }
+
+  const response = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}`, {
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  })
+  const payload = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.detail ||
+        payload?.error ||
+        'Could not resolve the latest Replicate model version.'
+    )
+  }
+
+  const latestVersion = payload?.latest_version?.id
+
+  if (!latestVersion) {
+    throw new Error('Replicate model does not expose a latest version.')
+  }
+
+  return {
+    model: `${owner}/${name}`,
+    owner,
+    version: latestVersion,
+  }
+}
+
 async function callReplicate({ job, modelPreset }) {
   const apiToken = process.env.REPLICATE_API_TOKEN
 
@@ -424,16 +468,13 @@ async function callReplicate({ job, modelPreset }) {
   })
   const request = buildReplicateRequest({ imageUrl, modelPreset })
   const model = request.model
-  const [owner, rest] = model.split('/')
-  const [name, version] = (rest || '').split(':')
+  const resolvedModel = await resolveReplicateModelVersion({
+    apiToken,
+    model,
+  })
   const input = request.input
-
-  const createBody = version
-    ? { version, input }
-    : { input }
-  const createUrl = version
-    ? 'https://api.replicate.com/v1/predictions'
-    : `https://api.replicate.com/v1/models/${owner}/${name}/predictions`
+  const createBody = { version: resolvedModel.version, input }
+  const createUrl = 'https://api.replicate.com/v1/predictions'
 
   const createResponse = await fetch(createUrl, {
     method: 'POST',
@@ -506,6 +547,7 @@ async function callReplicate({ job, modelPreset }) {
     provider: 'replicate',
     providerPayload: {
       model_preset: request.preset,
+      model_version: resolvedModel.version,
       prediction_id: payload?.id,
       source: 'prediction',
     },

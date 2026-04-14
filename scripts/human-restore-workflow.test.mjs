@@ -408,6 +408,14 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'api.replicate.com') {
+      if (method === 'GET' && url.pathname === '/v1/models/lucataco/codeformer') {
+        return makeJsonResponse({
+          latest_version: {
+            id: '78f2bab438ab0ffc85a68cdfd316a2ecd3994b5dd26aa6b3d203357b45e5eb1b',
+          },
+        })
+      }
+
       if (method === 'POST' && url.pathname.includes('/predictions')) {
         const body = JSON.parse(getBodyText(options))
         const preset = body.input?.codeformer_fidelity ? 'codeformer' : 'gfpgan'
