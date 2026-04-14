@@ -1,5 +1,9 @@
 import { FormEvent, useState } from 'react'
 import trackProductEvent from '../analytics'
+import {
+  humanRestorePolicyLinkText,
+  humanRestorePolicySummary,
+} from '../contentPolicy'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
@@ -55,11 +59,13 @@ export default function HumanRestoreCheckoutForm(
   const { onCancel, onCheckoutCreated } = props
   const [notes, setNotes] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [policyAccepted, setPolicyAccepted] = useState(false)
   const [checkoutPayload, setCheckoutPayload] =
     useState<HumanRestoreCheckoutPayload | null>(null)
   const [status, setStatus] = useState<SubmissionStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const notesFieldId = 'human-restore-precheckout-notes'
+  const policyFieldId = 'human-restore-precheckout-policy'
   const photoFieldId = 'human-restore-precheckout-photo'
   const isBusy = status === 'submitting' || status === 'opening'
   const hasSavedCheckout = Boolean(checkoutPayload)
@@ -107,7 +113,7 @@ export default function HumanRestoreCheckoutForm(
       if (!launchResult.ok) {
         throw new Error(
           launchResult.error ||
-            'Paddle checkout could not open. Please retry in a moment.'
+            'Secure checkout could not open. Please retry in a moment.'
         )
       }
 
@@ -122,7 +128,7 @@ export default function HumanRestoreCheckoutForm(
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Paddle checkout could not open. Please retry in a moment.'
+          : 'Secure checkout could not open. Please retry in a moment.'
       )
 
       trackProductEvent('open_human_restore_checkout_failed', {
@@ -147,8 +153,17 @@ export default function HumanRestoreCheckoutForm(
       return
     }
 
+    if (!policyAccepted) {
+      setStatus('error')
+      setErrorMessage(
+        'Please confirm that your photo follows our Acceptable Use Policy before continuing.'
+      )
+      return
+    }
+
     const formData = new FormData()
     formData.append('notes', notes.trim())
+    formData.append('contentPolicyAccepted', 'true')
     formData.append('photo', selectedFile)
 
     setStatus('submitting')
@@ -212,12 +227,12 @@ export default function HumanRestoreCheckoutForm(
   } else if (status === 'opening') {
     submitButtonText = 'Opening secure checkout...'
   } else if (checkoutPayload) {
-    submitButtonText = 'Pay with Paddle'
+    submitButtonText = 'Pay securely'
   }
 
   const checkoutHelperText = checkoutPayload
-    ? 'Your upload is saved. Click Pay with Paddle to open secure checkout from this same order.'
-    : 'After the upload is saved, Paddle opens for secure payment. You will not need to upload this photo again after payment.'
+    ? 'Your upload is saved. Click Pay securely to open checkout from this same order.'
+    : 'After the upload is saved, secure checkout opens for payment. You will not need to upload this photo again after payment.'
   const checkoutErrorTitle = checkoutPayload
     ? 'Photo saved. Checkout did not open'
     : 'Checkout not ready'
@@ -233,8 +248,9 @@ export default function HumanRestoreCheckoutForm(
             Upload one photo before secure checkout.
           </h2>
           <p className="mt-4 max-w-2xl leading-7 text-[#66574d]">
-            No email is needed here. Paddle collects your checkout email, and we
-            deliver the approved restoration to that address after human review.
+            No email is needed here. The payment provider collects your checkout
+            email, and we deliver the approved restoration to that address after
+            human review.
           </p>
         </div>
         <button
@@ -267,8 +283,8 @@ export default function HumanRestoreCheckoutForm(
           <p className="font-black">Photo saved before payment</p>
           <p className="mt-1">
             Your source photo and notes are attached to a pending order for 48
-            hours. Click Pay with Paddle below to open secure checkout. Do not
-            upload the same photo again.
+            hours. Click Pay securely below to open checkout. Do not upload the
+            same photo again.
           </p>
         </div>
       )}
@@ -323,6 +339,52 @@ export default function HumanRestoreCheckoutForm(
           scheduled for automatic deletion.
         </div>
 
+        {!hasSavedCheckout && (
+          <div className="flex gap-3 rounded-[1.5rem] border border-[#d7b98c] bg-white px-5 py-4 text-sm leading-6 text-[#5b4a40]">
+            <input
+              id={policyFieldId}
+              type="checkbox"
+              checked={policyAccepted}
+              onChange={event => {
+                setPolicyAccepted(event.currentTarget.checked)
+              }}
+              className="mt-1 h-5 w-5 shrink-0 accent-[#211915]"
+              disabled={isBusy}
+              required
+            />
+            <label htmlFor={policyFieldId}>
+              {humanRestorePolicySummary} I agree to the{' '}
+              <a
+                href="/acceptable-use"
+                target="_blank"
+                rel="noreferrer"
+                className="font-black text-[#211915] underline"
+              >
+                {humanRestorePolicyLinkText}
+              </a>
+              ,{' '}
+              <a
+                href="/terms"
+                target="_blank"
+                rel="noreferrer"
+                className="font-black text-[#211915] underline"
+              >
+                Terms
+              </a>
+              , and{' '}
+              <a
+                href="/privacy"
+                target="_blank"
+                rel="noreferrer"
+                className="font-black text-[#211915] underline"
+              >
+                Privacy Policy
+              </a>
+              .
+            </label>
+          </div>
+        )}
+
         {errorMessage && (
           <div className="rounded-[1.5rem] border border-[#f0b5a9] bg-[#fff1ed] px-5 py-4 text-sm leading-6 text-[#8a2f1d]">
             <p className="font-black">{checkoutErrorTitle}</p>
@@ -336,7 +398,7 @@ export default function HumanRestoreCheckoutForm(
           </p>
           <button
             type="submit"
-            disabled={isBusy}
+            disabled={isBusy || (!hasSavedCheckout && !policyAccepted)}
             className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {submitButtonText}

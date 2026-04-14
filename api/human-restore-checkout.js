@@ -13,6 +13,10 @@ import {
   updateOrder,
   uploadObject,
 } from './_lib/supabase.js'
+import {
+  validateContentPolicyAcceptance,
+  validateHumanRestoreSubmissionText,
+} from './_lib/content-policy.js'
 
 export const config = {
   api: {
@@ -90,6 +94,19 @@ export default async function handler(req, res) {
       return
     }
 
+    const notes = String(fields.notes || '').trim()
+    const policyError =
+      validateContentPolicyAcceptance(fields) ||
+      validateHumanRestoreSubmissionText({
+        fileName: file.filename,
+        notes,
+      })
+
+    if (policyError) {
+      json(res, 400, { error: policyError })
+      return
+    }
+
     const orderId = randomUUID()
     const checkoutRef = randomUUID()
     const submissionReference = createSubmissionReference()
@@ -99,7 +116,6 @@ export default async function handler(req, res) {
       ''
     )
     const storagePath = `${safeSubmissionReference}/${file.filename}`
-    const notes = String(fields.notes || '').trim()
 
     await uploadObject({
       bucket: buckets.originals,

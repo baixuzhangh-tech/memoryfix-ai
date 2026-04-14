@@ -1,6 +1,6 @@
 const supportEmail = 'support@artgen.site'
 const siteUrl = 'https://artgen.site'
-const lastUpdated = '2026-04-12'
+const lastUpdated = '2026-04-14'
 
 function Section({
   title,
@@ -45,40 +45,27 @@ function PrivacyContent() {
         </p>
         <ul className="list-disc space-y-1 pl-6">
           <li>The photo you explicitly upload for restoration</li>
-          <li>Your checkout email address and name (from Paddle)</li>
+          <li>
+            Your checkout email address and name from the payment provider
+          </li>
           <li>Your repair notes and preferences</li>
           <li>Order and payment reference information</li>
         </ul>
         <p>
           Uploaded photos are stored in a private, access-controlled cloud
-          bucket. We retain your photo and order data for up to 90 days after
-          delivery to handle support requests, then delete them.
+          bucket. We retain your uploaded photo, restored result, and order
+          records for up to 30 days after delivery to handle support and refund
+          requests, then delete the image files and related restoration data.
         </p>
       </Section>
 
       <Section title="3. Payment Processing">
         <p>
-          Payments are processed by{' '}
-          <a
-            href="https://www.paddle.com"
-            target="_blank"
-            rel="noreferrer"
-            className="font-bold text-[#211915] underline"
-          >
-            Paddle
-          </a>{' '}
-          (Merchant of Record). We do not store credit card numbers or banking
-          details. Paddle handles tax collection, receipts, and payment
-          security. Please review{' '}
-          <a
-            href="https://www.paddle.com/legal/privacy"
-            target="_blank"
-            rel="noreferrer"
-            className="font-bold text-[#211915] underline"
-          >
-            Paddle&apos;s Privacy Policy
-          </a>{' '}
-          for details on their data handling.
+          Payments are processed by the authorized payment provider shown at
+          checkout. We do not store credit card numbers or banking details. The
+          payment provider handles secure payment collection, receipts, tax
+          calculation where applicable, fraud checks, and payment-related
+          compliance.
         </p>
       </Section>
 
@@ -101,7 +88,8 @@ function PrivacyContent() {
         <p>We do not sell your personal data. We share data only with:</p>
         <ul className="list-disc space-y-1 pl-6">
           <li>
-            <strong>Paddle</strong> &mdash; for payment processing
+            <strong>Payment providers</strong> &mdash; for checkout, receipts,
+            tax, fraud prevention, and payment support
           </li>
           <li>
             <strong>Resend</strong> &mdash; for transactional email delivery
@@ -131,7 +119,23 @@ function PrivacyContent() {
         </p>
       </Section>
 
-      <Section title="8. Changes">
+      <Section title="8. AI Safety &amp; Content Review">
+        <p>
+          Human-Assisted Restore is for lawful old-photo restoration only. We do
+          not offer face-swap, deepfake, adult-content generation, identity
+          impersonation, or public-figure manipulation services. Submitted
+          photos and notes may be reviewed to enforce our{' '}
+          <a
+            href="/acceptable-use"
+            className="font-bold text-[#211915] underline"
+          >
+            Acceptable Use Policy
+          </a>
+          .
+        </p>
+      </Section>
+
+      <Section title="9. Changes">
         <p>
           We may update this policy from time to time. The &quot;Last
           updated&quot; date at the top reflects the most recent revision.
@@ -153,16 +157,21 @@ function TermsContent() {
       </p>
 
       <Section title="1. Service Description">
-        <p>MemoryFix AI provides two services:</p>
+        <p>MemoryFix AI provides three digital services:</p>
         <ul className="list-disc space-y-1 pl-6">
           <li>
             <strong>Free local photo repair</strong> &mdash; a browser-based
             tool that processes photos on your device without uploading
           </li>
           <li>
+            <strong>Local Pack</strong> &mdash; paid browser-local repair
+            credits. Local Pack credits are stored in your current browser and
+            do not require an account.
+          </li>
+          <li>
             <strong>Human-Assisted Restore</strong> &mdash; a paid service
-            ($19/photo) where your photo is uploaded, processed by AI, reviewed
-            by a human, and delivered by email
+            ($19.90/photo) where one photo is uploaded, processed by AI,
+            reviewed by a human, and delivered by email
           </li>
         </ul>
       </Section>
@@ -170,15 +179,34 @@ function TermsContent() {
       <Section title="2. Acceptable Use">
         <p>You agree to:</p>
         <ul className="list-disc space-y-1 pl-6">
+          <li>
+            Be at least 18 years old or the age of majority where you live
+          </li>
           <li>Upload only photos you own or have the right to edit</li>
+          <li>
+            Submit photos of other people only when you have a lawful basis,
+            permission, or family/archive right to do so
+          </li>
           <li>Not upload illegal, harmful, or abusive content</li>
+          <li>
+            Not request adult sexual content, non-consensual intimate content,
+            deepfakes, face swaps, identity impersonation, public-figure
+            manipulation, fraud, or official-document alteration
+          </li>
           <li>
             Not attempt to abuse, reverse-engineer, or overload the service
           </li>
         </ul>
         <p>
           We reserve the right to refuse service and refund payment if submitted
-          content violates these terms.
+          content violates these terms or our{' '}
+          <a
+            href="/acceptable-use"
+            className="font-bold text-[#211915] underline"
+          >
+            Acceptable Use Policy
+          </a>
+          .
         </p>
       </Section>
 
@@ -212,7 +240,8 @@ function TermsContent() {
         <p>
           We aim to keep the service available but do not guarantee 100% uptime.
           During beta, delivery times for Human-Assisted Restore are typically
-          within 48 hours but may vary.
+          within 48 hours but may vary. MemoryFix AI is a digital service and
+          does not ship physical goods.
         </p>
       </Section>
 
@@ -230,6 +259,121 @@ function TermsContent() {
         <p>
           We may update these terms. Continued use after changes constitutes
           acceptance. Material changes will be noted by updating the date above.
+        </p>
+      </Section>
+    </>
+  )
+}
+
+function AcceptableUseContent() {
+  return (
+    <>
+      <p className="leading-7 text-[#66574d]">
+        MemoryFix AI is built for lawful restoration of old family and archive
+        photos. This policy protects customers, people depicted in photos, and
+        our payment partners.
+      </p>
+
+      <Section title="1. Allowed Use">
+        <ul className="list-disc space-y-1 pl-6">
+          <li>
+            Repair scratches, stains, folds, small missing areas, and fading
+          </li>
+          <li>
+            Improve clarity or upscale old scans while preserving identity
+          </li>
+          <li>
+            Restore family, genealogy, wedding, graduation, and archive photos
+          </li>
+          <li>
+            Submit only photos you own, control, or have permission to restore
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="2. Prohibited Content">
+        <p>You may not submit content or requests involving:</p>
+        <ul className="list-disc space-y-1 pl-6">
+          <li>Adult sexual, pornographic, nude, or NSFW content</li>
+          <li>Sexualized minors or child exploitation material</li>
+          <li>
+            Non-consensual intimate imagery or requests to undress a person
+          </li>
+          <li>
+            Deepfakes, face swaps, celebrity/public-figure impersonation, or
+            identity manipulation
+          </li>
+          <li>
+            Illegal, hateful, abusive, harassing, violent, or extremist content
+          </li>
+          <li>
+            Fraud, forgery, counterfeit, official document, or ID alteration
+          </li>
+          <li>
+            Requests to make a person look like someone else or materially
+            change their identity
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="3. Review and Enforcement">
+        <p>
+          We may reject, stop processing, delete, or refund an order if we
+          believe it violates this policy. Human-Assisted Restore includes a
+          human review step before delivery, and review notes may be used to
+          enforce this policy.
+        </p>
+      </Section>
+
+      <Section title="4. Reporting Abuse">
+        <p>
+          If you believe someone is using MemoryFix AI to process unlawful or
+          non-consensual content, contact{' '}
+          <a
+            href={`mailto:${supportEmail}`}
+            className="font-bold text-[#211915] underline"
+          >
+            {supportEmail}
+          </a>
+          .
+        </p>
+      </Section>
+    </>
+  )
+}
+
+function DeliveryContent() {
+  return (
+    <>
+      <p className="leading-7 text-[#66574d]">
+        MemoryFix AI sells digital photo restoration services and browser-local
+        software access. We do not ship physical goods.
+      </p>
+
+      <Section title="1. Free Local and Local Pack">
+        <p>
+          Free Local and Local Pack repairs run in your browser. Results are
+          available immediately on your device after processing. Local Pack
+          credits are browser-local and may not transfer across devices or
+          browsers unless we later add account sync.
+        </p>
+      </Section>
+
+      <Section title="2. Human-Assisted Restore">
+        <p>
+          Human-Assisted Restore is delivered by email to the checkout email
+          address. During beta, approved restorations are typically delivered
+          within 48 hours for straightforward photos. Complex or
+          policy-sensitive submissions may take longer or be refused and
+          refunded.
+        </p>
+      </Section>
+
+      <Section title="3. Access Window">
+        <p>
+          Delivery emails include a private download link. If your link expires
+          before you download the result, contact support while the order is
+          still within the 30-day retention window.
         </p>
       </Section>
     </>
@@ -289,8 +433,8 @@ function RefundContent() {
             {supportEmail}
           </a>{' '}
           with your order reference or submission reference. We aim to respond
-          within 2 business days. Approved refunds are processed through Paddle
-          and typically appear within 5&ndash;10 business days.
+          within 2 business days. Approved refunds are processed through the
+          payment provider and typically appear within 5&ndash;10 business days.
         </p>
       </Section>
     </>
@@ -310,6 +454,16 @@ const pages: Record<
     title: 'Terms of Service',
     subtitle: 'Rules for using MemoryFix AI',
     Content: TermsContent,
+  },
+  '/acceptable-use': {
+    title: 'Acceptable Use Policy',
+    subtitle: 'What can and cannot be submitted',
+    Content: AcceptableUseContent,
+  },
+  '/delivery': {
+    title: 'Delivery Policy',
+    subtitle: 'How digital orders are fulfilled',
+    Content: DeliveryContent,
   },
   '/refund': {
     title: 'Refund Policy',

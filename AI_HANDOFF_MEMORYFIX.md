@@ -25,8 +25,9 @@ MemoryFix AI 是面向海外用户的旧照片修复网站。
 
 - 基于 `inpaint-web` 的浏览器本地修复和 4x upscaling。
 - 首页重构：隐私优先、本地免费、本地付费包、Human Restore 三条路径。
-- Paddle.js 前端初始化：`Paddle.Setup({ token: VITE_PADDLE_CLIENT_TOKEN })`。
+- Paddle.js 前端初始化：优先 `Paddle.Initialize({ token, eventCallback })`，旧 SDK fallback 到 `Paddle.Setup`。
 - Human Restore 预上传：先上传照片和备注，再打开 Paddle checkout。
+- Human Restore 上传前必须确认 Acceptable Use Policy；前后端都拒绝明显 NSFW、deepfake、face-swap、身份操纵、伪造证件等违规请求。
 - Paddle webhook：`POST /api/paddle-webhook`，验证 `paddle-signature`。
 - Supabase：订单、任务、事件、私有原图 bucket、私有结果 bucket。
 - 云端 AI：支持 fal.ai / OpenAI / Replicate provider。
@@ -106,8 +107,7 @@ npm run build
 1. Paddle sandbox 真实付款测试。
 2. Paddle live 审核通过后切 production token / price IDs / webhook。
 3. 后台增加“上传人工最终修复图并替换 AI result”的入口。
-4. 统一 Privacy / Terms / Refund 的 30 天数据保留口径。
-5. 准备 before/after 示例图、首批推广文案和客服退款 SOP。
+4. 准备 before/after 示例图、首批推广文案和客服退款 SOP。
 
 ## 协作规则
 

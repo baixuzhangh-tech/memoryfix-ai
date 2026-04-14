@@ -1,5 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react'
 import trackProductEvent from '../analytics'
+import {
+  humanRestorePolicyLinkText,
+  humanRestorePolicySummary,
+} from '../contentPolicy'
 import { humanRestoreAfterUploadSteps } from '../humanRestoreContent'
 
 type HumanRestoreUploadFormProps = {
@@ -58,6 +62,7 @@ export default function HumanRestoreUploadForm(
   const [orderReference, setOrderReference] = useState(defaultOrderReference)
   const [notes, setNotes] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [policyAccepted, setPolicyAccepted] = useState(false)
   const [status, setStatus] = useState<SubmissionStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const [fileInputKey, setFileInputKey] = useState(0)
@@ -67,6 +72,7 @@ export default function HumanRestoreUploadForm(
   const checkoutEmailFieldId = 'human-restore-checkout-email'
   const orderReferenceFieldId = 'human-restore-order-reference'
   const notesFieldId = 'human-restore-notes'
+  const policyFieldId = 'human-restore-policy'
   const photoFieldId = 'human-restore-photo'
 
   useEffect(() => {
@@ -116,10 +122,19 @@ export default function HumanRestoreUploadForm(
       return
     }
 
+    if (!policyAccepted) {
+      setStatus('error')
+      setErrorMessage(
+        'Please confirm that your photo follows our Acceptable Use Policy before submitting.'
+      )
+      return
+    }
+
     const formData = new FormData()
     formData.append('checkoutEmail', checkoutEmail.trim())
     formData.append('orderReference', orderReference.trim())
     formData.append('notes', notes.trim())
+    formData.append('contentPolicyAccepted', 'true')
     formData.append('photo', selectedFile)
     if (secureUploadToken) {
       formData.append('token', secureUploadToken)
@@ -157,6 +172,7 @@ export default function HumanRestoreUploadForm(
       setStatus('success')
       setSelectedFile(null)
       setNotes('')
+      setPolicyAccepted(false)
       setFileInputKey(currentValue => currentValue + 1)
       setSubmissionReference(responseBody?.submissionReference || '')
       setConfirmationEmailSent(responseBody?.confirmationEmailSent !== false)
@@ -233,7 +249,7 @@ export default function HumanRestoreUploadForm(
         >
           {isSecureUpload
             ? 'Choose the clearest scan or original image. Add a short note, then submit once to start human-reviewed restoration.'
-            : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the Paddle transaction reference if you have it so we can match the paid order quickly.'}
+            : 'Your secure upload page or secure email link is still the best path. If those are unavailable, use the same checkout email here and add the payment transaction reference if you have it so we can match the paid order quickly.'}
         </p>
       </div>
 
@@ -286,7 +302,7 @@ export default function HumanRestoreUploadForm(
 
             <label className="grid gap-2" htmlFor={orderReferenceFieldId}>
               <span className="text-sm font-black uppercase tracking-[0.14em] text-[#211915]">
-                Paddle reference
+                Payment reference
               </span>
               <input
                 id={orderReferenceFieldId}
@@ -296,7 +312,7 @@ export default function HumanRestoreUploadForm(
                   setOrderReference(event.currentTarget.value)
                 }}
                 className={inputClassName}
-                placeholder="Transaction ID from your Paddle receipt"
+                placeholder="Transaction ID from your payment receipt"
                 autoComplete="off"
                 disabled={status === 'submitting'}
                 required
@@ -347,6 +363,50 @@ export default function HumanRestoreUploadForm(
             </p>
           )}
         </label>
+
+        <div className="flex gap-3 rounded-[1.5rem] border border-[#d7b98c] bg-white px-5 py-4 text-sm leading-6 text-[#5b4a40]">
+          <input
+            id={policyFieldId}
+            type="checkbox"
+            checked={policyAccepted}
+            onChange={event => {
+              setPolicyAccepted(event.currentTarget.checked)
+            }}
+            className="mt-1 h-5 w-5 shrink-0 accent-[#211915]"
+            disabled={status === 'submitting'}
+            required
+          />
+          <label htmlFor={policyFieldId}>
+            {humanRestorePolicySummary} I agree to the{' '}
+            <a
+              href="/acceptable-use"
+              target="_blank"
+              rel="noreferrer"
+              className="font-black text-[#211915] underline"
+            >
+              {humanRestorePolicyLinkText}
+            </a>
+            ,{' '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noreferrer"
+              className="font-black text-[#211915] underline"
+            >
+              Terms
+            </a>
+            , and{' '}
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noreferrer"
+              className="font-black text-[#211915] underline"
+            >
+              Privacy Policy
+            </a>
+            .
+          </label>
+        </div>
 
         {status === 'success' && (
           <div className="grid gap-3 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-5 text-[#355322]">
@@ -423,7 +483,7 @@ export default function HumanRestoreUploadForm(
           </p>
           <button
             type="submit"
-            disabled={status === 'submitting'}
+            disabled={status === 'submitting' || !policyAccepted}
             className="inline-flex justify-center rounded-full bg-[#211915] px-7 py-4 text-center font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 hover:bg-[#3a2820] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {status === 'submitting'

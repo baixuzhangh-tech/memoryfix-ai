@@ -30,6 +30,10 @@ import {
   uploadObject,
 } from './_lib/supabase.js'
 import { runRestoreJob } from './_lib/ai-restore.js'
+import {
+  validateContentPolicyAcceptance,
+  validateHumanRestoreSubmissionText,
+} from './_lib/content-policy.js'
 
 export const config = {
   api: {
@@ -117,7 +121,7 @@ async function verifyPaddlePaidOrder({ email, orderReference }) {
     return {
       verified: false,
       reason:
-        'No paid Paddle order matched this checkout email and transaction reference. Please use the secure upload link from your payment confirmation or contact support.',
+        'No paid order matched this checkout email and transaction reference. Please use the secure upload link from your payment confirmation or contact support.',
     }
   }
 
@@ -132,7 +136,7 @@ async function verifyPaddlePaidOrder({ email, orderReference }) {
     return {
       verified: false,
       reason:
-        'This order is not paid yet. Please wait for Paddle confirmation and try again.',
+        'This order is not paid yet. Please wait for payment confirmation and try again.',
     }
   }
 
@@ -192,7 +196,9 @@ async function sendMerchantNotificationEmail({
       ['Stored file', photo.filename],
     ]),
     emailNoteBox(
-      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(notes || 'No extra notes provided.').replace(/\n/g, '<br/>')}`
+      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(
+        notes || 'No extra notes provided.'
+      ).replace(/\n/g, '<br/>')}`
     ),
     emailCtaButton(adminUrl, 'Open Admin Review'),
     emailCtaFallback(adminUrl, 'Open admin review page'),
@@ -355,9 +361,13 @@ export default async function handler(req, res) {
       return
     }
 
-    if (!isSecureUpload && process.env.HUMAN_RESTORE_ALLOW_FALLBACK_UPLOAD === 'false') {
+    if (
+      !isSecureUpload &&
+      process.env.HUMAN_RESTORE_ALLOW_FALLBACK_UPLOAD === 'false'
+    ) {
       json(res, 403, {
-        error: 'Direct uploads are disabled. Please use the secure upload link from your Paddle confirmation email.',
+        error:
+          'Direct uploads are disabled. Please use the secure upload link from your payment confirmation email.',
       })
       return
     }
@@ -385,7 +395,8 @@ export default async function handler(req, res) {
     if (!isSecureUpload) {
       if (!orderReference) {
         json(res, 400, {
-          error: 'Paddle transaction reference is required. You can find it in your payment confirmation email.',
+          error:
+            'Payment transaction reference is required. You can find it in your payment confirmation email.',
         })
         return
       }
@@ -397,7 +408,9 @@ export default async function handler(req, res) {
 
       if (!verification.verified) {
         json(res, 403, {
-          error: verification.reason || 'Order could not be verified. Please check your email and order number.',
+          error:
+            verification.reason ||
+            'Order could not be verified. Please check your email and order number.',
         })
         return
       }
@@ -417,7 +430,8 @@ export default async function handler(req, res) {
 
       if (recentCount >= maxFallbackSubmissionsPerDay) {
         json(res, 429, {
-          error: 'You have reached the upload limit for today. Please try again in 24 hours or contact support.',
+          error:
+            'You have reached the upload limit for today. Please try again in 24 hours or contact support.',
         })
         return
       }
@@ -444,6 +458,18 @@ export default async function handler(req, res) {
       json(res, 400, {
         error: 'Please keep the upload under 15 MB for this beta form.',
       })
+      return
+    }
+
+    const policyError =
+      validateContentPolicyAcceptance(fields) ||
+      validateHumanRestoreSubmissionText({
+        fileName: file.filename,
+        notes,
+      })
+
+    if (policyError) {
+      json(res, 400, { error: policyError })
       return
     }
 
@@ -485,14 +511,22 @@ export default async function handler(req, res) {
       status: 'uploaded',
       submission_reference: submissionReference,
       test_mode: Boolean(orderPayload?.testMode),
-      upload_source: isSecureUpload ? 'secure_link' : verifiedOrder ? 'verified_fallback' : 'fallback_form',
+      upload_source: isSecureUpload
+        ? 'secure_link'
+        : verifiedOrder
+        ? 'verified_fallback'
+        : 'fallback_form',
     })
 
     await insertEvent(job.id, 'photo_uploaded', {
       file_name: file.filename,
       file_size: file.data.length,
       order_bound: isSecureUpload || Boolean(verifiedOrder),
-      upload_source: isSecureUpload ? 'secure_link' : verifiedOrder ? 'verified_fallback' : 'fallback_form',
+      upload_source: isSecureUpload
+        ? 'secure_link'
+        : verifiedOrder
+        ? 'verified_fallback'
+        : 'fallback_form',
     })
 
     let currentJob = job

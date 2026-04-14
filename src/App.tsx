@@ -1353,7 +1353,7 @@ function App() {
     if (!isLocalPackPaymentReady) {
       setLocalPackCheckoutStatus('error')
       setLocalPackCheckoutError(
-        'Local Pack payment is being activated. Paddle checkout will open here after onboarding is approved.'
+        'Local Pack payment is being activated. Secure checkout will open here after payment onboarding is approved.'
       )
       setShowLocalRepairLimitModal(false)
       setPaymentSetupNotice('local-pack')
@@ -1431,7 +1431,7 @@ function App() {
     if (!isHumanRestorePaymentReady) {
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError(
-        'Human Restore checkout is being activated with Paddle. Free local repair is ready now; paid restore will open after payment approval.'
+        'Human Restore checkout is being activated. Free local repair is ready now; paid restore will open after payment approval.'
       )
       setShowLocalRepairLimitModal(false)
       setPaymentSetupNotice('human-restore')
@@ -1451,7 +1451,7 @@ function App() {
     const { checkoutRef, orderId } = payload
 
     if (!paddleHumanRestorePriceId) {
-      const errorMessage = 'Paddle checkout is not configured.'
+      const errorMessage = 'Secure checkout is not configured.'
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError(errorMessage)
       return { error: errorMessage, ok: false }
@@ -1529,7 +1529,7 @@ function App() {
 
         setCheckoutLaunchStatus('idle')
         setCheckoutLaunchError(
-          'Popup was blocked. Please allow popups for this site, then click Pay with Paddle again.'
+          'Popup was blocked. Please allow popups for this site, then click Pay securely again.'
         )
         return { ok: false }
       }
@@ -1749,6 +1749,12 @@ function App() {
                   className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
                 >
                   Terms
+                </a>
+                <a
+                  href="/refund"
+                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+                >
+                  Refund
                 </a>
                 <a
                   href="#open-source"
@@ -2551,8 +2557,20 @@ function App() {
                   <a href="/terms" className="underline">
                     Terms
                   </a>
+                  <a href="/acceptable-use" className="underline">
+                    Acceptable Use
+                  </a>
+                  <a href="/delivery" className="underline">
+                    Delivery
+                  </a>
                   <a href="/refund" className="underline">
                     Refund
+                  </a>
+                  <a
+                    href={`mailto:${paymentContactEmail}`}
+                    className="underline"
+                  >
+                    Support
                   </a>
                   <a href="#open-source" className="underline">
                     Open Source
@@ -2574,10 +2592,10 @@ function App() {
               Paid checkout is being activated.
             </h2>
             <p className="mt-5 text-lg leading-8 text-[#66574d]">
-              Paddle onboarding is in progress, so this paid option is reserved
+              Payment onboarding is in progress, so this paid option is reserved
               but not yet open for live customers. You can use the free local
-              repair now; paid checkout will open here as soon as Paddle is
-              approved.
+              repair now; paid checkout will open here as soon as the payment
+              provider is approved.
             </p>
             <div className="mt-6 rounded-[1.5rem] border border-[#e6d2b7] bg-white px-5 py-4 text-sm leading-6 text-[#66574d]">
               {paymentSetupNotice === 'human-restore'

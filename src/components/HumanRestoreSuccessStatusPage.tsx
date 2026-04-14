@@ -70,14 +70,14 @@ function getHeroDescription(order: HumanRestoreLocalOrder | null) {
   }
 
   if (order.status === 'pending_payment') {
-    return 'Paddle can take a few seconds to notify us. Keep this page open; no second upload or second payment is needed.'
+    return 'The payment provider can take a few seconds to notify us. Keep this page open; no second upload or second payment is needed.'
   }
 
   if (order.checkoutEmailMasked) {
     return `We will deliver the approved restoration to your checkout email ${order.checkoutEmailMasked}.`
   }
 
-  return 'We will deliver the approved restoration to the checkout email from your Paddle receipt.'
+  return 'We will deliver the approved restoration to the checkout email from your payment receipt.'
 }
 
 function getStepState(order: HumanRestoreLocalOrder | null, step: string) {
@@ -166,7 +166,7 @@ export default function HumanRestoreSuccessStatusPage(
       id: 'payment',
       title: 'Payment confirmation',
       description:
-        'Paddle confirms the order by webhook and returns the checkout email.',
+        'The payment provider confirms the order and returns the checkout email.',
     },
     {
       id: 'ai',
@@ -206,7 +206,7 @@ export default function HumanRestoreSuccessStatusPage(
             <p className="mt-5 max-w-2xl text-base leading-8 text-[#f7eadb] md:text-lg">
               {isError
                 ? errorMessage ||
-                  'If you already paid, do not pay again. Use the Paddle receipt email as your backup record and contact support if this page does not recover.'
+                  'If you already paid, do not pay again. Use the payment receipt email as your backup record and contact support if this page does not recover.'
                 : getHeroDescription(order)}
             </p>
 

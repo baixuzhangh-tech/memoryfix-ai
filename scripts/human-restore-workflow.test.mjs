@@ -515,9 +515,34 @@ async function main() {
   assert.equal(recoveredContext.hasPendingCheckout, true)
   assert.equal(recoveredContext.pendingCheckoutRef, checkoutRef)
 
+  const rejectedPolicyMultipart = createMultipartBody(
+    {
+      notes: 'Please make this a deepfake face swap.',
+      contentPolicyAccepted: 'true',
+    },
+    {
+      contentType: 'image/jpeg',
+      data: Buffer.from('original-image'),
+      fieldName: 'photo',
+      filename: 'blocked.jpg',
+    }
+  )
+  const rejectedPolicyResponse = await invoke(checkoutHandler, {
+    body: rejectedPolicyMultipart.body,
+    headers: { 'content-type': rejectedPolicyMultipart.contentType },
+    method: 'POST',
+  })
+
+  assert.equal(rejectedPolicyResponse.statusCode, 400)
+  assert.match(
+    rejectedPolicyResponse.body.error,
+    /deepfake, face-swap, or identity manipulation/i
+  )
+
   const checkoutMultipart = createMultipartBody(
     {
       notes: 'Please remove scratches while keeping faces natural.',
+      contentPolicyAccepted: 'true',
     },
     {
       contentType: 'image/jpeg',

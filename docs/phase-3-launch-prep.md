@@ -26,6 +26,7 @@
 ```text
 用户选择 Human Restore
 -> 先上传 1 张源照片和修复备注
+-> 勾选权利确认与 Acceptable Use Policy
 -> 创建 Supabase pending_payment order
 -> 打开 Paddle checkout
 -> Paddle transaction.completed webhook
@@ -86,6 +87,9 @@ FAL_KEY= 或 OPENAI_API_KEY=
 10. `/admin/review` 能看到任务、原图、AI result、用户备注。
 11. `Approve & send` 能发出结果邮件。
 12. 下载链接可打开，过期清理 cron 不误删未交付任务。
+13. `/acceptable-use`、`/delivery`、`/privacy`、`/terms`、`/refund` 均可访问。
+14. Human Restore 上传表单拒绝未勾选内容政策的提交。
+15. 明显 NSFW、deepfake、face-swap、身份操纵、伪造证件类备注会被后端拒绝。
 
 ## 首个付费用户验证
 
@@ -100,6 +104,5 @@ FAL_KEY= 或 OPENAI_API_KEY=
 ## 仍需补强
 
 - 后台增加“上传人工最终修复图并替换 AI result”的能力。
-- 统一 Privacy / Terms / Refund 中的 30 天保留口径。
 - 准备 3-5 张 before/after 示例图用于获客。
 - 准备英文首批推广文案和客服退款 SOP。
