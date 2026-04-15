@@ -93,6 +93,17 @@ function formatFileSize(size?: number | null) {
   return `${Math.max(1, Math.round(size / 1024))} KB`
 }
 
+function getAiDraftSummary(job: RestoreJob) {
+  if (job.ai_draft_source === 'fal_codeformer') {
+    return 'fal + codeformer'
+  }
+
+  const provider = job.ai_draft_provider || job.ai_provider || 'unknown'
+  const model = job.ai_draft_model || job.result_model || 'unknown'
+
+  return `${provider} / ${model}`
+}
+
 function getStoredAdminToken() {
   try {
     return sessionStorage.getItem('memoryfix_admin_token') || ''
@@ -254,6 +265,11 @@ export default function AdminReviewPage() {
 
     if (provider) {
       successMessage = `${provider} restore job updated. Review the result or refresh if it is still processing.`
+    }
+
+    if (provider === 'fal' && !modelPreset) {
+      successMessage =
+        'fal + CodeFormer restore job updated. Review the result or refresh if it is still processing.'
     }
 
     if (modelPreset) {
@@ -694,14 +710,7 @@ export default function AdminReviewPage() {
                 selectedJob.ai_draft_model ||
                 selectedJob.result_model) && (
                 <p className="text-sm leading-6 text-[#66574d]">
-                  AI draft:{' '}
-                  {selectedJob.ai_draft_provider ||
-                    selectedJob.ai_provider ||
-                    'unknown'}{' '}
-                  /{' '}
-                  {selectedJob.ai_draft_model ||
-                    selectedJob.result_model ||
-                    'unknown'}
+                  AI draft: {getAiDraftSummary(selectedJob)}
                 </p>
               )}
               {(selectedJob.final_source || selectedJob.delivery_source) && (
@@ -741,14 +750,24 @@ export default function AdminReviewPage() {
               <button
                 type="button"
                 disabled={busyJobId === selectedJob.id}
-                onClick={() =>
-                  processJob(selectedJob, 'replicate', 'codeformer')
-                }
+                onClick={() => processJob(selectedJob)}
                 className="rounded-full bg-[#211915] px-6 py-3 font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 disabled:opacity-60"
               >
                 {selectedJob.status === 'processing'
-                  ? 'Refresh CodeFormer draft'
-                  : 'Run CodeFormer'}
+                  ? 'Refresh AI restore'
+                  : 'Run AI restore'}
+              </button>
+              <button
+                type="button"
+                disabled={busyJobId === selectedJob.id}
+                onClick={() =>
+                  processJob(selectedJob, 'replicate', 'codeformer')
+                }
+                className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
+              >
+                {selectedJob.status === 'processing'
+                  ? 'Refresh CodeFormer only'
+                  : 'Run CodeFormer only'}
               </button>
               <button
                 type="button"
@@ -772,7 +791,7 @@ export default function AdminReviewPage() {
                 onClick={() => processJob(selectedJob, 'fal')}
                 className="rounded-full border border-[#d7b98c] px-6 py-3 font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
               >
-                Retry with fal
+                Run fal + CodeFormer
               </button>
               <button
                 type="button"
