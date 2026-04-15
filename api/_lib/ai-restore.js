@@ -14,6 +14,13 @@ const defaultReplicateGfpganModel =
   'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
 const defaultReplicatePreset = 'codeformer'
 
+function getCodeformerPipelineEnabled() {
+  return (
+    process.env.FAL_RESTORE_ENABLE_CODEFORMER_PIPELINE !== 'false' &&
+    Boolean(process.env.REPLICATE_API_TOKEN)
+  )
+}
+
 function wait(ms) {
   return new Promise(resolve => {
     setTimeout(resolve, ms)
@@ -88,6 +95,35 @@ function getDefaultReplicatePreset() {
   return (
     normalizeModelPreset(process.env.REPLICATE_DEFAULT_PRESET) ||
     defaultReplicatePreset
+  )
+}
+
+function isTransientFalPollFailure(response, payload) {
+  if (!response) {
+    return false
+  }
+
+  if ([408, 425, 429, 500, 502, 503, 504].includes(response.status)) {
+    return true
+  }
+
+  const status = String(payload?.status || '').toUpperCase()
+  const errorType = String(payload?.error_type || payload?.errorType || '').toUpperCase()
+
+  if (response.status === 404) {
+    return ['IN_QUEUE', 'IN_PROGRESS', 'NOT_FOUND'].includes(status)
+  }
+
+  return errorType === 'TIMEOUT' || errorType === 'TEMPORARY_UNAVAILABLE'
+}
+
+function getFalErrorMessage(payload, fallback) {
+  return (
+    payload?.detail ||
+    payload?.error?.message ||
+    payload?.error ||
+    payload?.message ||
+    fallback
   )
 }
 
@@ -168,6 +204,18 @@ async function fetchImageBuffer(url) {
   }
 }
 
+function inferImageExtension(contentType) {
+  if (String(contentType || '').includes('jpeg')) {
+    return 'jpg'
+  }
+
+  if (String(contentType || '').includes('webp')) {
+    return 'webp'
+  }
+
+  return 'png'
+}
+
 async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
   const apiKey = process.env.OPENAI_API_KEY
 
@@ -242,7 +290,7 @@ async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
   throw new Error('OpenAI did not return a restored image.')
 }
 
-async function submitFalRequest({ imageUrl, job, prompt }) {
+async function submitFalRequest({ imageUrl, prompt }) {
   const falKey = process.env.FAL_KEY
 
   if (!falKey) {
@@ -280,6 +328,15 @@ async function submitFalRequest({ imageUrl, job, prompt }) {
   }
 
   const requestId = payload?.request_id || payload?.requestId || payload?.id
+  const statusUrl =
+    payload?.status_url || payload?.statusUrl || payload?.urls?.status || ''
+  const resultUrl =
+    payload?.response_url ||
+    payload?.responseUrl ||
+    payload?.result_url ||
+    payload?.resultUrl ||
+    payload?.urls?.response ||
+    ''
 
   if (!requestId) {
     const imageUrlFromPayload = extractFalImageUrl(payload)
@@ -302,15 +359,21 @@ async function submitFalRequest({ imageUrl, job, prompt }) {
     model,
     provider: 'fal',
     requestId,
+    resultUrl,
+    statusUrl,
   }
 }
 
-async function pollFalRequest({ model, requestId }) {
+async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   const falKey = process.env.FAL_KEY
-  const statusUrl = `https://queue.fal.run/${model}/requests/${requestId}/status`
-  const resultUrl = `https://queue.fal.run/${model}/requests/${requestId}/response`
+  const normalizedStatusUrl =
+    statusUrl ||
+    `https://queue.fal.run/${model}/requests/${requestId}/status`
+  const normalizedResultUrl =
+    responseUrl ||
+    `https://queue.fal.run/${model}/requests/${requestId}/response`
 
-  const statusResponse = await fetch(statusUrl, {
+  const statusResponse = await fetch(normalizedStatusUrl, {
     headers: {
       Authorization: `Key ${falKey}`,
     },
@@ -318,16 +381,25 @@ async function pollFalRequest({ model, requestId }) {
   const statusPayload = await statusResponse.json().catch(() => null)
 
   if (!statusResponse.ok) {
-    throw new Error(
-      statusPayload?.detail || statusPayload?.error || 'Could not poll fal.ai.'
-    )
+    if (isTransientFalPollFailure(statusResponse, statusPayload)) {
+      return {
+        model,
+        provider: 'fal',
+        requestId,
+        status: 'pending',
+      }
+    }
+
+    throw new Error(getFalErrorMessage(statusPayload, 'Could not poll fal.ai.'))
   }
 
   const status = String(statusPayload?.status || '').toUpperCase()
 
   if (status && status !== 'COMPLETED') {
     if (status.includes('FAIL')) {
-      throw new Error(statusPayload?.error || 'fal.ai restoration failed.')
+      throw new Error(
+        getFalErrorMessage(statusPayload, 'fal.ai restoration failed.')
+      )
     }
 
     return {
@@ -338,7 +410,7 @@ async function pollFalRequest({ model, requestId }) {
     }
   }
 
-  const resultResponse = await fetch(resultUrl, {
+  const resultResponse = await fetch(normalizedResultUrl, {
     headers: {
       Authorization: `Key ${falKey}`,
     },
@@ -346,10 +418,17 @@ async function pollFalRequest({ model, requestId }) {
   const resultPayload = await resultResponse.json().catch(() => null)
 
   if (!resultResponse.ok) {
+    if (isTransientFalPollFailure(resultResponse, resultPayload)) {
+      return {
+        model,
+        provider: 'fal',
+        requestId,
+        status: 'pending',
+      }
+    }
+
     throw new Error(
-      resultPayload?.detail ||
-        resultPayload?.error ||
-        'Could not fetch fal.ai result.'
+      getFalErrorMessage(resultPayload, 'Could not fetch fal.ai result.')
     )
   }
 
@@ -454,18 +533,20 @@ async function resolveReplicateModelVersion({ apiToken, model }) {
   }
 }
 
-async function callReplicate({ job, modelPreset }) {
+async function callReplicate({ imageUrlOverride, job, modelPreset }) {
   const apiToken = process.env.REPLICATE_API_TOKEN
 
   if (!apiToken) {
     throw new Error('REPLICATE_API_TOKEN is not configured.')
   }
 
-  const imageUrl = await createSignedUrl({
-    bucket: job.original_storage_bucket,
-    expiresIn: 60 * 30,
-    path: job.original_storage_path,
-  })
+  const imageUrl =
+    imageUrlOverride ||
+    (await createSignedUrl({
+      bucket: job.original_storage_bucket,
+      expiresIn: 60 * 30,
+      path: job.original_storage_path,
+    }))
   const request = buildReplicateRequest({ imageUrl, modelPreset })
   const model = request.model
   const resolvedModel = await resolveReplicateModelVersion({
@@ -560,7 +641,7 @@ async function callFal({ job, prompt }) {
     expiresIn: 60 * 30,
     path: job.original_storage_path,
   })
-  const queuedOrImmediate = await submitFalRequest({ imageUrl, job, prompt })
+  const queuedOrImmediate = await submitFalRequest({ imageUrl, prompt })
 
   if (queuedOrImmediate.buffer) {
     return queuedOrImmediate
@@ -575,6 +656,8 @@ async function callFal({ job, prompt }) {
     const polled = await pollFalRequest({
       model: queuedOrImmediate.model,
       requestId: queuedOrImmediate.requestId,
+      responseUrl: queuedOrImmediate.resultUrl,
+      statusUrl: queuedOrImmediate.statusUrl,
     })
 
     if (polled.buffer) {
@@ -586,7 +669,69 @@ async function callFal({ job, prompt }) {
     model: queuedOrImmediate.model,
     provider: 'fal',
     requestId: queuedOrImmediate.requestId,
+    responseUrl: queuedOrImmediate.resultUrl,
     status: 'pending',
+    statusUrl: queuedOrImmediate.statusUrl,
+  }
+}
+
+async function runCodeformerStage({ contentType, imageBuffer, job }) {
+  const buckets = getHumanRestoreBuckets()
+  const extension = inferImageExtension(contentType)
+  const tempPath = `${
+    job.submission_reference
+  }/pipeline-stage-${Date.now()}.${extension}`
+
+  await uploadObject({
+    bucket: buckets.results,
+    contentType: contentType || 'image/png',
+    data: imageBuffer,
+    path: tempPath,
+  })
+
+  try {
+    const signedUrl = await createSignedUrl({
+      bucket: buckets.results,
+      expiresIn: 60 * 30,
+      path: tempPath,
+    })
+
+    return await callReplicate({
+      imageUrlOverride: signedUrl,
+      job,
+      modelPreset: 'codeformer',
+    })
+  } finally {
+    await deleteObject({
+      bucket: buckets.results,
+      path: tempPath,
+    }).catch(() => null)
+  }
+}
+
+async function callFalCodeformerPipeline({ job, prompt }) {
+  const falResult = await callFal({ job, prompt })
+
+  if (falResult.status === 'pending') {
+    return falResult
+  }
+
+  const codeformerResult = await runCodeformerStage({
+    contentType: falResult.contentType,
+    imageBuffer: falResult.buffer,
+    job,
+  })
+
+  return {
+    ...codeformerResult,
+    model: `${falResult.model} -> ${codeformerResult.model}`,
+    provider: 'fal',
+    providerPayload: {
+      codeformer: codeformerResult.providerPayload || {},
+      fal: falResult.providerPayload || {},
+      pipeline: ['fal', 'replicate_codeformer'],
+    },
+    source: 'fal_codeformer',
   }
 }
 
@@ -631,9 +776,10 @@ async function finishJobWithResult({ job, prompt, result }) {
     ai_draft_prompt: prompt,
     ai_draft_provider: result.provider,
     ai_draft_source:
-      result.modelPreset && result.provider === 'replicate'
+      result.source ||
+      (result.modelPreset && result.provider === 'replicate'
         ? `replicate_${result.modelPreset}`
-        : result.provider,
+        : result.provider),
     ai_draft_storage_bucket: buckets.results,
     ai_draft_storage_path: resultPath,
     ai_error: null,
@@ -675,6 +821,8 @@ export async function runRestoreJob({
       model:
         job.result_model || process.env.FAL_RESTORE_MODEL || defaultFalModel,
       requestId: job.ai_request_id,
+      responseUrl: job.ai_provider_payload?.fal?.response_url,
+      statusUrl: job.ai_provider_payload?.fal?.status_url,
     })
 
     if (polled.status === 'pending') {
@@ -682,6 +830,30 @@ export async function runRestoreJob({
         ai_error: null,
         ai_draft_error: null,
         status: 'processing',
+      })
+    }
+
+    if (getCodeformerPipelineEnabled()) {
+      const piped = await runCodeformerStage({
+        contentType: polled.contentType,
+        imageBuffer: polled.buffer,
+        job,
+      })
+
+      return finishJobWithResult({
+        job,
+        prompt,
+        result: {
+          ...piped,
+          model: `${polled.model} -> ${piped.model}`,
+          provider: 'fal',
+          providerPayload: {
+            codeformer: piped.providerPayload || {},
+            fal: polled.providerPayload || {},
+            pipeline: ['fal', 'replicate_codeformer'],
+          },
+          source: 'fal_codeformer',
+        },
       })
     }
 
@@ -694,9 +866,11 @@ export async function runRestoreJob({
     ai_provider: provider,
     ai_draft_provider: provider,
     ai_draft_source:
-      provider === 'replicate' && modelPreset
-        ? `replicate_${modelPreset}`
-        : provider,
+      provider === 'fal' && getCodeformerPipelineEnabled()
+        ? 'fal_codeformer'
+        : provider === 'replicate' && modelPreset
+          ? `replicate_${modelPreset}`
+          : provider,
     status: 'processing',
   })
 
@@ -715,7 +889,9 @@ export async function runRestoreJob({
           })
         : provider === 'replicate'
           ? await callReplicate({ job, modelPreset })
-          : await callFal({ job, prompt })
+          : getCodeformerPipelineEnabled()
+            ? await callFalCodeformerPipeline({ job, prompt })
+            : await callFal({ job, prompt })
 
     if (result.status === 'pending') {
       return updateJob(job.id, {
@@ -724,11 +900,13 @@ export async function runRestoreJob({
         ai_draft_prompt: prompt,
         ai_draft_provider: result.provider,
         ai_draft_source:
-          result.modelPreset && result.provider === 'replicate'
+          result.source ||
+          (result.modelPreset && result.provider === 'replicate'
             ? `replicate_${result.modelPreset}`
-            : result.provider,
+            : result.provider),
         ai_error: null,
         ai_provider: result.provider,
+        ai_provider_payload: result.providerPayload || {},
         ai_request_id: result.requestId,
         result_model: result.model,
         result_prompt: prompt,

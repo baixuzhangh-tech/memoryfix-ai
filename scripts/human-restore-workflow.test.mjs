@@ -359,7 +359,13 @@ function installMockFetch(state) {
 
     if (url.hostname === 'queue.fal.run') {
       if (method === 'POST') {
-        return makeJsonResponse({ request_id: 'fal-request-1' })
+        return makeJsonResponse({
+          request_id: 'fal-request-1',
+          response_url:
+            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+          status_url:
+            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+        })
       }
 
       if (url.pathname.endsWith('/status')) {
@@ -559,9 +565,10 @@ function createSignedPaddleWebhookBody(payload) {
 
 function installEnv() {
   Object.assign(process.env, {
-    AI_RESTORE_PROVIDER: 'replicate',
+    AI_RESTORE_PROVIDER: 'fal',
     CRON_SECRET: 'cron-secret',
     FAL_KEY: 'fal-key',
+    FAL_RESTORE_ENABLE_CODEFORMER_PIPELINE: 'true',
     FAL_RESTORE_MAX_POLLS: '1',
     FAL_RESTORE_MODEL: 'fal-ai/image-editing/photo-restoration',
     FAL_RESTORE_POLL_INTERVAL_MS: '1',
@@ -772,8 +779,12 @@ async function main() {
   assert.equal(webhookResponse.body.preuploadedOrderProcessed, true)
   assert.equal(state.jobs.length, 1)
   assert.equal(state.jobs[0].status, 'needs_review')
-  assert.equal(state.jobs[0].ai_draft_model, 'lucataco/codeformer')
-  assert.equal(state.jobs[0].ai_draft_source, 'replicate_codeformer')
+  assert.equal(
+    state.jobs[0].ai_draft_model,
+    'fal-ai/image-editing/photo-restoration -> lucataco/codeformer'
+  )
+  assert.equal(state.jobs[0].ai_draft_provider, 'fal')
+  assert.equal(state.jobs[0].ai_draft_source, 'fal_codeformer')
   assert.ok(state.jobs[0].ai_draft_storage_path)
   assert.ok(state.jobs[0].result_storage_path)
   assert.equal(state.orders[0].status, 'needs_review')
