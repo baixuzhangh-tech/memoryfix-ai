@@ -141,6 +141,39 @@ export async function insertEvent(jobId, eventType, metadata = {}) {
   }
 }
 
+export async function insertSystemEvent(eventType, metadata = {}) {
+  try {
+    const payload = await supabaseRest('/human_restore_events', {
+      method: 'POST',
+      body: {
+        event_type: eventType,
+        metadata,
+      },
+      prefer: 'return=representation',
+    })
+
+    return Array.isArray(payload) ? payload[0] || null : payload
+  } catch {
+    return null
+  }
+}
+
+export async function getLatestSystemEventByType(eventType) {
+  if (!eventType) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    event_type: `eq.${eventType}`,
+    limit: '1',
+    order: 'created_at.desc',
+    select: '*',
+  })
+  const payload = await supabaseRest(`/human_restore_events?${params.toString()}`)
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
 export async function getJob(jobId) {
   const params = new URLSearchParams({
     id: `eq.${jobId}`,

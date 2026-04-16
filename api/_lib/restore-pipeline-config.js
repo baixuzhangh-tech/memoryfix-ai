@@ -1,8 +1,14 @@
 import crypto from 'crypto'
-import { downloadObject, getHumanRestoreBuckets, uploadObject } from './supabase.js'
+import {
+  downloadObject,
+  getHumanRestoreBuckets,
+  getLatestSystemEventByType,
+  insertSystemEvent,
+} from './supabase.js'
 
 const configVersion = 1
 const defaultReplicatePreset = 'codeformer'
+const pipelineConfigEventType = 'restore_pipeline_config_saved'
 const configPath =
   process.env.HUMAN_RESTORE_PIPELINE_CONFIG_PATH ||
   'config/ai-restore-pipelines.json'
@@ -295,6 +301,17 @@ function isMissingObjectError(error) {
 }
 
 export async function readPipelineConfig() {
+  try {
+    const storedEvent = await getLatestSystemEventByType(pipelineConfigEventType)
+    const eventConfig = storedEvent?.metadata?.config
+
+    if (eventConfig && typeof eventConfig === 'object') {
+      return normalizePipelineConfig(eventConfig)
+    }
+  } catch {
+    // fall through to legacy storage fallback
+  }
+
   const storage = getPipelineConfigStorageRef()
 
   try {
@@ -313,14 +330,14 @@ export async function readPipelineConfig() {
 
 export async function writePipelineConfig(input) {
   const normalized = normalizePipelineConfig(input)
-  const storage = getPipelineConfigStorageRef()
 
-  await uploadObject({
-    bucket: storage.bucket,
-    contentType: 'application/json',
-    data: Buffer.from(JSON.stringify(normalized, null, 2), 'utf8'),
-    path: storage.path,
+  const saved = await insertSystemEvent(pipelineConfigEventType, {
+    config: normalized,
   })
+
+  if (!saved) {
+    throw new Error('Could not save restore pipeline config.')
+  }
 
   return normalized
 }
