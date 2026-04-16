@@ -29,10 +29,14 @@ function createMockState() {
     emails: [],
     events: [],
     falPostCalls: 0,
+    falResponseRequestUrls: [],
     falResponseErrorStatus: 0,
+    falStatusRequestUrls: [],
     falStatusSequence: [],
     falStatusErrorStatus: 0,
     falStatusCalls: 0,
+    falSubmitResponseUrl: '',
+    falSubmitStatusUrl: '',
     jobs: [],
     nextEmailId: 1,
     nextJobId: 1,
@@ -367,6 +371,7 @@ function installMockFetch(state) {
         if (method !== 'POST') {
           return makeJsonResponse({ error: 'fal status requires POST' }, { status: 405 })
         }
+        state.falStatusRequestUrls.push(url.toString())
         if (state.falStatusErrorStatus) {
           return makeJsonResponse(
             { error: 'fal status transient failure' },
@@ -384,6 +389,7 @@ function installMockFetch(state) {
         if (method !== 'POST') {
           return makeJsonResponse({ error: 'fal response requires POST' }, { status: 405 })
         }
+        state.falResponseRequestUrls.push(url.toString())
         if (state.falResponseErrorStatus) {
           return makeJsonResponse(
             { error: 'fal response transient failure' },
@@ -400,8 +406,10 @@ function installMockFetch(state) {
         return makeJsonResponse({
           request_id: 'fal-request-1',
           response_url:
+            state.falSubmitResponseUrl ||
             'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
           status_url:
+            state.falSubmitStatusUrl ||
             'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
         })
       }
@@ -1120,6 +1128,68 @@ async function main() {
   assert.equal(stuckFalResponse.body.job.ai_draft_source, 'fal')
   assert.equal(stuckFalResponse.body.job.ai_draft_storage_path, stuckFalDraftPath)
 
+  state.falSubmitResponseUrl =
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
+  state.falSubmitStatusUrl =
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
+  const malformedSubmitOriginalPath = 'manual/malformed-submit-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', malformedSubmitOriginalPath), {
+    buffer: Buffer.from('malformed-submit-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'malformed-submit-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-malformed-submit-fal',
+    notes: 'Malformed fal submit URLs should be canonicalized for polling.',
+    order_bound: true,
+    order_number: 'txn_malformed_submit_fal',
+    original_file_name: 'malformed-submit-fal.jpg',
+    original_file_size: Buffer.byteLength('malformed-submit-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: malformedSubmitOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-MALFORMED-SUBMIT-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const statusUrlCallsBeforeMalformedSubmit = state.falStatusRequestUrls.length
+  const responseUrlCallsBeforeMalformedSubmit = state.falResponseRequestUrls.length
+  const falPostCallsBeforeMalformedSubmit = state.falPostCalls
+  const malformedSubmitResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-malformed-submit-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.falSubmitResponseUrl = ''
+  state.falSubmitStatusUrl = ''
+
+  assert.equal(malformedSubmitResponse.statusCode, 200)
+  assert.equal(malformedSubmitResponse.body.job.status, 'needs_review')
+  assert.equal(malformedSubmitResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(malformedSubmitResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.ok(malformedSubmitResponse.body.job.ai_draft_storage_path)
+  assert.equal(state.falPostCalls, falPostCallsBeforeMalformedSubmit + 1)
+  assert.equal(
+    state.falStatusRequestUrls[statusUrlCallsBeforeMalformedSubmit],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+  )
+  assert.equal(
+    state.falResponseRequestUrls[responseUrlCallsBeforeMalformedSubmit],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+  )
+  assert.equal(
+    malformedSubmitResponse.body.job.ai_provider_payload?.fal?.raw_status_url,
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
+  )
+  assert.equal(
+    malformedSubmitResponse.body.job.ai_provider_payload?.fal?.raw_response_url,
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
+  )
+
   state.falStatusSequence = ['COMPLETED']
   const falPostCallsBeforePendingResume = state.falPostCalls
   const pendingResumeResponse = await invoke(adminProcessHandler, {
@@ -1180,6 +1250,330 @@ async function main() {
   assert.equal(resumeFalResponse.body.job.ai_draft_provider, 'fal')
   assert.equal(resumeFalResponse.body.job.ai_draft_source, 'fal_codeformer')
   assert.equal(state.falPostCalls, falPostCallsBeforeResume)
+
+  const legacyMalformedOriginalPath = 'manual/legacy-malformed-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', legacyMalformedOriginalPath), {
+    buffer: Buffer.from('legacy-malformed-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_draft_source: 'fal',
+    ai_provider: 'fal',
+    ai_provider_payload: {
+      fal: {
+        response_url: 'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
+        status_url:
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
+      },
+    },
+    ai_request_id: 'fal-request-1',
+    checkout_email: 'legacy-malformed-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-legacy-malformed-fal',
+    notes: 'Legacy malformed fal payload URLs should resume via canonical queue endpoints.',
+    order_bound: true,
+    order_number: 'txn_legacy_malformed_fal',
+    original_file_name: 'legacy-malformed-fal.jpg',
+    original_file_size: Buffer.byteLength('legacy-malformed-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: legacyMalformedOriginalPath,
+    status: 'processing',
+    submission_reference: 'MF-LEGACY-MALFORMED-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const falPostCallsBeforeLegacyMalformedResume = state.falPostCalls
+  const statusUrlCallsBeforeLegacyMalformedResume = state.falStatusRequestUrls.length
+  const responseUrlCallsBeforeLegacyMalformedResume = state.falResponseRequestUrls.length
+  const legacyMalformedResumeResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-legacy-malformed-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(legacyMalformedResumeResponse.statusCode, 200)
+  assert.equal(legacyMalformedResumeResponse.body.job.status, 'needs_review')
+  assert.equal(legacyMalformedResumeResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(legacyMalformedResumeResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(state.falPostCalls, falPostCallsBeforeLegacyMalformedResume)
+  assert.equal(
+    state.falStatusRequestUrls[statusUrlCallsBeforeLegacyMalformedResume],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+  )
+  assert.equal(
+    state.falResponseRequestUrls[responseUrlCallsBeforeLegacyMalformedResume],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+  )
+  assert.equal(
+    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal?.raw_status_url,
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
+  )
+  assert.equal(
+    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal?.raw_response_url,
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
+  )
+
+  const publicResumeOriginalPath = 'manual/public-resume-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', publicResumeOriginalPath), {
+    buffer: Buffer.from('public-resume-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider: 'fal',
+    ai_provider_payload: {
+      fal: {
+        response_url: 'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
+        status_url:
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
+      },
+    },
+    ai_request_id: 'fal-request-1',
+    checkout_email: 'public-resume-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    human_restore_order_id: 'order-public-resume-fal',
+    id: 'job-public-resume-fal',
+    notes: 'Public order status polling should resume linked fal processing jobs.',
+    order_bound: true,
+    order_number: 'txn_public_resume_fal',
+    original_file_name: 'public-resume-fal.jpg',
+    original_file_size: Buffer.byteLength('public-resume-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: publicResumeOriginalPath,
+    status: 'processing',
+    submission_reference: 'MF-PUBLIC-RESUME-FAL',
+    updated_at: new Date().toISOString(),
+  })
+  state.orders.push({
+    checkout_email: 'public-resume-fal@example.com',
+    checkout_ref: 'checkout-public-resume-fal',
+    created_at: new Date().toISOString(),
+    id: 'order-public-resume-fal',
+    job_id: 'job-public-resume-fal',
+    order_number: 'txn_public_resume_fal',
+    original_storage_path: publicResumeOriginalPath,
+    payment_confirmed_at: new Date().toISOString(),
+    product_name: 'Human-assisted Restore',
+    status: 'processing',
+    submission_reference: 'MF-PUBLIC-RESUME-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  state.falStatusSequence = ['COMPLETED']
+  const falPostCallsBeforePublicResume = state.falPostCalls
+  const statusUrlCallsBeforePublicResume = state.falStatusRequestUrls.length
+  const responseUrlCallsBeforePublicResume = state.falResponseRequestUrls.length
+  const publicResumeResponse = await invoke(orderHandler, {
+    method: 'GET',
+    query: {
+      checkoutRef: 'checkout-public-resume-fal',
+      orderId: 'order-public-resume-fal',
+    },
+  })
+
+  assert.equal(publicResumeResponse.statusCode, 200)
+  assert.equal(publicResumeResponse.body.order.status, 'needs_review')
+  assert.equal(publicResumeResponse.body.order.jobId, 'job-public-resume-fal')
+  assert.equal(state.falPostCalls, falPostCallsBeforePublicResume)
+  assert.equal(
+    state.falStatusRequestUrls[statusUrlCallsBeforePublicResume],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+  )
+  assert.equal(
+    state.falResponseRequestUrls[responseUrlCallsBeforePublicResume],
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+  )
+  const publicResumeJob = state.jobs.find(candidate => candidate.id === 'job-public-resume-fal')
+  const publicResumeOrder = state.orders.find(
+    candidate => candidate.id === 'order-public-resume-fal'
+  )
+  assert.equal(publicResumeJob?.status, 'needs_review')
+  assert.equal(publicResumeOrder?.status, 'needs_review')
+  assert.ok(publicResumeJob?.ai_draft_storage_path)
+
+  const stalePublicOriginalPath = 'manual/stale-public-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', stalePublicOriginalPath), {
+    buffer: Buffer.from('stale-public-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  const staleFalQueuedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
+  state.jobs.push({
+    ai_provider: 'fal',
+    ai_provider_payload: {
+      fal: {
+        model: 'fal-ai/image-editing/photo-restoration',
+        queued_at: staleFalQueuedAt,
+        response_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+        status_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+      },
+    },
+    ai_request_id: 'fal-request-1',
+    checkout_email: 'stale-public-fal@example.com',
+    created_at: staleFalQueuedAt,
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    human_restore_order_id: 'order-stale-public-fal',
+    id: 'job-stale-public-fal',
+    notes: 'Stale fal processing jobs should move to manual review.',
+    order_bound: true,
+    order_number: 'txn_stale_public_fal',
+    original_file_name: 'stale-public-fal.jpg',
+    original_file_size: Buffer.byteLength('stale-public-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: stalePublicOriginalPath,
+    status: 'processing',
+    submission_reference: 'MF-STALE-PUBLIC-FAL',
+    updated_at: staleFalQueuedAt,
+  })
+  state.orders.push({
+    checkout_email: 'stale-public-fal@example.com',
+    checkout_ref: 'checkout-stale-public-fal',
+    created_at: staleFalQueuedAt,
+    id: 'order-stale-public-fal',
+    job_id: 'job-stale-public-fal',
+    order_number: 'txn_stale_public_fal',
+    original_storage_path: stalePublicOriginalPath,
+    payment_confirmed_at: staleFalQueuedAt,
+    product_name: 'Human-assisted Restore',
+    status: 'processing',
+    submission_reference: 'MF-STALE-PUBLIC-FAL',
+    updated_at: staleFalQueuedAt,
+  })
+
+  state.falStatusSequence = ['IN_PROGRESS']
+  const stalePublicResponse = await invoke(orderHandler, {
+    method: 'GET',
+    query: {
+      checkoutRef: 'checkout-stale-public-fal',
+      orderId: 'order-stale-public-fal',
+    },
+  })
+
+  assert.equal(stalePublicResponse.statusCode, 200)
+  assert.equal(stalePublicResponse.body.order.status, 'manual_review')
+  const stalePublicJob = state.jobs.find(candidate => candidate.id === 'job-stale-public-fal')
+  const stalePublicOrder = state.orders.find(
+    candidate => candidate.id === 'order-stale-public-fal'
+  )
+  assert.equal(stalePublicJob?.status, 'manual_review')
+  assert.equal(stalePublicOrder?.status, 'manual_review')
+  assert.match(
+    stalePublicJob?.ai_error || '',
+    /fal\.ai processing did not finish within 60 minutes/
+  )
+
+  const stalePublicRequestIdBeforeSkip = stalePublicJob?.ai_request_id
+  const falPostCallsBeforeSkip = state.falPostCalls
+  const staleManualRetryResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-stale-public-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  const stalePublicJobAfterSkip = state.jobs.find(
+    candidate => candidate.id === 'job-stale-public-fal'
+  )
+  const stalePublicOrderAfterSkip = state.orders.find(
+    candidate => candidate.id === 'order-stale-public-fal'
+  )
+
+  assert.equal(staleManualRetryResponse.statusCode, 200)
+  assert.equal(staleManualRetryResponse.body.ok, true)
+  assert.equal(staleManualRetryResponse.body.skipped, true)
+  assert.equal(staleManualRetryResponse.body.job.status, 'manual_review')
+  assert.equal(staleManualRetryResponse.body.job.ai_request_id, stalePublicRequestIdBeforeSkip)
+  assert.equal(state.falPostCalls, falPostCallsBeforeSkip)
+  assert.equal(stalePublicJobAfterSkip?.status, 'manual_review')
+  assert.equal(stalePublicJobAfterSkip?.ai_request_id, stalePublicRequestIdBeforeSkip)
+  assert.equal(stalePublicOrderAfterSkip?.status, 'manual_review')
+
+  const manualOnlyOriginalPath = 'manual/manual-only-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', manualOnlyOriginalPath), {
+    buffer: Buffer.from('manual-only-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  const manualOnlyCreatedAt = new Date().toISOString()
+  state.jobs.push({
+    ai_provider: 'fal',
+    ai_provider_payload: {
+      fal: {
+        model: 'fal-ai/image-editing/photo-restoration',
+        queued_at: manualOnlyCreatedAt,
+        response_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-manual-only/response',
+        status_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-manual-only/status',
+      },
+    },
+    ai_request_id: 'fal-request-manual-only',
+    checkout_email: 'manual-only-fal@example.com',
+    created_at: manualOnlyCreatedAt,
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    human_restore_order_id: 'order-manual-only-fal',
+    id: 'job-manual-only-fal',
+    notes: 'Manual review jobs should require an explicit retry action.',
+    order_bound: true,
+    order_number: 'txn_manual_only_fal',
+    original_file_name: 'manual-only-fal.jpg',
+    original_file_size: Buffer.byteLength('manual-only-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: manualOnlyOriginalPath,
+    status: 'processing',
+    submission_reference: 'MF-MANUAL-ONLY-FAL',
+    updated_at: manualOnlyCreatedAt,
+  })
+  state.orders.push({
+    checkout_email: 'manual-only-fal@example.com',
+    checkout_ref: 'checkout-manual-only-fal',
+    created_at: manualOnlyCreatedAt,
+    id: 'order-manual-only-fal',
+    job_id: 'job-manual-only-fal',
+    order_number: 'txn_manual_only_fal',
+    original_storage_path: manualOnlyOriginalPath,
+    payment_confirmed_at: manualOnlyCreatedAt,
+    product_name: 'Human-assisted Restore',
+    status: 'processing',
+    submission_reference: 'MF-MANUAL-ONLY-FAL',
+    updated_at: manualOnlyCreatedAt,
+  })
+
+  const manualOnlyPatchResponse = await invoke(adminJobHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        jobId: 'job-manual-only-fal',
+        reviewNote: 'manually moved to manual review',
+        status: 'manual_review',
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'PATCH',
+  })
+  const falPostCallsBeforeManualOnlySkip = state.falPostCalls
+  const manualOnlyRetryResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-manual-only-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  const manualOnlyJob = state.jobs.find(candidate => candidate.id === 'job-manual-only-fal')
+  const manualOnlyOrder = state.orders.find(
+    candidate => candidate.id === 'order-manual-only-fal'
+  )
+
+  assert.equal(manualOnlyPatchResponse.statusCode, 200)
+  assert.equal(manualOnlyPatchResponse.body.job.status, 'manual_review')
+  assert.equal(manualOnlyRetryResponse.statusCode, 200)
+  assert.equal(manualOnlyRetryResponse.body.ok, true)
+  assert.equal(manualOnlyRetryResponse.body.skipped, true)
+  assert.equal(manualOnlyRetryResponse.body.job.status, 'manual_review')
+  assert.equal(manualOnlyRetryResponse.body.job.ai_request_id, 'fal-request-manual-only')
+  assert.equal(state.falPostCalls, falPostCallsBeforeManualOnlySkip)
+  assert.equal(manualOnlyJob?.status, 'manual_review')
+  assert.equal(manualOnlyOrder?.status, 'manual_review')
 
   const manualReviewResponse = await invoke(adminJobHandler, {
     body: Buffer.from(
@@ -1339,6 +1733,21 @@ async function main() {
     candidate => candidate.id === 'job-stuck-fal-existing-draft'
   )
   const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
+  const malformedSubmitFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-malformed-submit-fal'
+  )
+  const legacyMalformedFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-legacy-malformed-fal'
+  )
+  const publicResumeFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-public-resume-fal'
+  )
+  const manualOnlyFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-manual-only-fal'
+  )
+  const stalePublicFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-stale-public-fal'
+  )
 
   if (defaultFalJob) {
     defaultFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
@@ -1350,6 +1759,26 @@ async function main() {
 
   if (resumeFalJob) {
     resumeFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (malformedSubmitFalJob) {
+    malformedSubmitFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (legacyMalformedFalJob) {
+    legacyMalformedFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (publicResumeFalJob) {
+    publicResumeFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (manualOnlyFalJob) {
+    manualOnlyFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (stalePublicFalJob) {
+    stalePublicFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
   if (pendingFalJob) {
@@ -1377,8 +1806,13 @@ async function main() {
       retoucherJob.id,
       'job-default-fal',
       'job-fal-codeformer-fallback',
+      'job-legacy-malformed-fal',
+      'job-manual-only-fal',
+      'job-malformed-submit-fal',
       'job-pending-fal',
       'job-poll-failure-fal',
+      'job-public-resume-fal',
+      'job-stale-public-fal',
       'job-resume-fal',
       'job-stuck-fal-existing-draft',
     ].sort()
@@ -1387,8 +1821,13 @@ async function main() {
   assert.equal(retoucherJob.status, 'deleted')
   assert.equal(defaultFalJob?.status, 'deleted')
   assert.equal(falCodeformerFallbackJob?.status, 'deleted')
+  assert.equal(legacyMalformedFalJob?.status, 'deleted')
+  assert.equal(manualOnlyFalJob?.status, 'deleted')
+  assert.equal(malformedSubmitFalJob?.status, 'deleted')
   assert.equal(pendingFalJob?.status, 'deleted')
   assert.equal(pollFailureFalJob?.status, 'deleted')
+  assert.equal(publicResumeFalJob?.status, 'deleted')
+  assert.equal(stalePublicFalJob?.status, 'deleted')
   assert.equal(resumeFalJob?.status, 'deleted')
   assert.equal(stuckFalExistingDraftJob?.status, 'deleted')
   assert.equal(state.storage.size, 0)

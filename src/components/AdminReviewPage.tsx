@@ -1,11 +1,25 @@
 /* eslint-disable camelcase */
 /* eslint-disable react-hooks/exhaustive-deps */
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import AdminPipelineConfigurator, {
+  RestorePipeline,
+  RestorePipelineConfig,
+  StageDefinition,
+} from './AdminPipelineConfigurator'
 
 type RestoreJob = {
   ai_draft_model?: string | null
   ai_draft_provider?: string | null
   ai_draft_signed_url?: string
+  ai_provider_payload?: {
+    pipeline_id?: string | null
+    pipeline_name?: string | null
+    pipeline_runtime?: {
+      pipelineId?: string | null
+      pipelineName?: string | null
+      stages?: Array<{ id: string; type: string }>
+    } | null
+  } | null
   ai_draft_source?: string | null
   ai_error?: string | null
   ai_provider?: string | null
@@ -46,10 +60,12 @@ type Retoucher = {
 }
 
 type AdminApiResponse = {
+  config?: RestorePipelineConfig
   error?: string
   job?: RestoreJob
   jobs?: RestoreJob[]
   ok?: boolean
+  stageDefinitions?: StageDefinition[]
 }
 
 const statusOptions = [
@@ -63,6 +79,8 @@ const statusOptions = [
   { label: 'Delivered', value: 'delivered' },
   { label: 'All', value: 'all' },
 ]
+
+const processingRefreshIntervalMs = 8000
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -94,6 +112,15 @@ function formatFileSize(size?: number | null) {
 }
 
 function getAiDraftSummary(job: RestoreJob) {
+  const pipelineName =
+    job.ai_provider_payload?.pipeline_name ||
+    job.ai_provider_payload?.pipeline_runtime?.pipelineName ||
+    ''
+
+  if (pipelineName) {
+    return pipelineName
+  }
+
   if (job.ai_draft_source === 'fal_codeformer') {
     return 'fal + codeformer'
   }
@@ -102,6 +129,10 @@ function getAiDraftSummary(job: RestoreJob) {
   const model = job.ai_draft_model || job.result_model || 'unknown'
 
   return `${provider} / ${model}`
+}
+
+function isManualReviewDefaultProcessDisabled(job?: RestoreJob | null) {
+  return Boolean(job && job.status === 'manual_review')
 }
 
 function getStoredAdminToken() {
@@ -153,14 +184,54 @@ export default function AdminReviewPage() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [busyJobId, setBusyJobId] = useState('')
+  const [pipelineConfig, setPipelineConfig] =
+    useState<RestorePipelineConfig | null>(null)
+  const [savingPipelineConfig, setSavingPipelineConfig] = useState(false)
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
   const [retouchers, setRetouchers] = useState<Retoucher[]>([])
+  const [stageDefinitions, setStageDefinitions] = useState<StageDefinition[]>(
+    []
+  )
   const [assignRetoucherId, setAssignRetoucherId] = useState('')
 
   const selectedJob = useMemo(
-    () => jobs.find(job => job.id === selectedJobId) || jobs[0] || null,
+    () => jobs.find(job => job.id === selectedJobId) || null,
     [jobs, selectedJobId]
   )
+  const enabledPipelines = useMemo(
+    () => pipelineConfig?.pipelines.filter(pipeline => pipeline.enabled) || [],
+    [pipelineConfig]
+  )
+  const defaultPipeline = useMemo(
+    () =>
+      enabledPipelines.find(
+        pipeline => pipeline.id === pipelineConfig?.defaultPipelineId
+      ) ||
+      enabledPipelines[0] ||
+      null,
+    [enabledPipelines, pipelineConfig?.defaultPipelineId]
+  )
+  const defaultAiRetryDisabled =
+    busyJobId === selectedJob?.id ||
+    isManualReviewDefaultProcessDisabled(selectedJob)
+  let defaultAiRetryLabel = defaultPipeline
+    ? `Run default pipeline · ${defaultPipeline.name}`
+    : 'Run default pipeline'
+
+  if (selectedJob?.status === 'processing') {
+    defaultAiRetryLabel = 'Refresh current pipeline'
+  }
+
+  if (isManualReviewDefaultProcessDisabled(selectedJob)) {
+    defaultAiRetryLabel = 'Use explicit pipeline action'
+  }
+
+  useEffect(() => {
+    if (!adminToken) return
+    loadJobs(statusFilter)
+    loadPipelineConfig()
+    loadRetouchers()
+  }, [adminToken, statusFilter])
 
   async function adminFetch(path: string, options: RequestInit = {}) {
     const response = await fetch(path, {
@@ -214,6 +285,53 @@ export default function AdminReviewPage() {
     }
   }
 
+  async function loadPipelineConfig() {
+    if (!adminToken) {
+      return
+    }
+
+    try {
+      const body = await adminFetch('/api/admin/human-restore-pipelines')
+
+      setPipelineConfig(body.config || null)
+      setStageDefinitions(body.stageDefinitions || [])
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not load restore pipelines.'
+      )
+    }
+  }
+
+  async function savePipelineConfig() {
+    if (!pipelineConfig) {
+      return
+    }
+
+    setSavingPipelineConfig(true)
+    setMessage('')
+
+    try {
+      const body = await adminFetch('/api/admin/human-restore-pipelines', {
+        method: 'POST',
+        body: JSON.stringify({ config: pipelineConfig }),
+      })
+
+      setPipelineConfig(body.config || pipelineConfig)
+      setStageDefinitions(body.stageDefinitions || [])
+      setMessage('Restore pipeline config saved.')
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not save restore pipelines.'
+      )
+    } finally {
+      setSavingPipelineConfig(false)
+    }
+  }
+
   function onUnlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalizedToken = tokenInput.trim()
@@ -255,25 +373,15 @@ export default function AdminReviewPage() {
     }
   }
 
-  function processJob(
-    job: RestoreJob,
-    provider?: 'fal' | 'openai' | 'replicate',
-    modelPreset?: 'codeformer' | 'gfpgan'
-  ) {
+  function processJob(job: RestoreJob, pipelineId?: string) {
+    const requestedPipeline = enabledPipelines.find(
+      pipeline => pipeline.id === pipelineId
+    )
     let successMessage =
       'AI restore job updated. Review the result or refresh if it is still processing.'
 
-    if (provider) {
-      successMessage = `${provider} restore job updated. Review the result or refresh if it is still processing.`
-    }
-
-    if (provider === 'fal' && !modelPreset) {
-      successMessage =
-        'fal + CodeFormer restore job updated. Review the result or refresh if it is still processing.'
-    }
-
-    if (modelPreset) {
-      successMessage = `${modelPreset} draft updated. Review the result or refresh if it is still processing.`
+    if (requestedPipeline) {
+      successMessage = `${requestedPipeline.name} updated. Review the result or refresh if it is still processing.`
     }
 
     runAction(
@@ -281,7 +389,7 @@ export default function AdminReviewPage() {
       () =>
         adminFetch('/api/admin/human-restore-process', {
           method: 'POST',
-          body: JSON.stringify({ jobId: job.id, modelPreset, provider }),
+          body: JSON.stringify({ jobId: job.id, pipelineId }),
         }),
       successMessage
     )
@@ -375,11 +483,36 @@ export default function AdminReviewPage() {
   }
 
   useEffect(() => {
-    if (adminToken) {
-      loadJobs(statusFilter)
-      loadRetouchers()
+    if (!adminToken || !selectedJob || selectedJob.status !== 'processing') {
+      return undefined
     }
-  }, [adminToken, statusFilter])
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const body = await adminFetch('/api/admin/human-restore-process', {
+          method: 'POST',
+          body: JSON.stringify({ jobId: selectedJob.id }),
+        })
+
+        if (body.job) {
+          setJobs(currentJobs =>
+            currentJobs.map(job => (job.id === body.job?.id ? body.job : job))
+          )
+          setSelectedJobId(body.job.id)
+        }
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : 'Could not refresh restore job.'
+        )
+      }
+    }, processingRefreshIntervalMs)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [adminToken, selectedJob?.id, selectedJob?.status])
 
   if (!adminToken) {
     return (
@@ -488,6 +621,15 @@ export default function AdminReviewPage() {
           </p>
         )}
       </section>
+
+      <AdminPipelineConfigurator
+        config={pipelineConfig}
+        onChange={setPipelineConfig}
+        onReload={loadPipelineConfig}
+        onSave={savePipelineConfig}
+        saving={savingPipelineConfig}
+        stageDefinitions={stageDefinitions}
+      />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[0.9fr_1.4fr]">
         <aside className="grid content-start gap-3">
@@ -749,50 +891,31 @@ export default function AdminReviewPage() {
             <div className="mt-6 flex flex-wrap gap-3">
               <button
                 type="button"
-                disabled={busyJobId === selectedJob.id}
+                disabled={defaultAiRetryDisabled}
                 onClick={() => processJob(selectedJob)}
                 className="rounded-full bg-[#211915] px-6 py-3 font-black text-white shadow-xl shadow-[#211915]/20 transition hover:-translate-y-1 disabled:opacity-60"
               >
-                {selectedJob.status === 'processing'
-                  ? 'Refresh AI restore'
-                  : 'Run AI restore'}
+                {defaultAiRetryLabel}
               </button>
-              <button
-                type="button"
-                disabled={busyJobId === selectedJob.id}
-                onClick={() =>
-                  processJob(selectedJob, 'replicate', 'codeformer')
-                }
-                className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
-              >
-                {selectedJob.status === 'processing'
-                  ? 'Refresh CodeFormer only'
-                  : 'Run CodeFormer only'}
-              </button>
-              <button
-                type="button"
-                disabled={busyJobId === selectedJob.id}
-                onClick={() => processJob(selectedJob, 'replicate', 'gfpgan')}
-                className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
-              >
-                Retry GFPGAN
-              </button>
-              <button
-                type="button"
-                disabled={busyJobId === selectedJob.id}
-                onClick={() => processJob(selectedJob, 'openai')}
-                className="rounded-full border border-[#d7b98c] px-6 py-3 font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
-              >
-                Retry with OpenAI
-              </button>
-              <button
-                type="button"
-                disabled={busyJobId === selectedJob.id}
-                onClick={() => processJob(selectedJob, 'fal')}
-                className="rounded-full border border-[#d7b98c] px-6 py-3 font-black text-[#5b4a40] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
-              >
-                Run fal + CodeFormer
-              </button>
+              {enabledPipelines.map((pipeline: RestorePipeline) => {
+                const isCurrentPipelineProcessing =
+                  selectedJob.ai_provider_payload?.pipeline_id ===
+                    pipeline.id && selectedJob.status === 'processing'
+
+                return (
+                  <button
+                    key={pipeline.id}
+                    type="button"
+                    disabled={busyJobId === selectedJob.id}
+                    onClick={() => processJob(selectedJob, pipeline.id)}
+                    className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
+                  >
+                    {isCurrentPipelineProcessing
+                      ? `Refresh ${pipeline.name}`
+                      : `Run ${pipeline.name}`}
+                  </button>
+                )
+              })}
               <button
                 type="button"
                 disabled={

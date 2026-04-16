@@ -3,10 +3,68 @@ import {
   maskEmail,
   verifyOrderUploadToken,
 } from './_lib/human-restore.js'
-import { getOrder, getOrderByCheckoutRef } from './_lib/supabase.js'
+import { runRestoreJob } from './_lib/ai-restore.js'
+import {
+  getJob,
+  getOrder,
+  getOrderByCheckoutRef,
+  updateOrderByJobId,
+} from './_lib/supabase.js'
 
 function isPaymentConfirmed(status) {
   return !['pending_payment', 'expired', 'failed', 'deleted'].includes(status)
+}
+
+function mapJobStatusToOrderStatus(status) {
+  const supportedStatuses = new Set([
+    'uploaded',
+    'processing',
+    'ai_queued',
+    'ai_failed',
+    'needs_review',
+    'manual_review',
+    'delivered',
+    'failed',
+  ])
+
+  return supportedStatuses.has(status) ? status : 'paid'
+}
+
+function shouldResumeLinkedFalJob(job) {
+  return Boolean(
+    job &&
+      job.status === 'processing' &&
+      job.ai_provider === 'fal' &&
+      job.ai_request_id
+  )
+}
+
+async function syncOrderWithLinkedJob(order) {
+  if (!order?.job_id) {
+    return order
+  }
+
+  const linkedJob = await getJob(order.job_id)
+
+  if (!linkedJob) {
+    return order
+  }
+
+  let effectiveJob = linkedJob
+
+  if (shouldResumeLinkedFalJob(linkedJob)) {
+    effectiveJob = await runRestoreJob({ job: linkedJob }).catch(() => linkedJob)
+  }
+
+  const nextOrderStatus = mapJobStatusToOrderStatus(effectiveJob.status)
+
+  if (nextOrderStatus === order.status) {
+    return order
+  }
+
+  return (await updateOrderByJobId(effectiveJob.id, {
+    status: nextOrderStatus,
+  })) || order
 }
 
 function buildPublicOrder(order) {
@@ -102,6 +160,8 @@ export default async function handler(req, res) {
       json(res, 403, { error: 'Checkout reference does not match this order.' })
       return
     }
+
+    order = await syncOrderWithLinkedJob(order)
 
     json(res, 200, {
       ok: true,

@@ -6,20 +6,21 @@ import {
   updateJob,
   uploadObject,
 } from './supabase.js'
+import {
+  buildLegacyRequestedPipeline,
+  findPipelineById,
+  getDefaultPipeline,
+  readPipelineConfig,
+  summarizePipeline,
+} from './restore-pipeline-config.js'
 
 const defaultFalModel = 'fal-ai/image-editing/photo-restoration'
+const defaultFalProcessingTimeoutMinutes = 60
 const defaultOpenAIImageModel = 'gpt-image-1.5'
 const defaultReplicateCodeformerModel = 'lucataco/codeformer'
 const defaultReplicateGfpganModel =
   'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
 const defaultReplicatePreset = 'codeformer'
-
-function getCodeformerPipelineEnabled() {
-  return (
-    process.env.FAL_RESTORE_ENABLE_CODEFORMER_PIPELINE !== 'false' &&
-    Boolean(process.env.REPLICATE_API_TOKEN)
-  )
-}
 
 function wait(ms) {
   return new Promise(resolve => {
@@ -148,42 +149,15 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, numericValue))
 }
 
-function getProvider(requestedProvider, modelPreset) {
-  if (normalizeModelPreset(modelPreset) && process.env.REPLICATE_API_TOKEN) {
-    return 'replicate'
-  }
-
-  if (requestedProvider) {
-    return requestedProvider
-  }
-
-  const configuredProvider = process.env.AI_RESTORE_PROVIDER
-
-  if (configuredProvider === 'replicate' && process.env.REPLICATE_API_TOKEN) {
-    return 'replicate'
-  }
-
-  if (configuredProvider === 'fal' && process.env.FAL_KEY) {
-    return 'fal'
-  }
-
-  if (configuredProvider === 'openai' && process.env.OPENAI_API_KEY) {
-    return 'openai'
-  }
-
-  if (process.env.REPLICATE_API_TOKEN) {
-    return 'replicate'
-  }
-
-  if (process.env.FAL_KEY) {
-    return 'fal'
-  }
-
-  if (process.env.OPENAI_API_KEY) {
-    return 'openai'
-  }
-
-  return ''
+function getFalProcessingTimeoutMs() {
+  return (
+    clampNumber(
+      process.env.FAL_RESTORE_MAX_PROCESSING_MINUTES,
+      5,
+      24 * 60,
+      defaultFalProcessingTimeoutMinutes
+    ) * 60 * 1000
+  )
 }
 
 function extractFalImageUrl(payload) {
@@ -308,7 +282,7 @@ async function submitFalRequest({ imageUrl, prompt }) {
     throw new Error('FAL_KEY is not configured.')
   }
 
-  const model = process.env.FAL_RESTORE_MODEL || defaultFalModel
+  const model = normalizeFalModel(process.env.FAL_RESTORE_MODEL || defaultFalModel)
   const input = {
     guidance_scale: Number(process.env.FAL_RESTORE_GUIDANCE_SCALE) || 3.5,
     image_url: imageUrl,
@@ -339,9 +313,9 @@ async function submitFalRequest({ imageUrl, prompt }) {
   }
 
   const requestId = payload?.request_id || payload?.requestId || payload?.id
-  const statusUrl =
+  const rawStatusUrl =
     payload?.status_url || payload?.statusUrl || payload?.urls?.status || ''
-  const resultUrl =
+  const rawResultUrl =
     payload?.response_url ||
     payload?.responseUrl ||
     payload?.result_url ||
@@ -366,28 +340,46 @@ async function submitFalRequest({ imageUrl, prompt }) {
     throw new Error('fal.ai did not return a request id.')
   }
 
+  const queuePayload = buildFalQueuePayload({
+    model,
+    queuedAt: new Date().toISOString(),
+    requestId,
+  })
+
   return {
     model,
     provider: 'fal',
     providerPayload: {
-      request_id: requestId,
-      response_url: resultUrl,
-      status_url: statusUrl,
+      ...queuePayload,
+      raw_response_url: rawResultUrl || null,
+      raw_status_url: rawStatusUrl || null,
     },
     requestId,
-    resultUrl,
-    statusUrl,
+    resultUrl: rawResultUrl || queuePayload.response_url,
+    statusUrl: rawStatusUrl || queuePayload.status_url,
   }
 }
 
 async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   const falKey = process.env.FAL_KEY
-  const normalizedStatusUrl =
-    statusUrl ||
-    `https://queue.fal.run/${model}/requests/${requestId}/status`
-  const normalizedResultUrl =
-    responseUrl ||
-    `https://queue.fal.run/${model}/requests/${requestId}/response`
+
+  if (!requestId) {
+    throw new Error('fal.ai request id is required for polling.')
+  }
+
+  const normalizedModel = normalizeFalModel(model)
+  const normalizedStatusUrl = buildFalQueueUrl({
+    model: normalizedModel,
+    requestId,
+    type: 'status',
+  })
+  const normalizedResultUrl = buildFalQueueUrl({
+    model: normalizedModel,
+    requestId,
+    type: 'response',
+  })
+  const rawResponseUrl = String(responseUrl || '').trim()
+  const rawStatusUrl = String(statusUrl || '').trim()
 
   const statusResponse = await fetch(normalizedStatusUrl, {
     method: 'POST',
@@ -460,9 +452,15 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
 
   return {
     ...fetched,
-    model,
+    model: normalizedModel,
     provider: 'fal',
-    providerPayload: { source: 'queue_result' },
+    providerPayload: {
+      ...buildFalQueuePayload({ model: normalizedModel, requestId }),
+      raw_response_url: rawResponseUrl || null,
+      raw_status_url: rawStatusUrl || null,
+      source: 'queue_result',
+    },
+    requestId,
   }
 }
 
@@ -653,12 +651,14 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
   }
 }
 
-async function callFal({ job, prompt }) {
-  const imageUrl = await createSignedUrl({
-    bucket: job.original_storage_bucket,
-    expiresIn: 60 * 30,
-    path: job.original_storage_path,
-  })
+async function callFal({ imageUrlOverride, job, prompt }) {
+  const imageUrl =
+    imageUrlOverride ||
+    (await createSignedUrl({
+      bucket: job.original_storage_bucket,
+      expiresIn: 60 * 30,
+      path: job.original_storage_path,
+    }))
   const queuedOrImmediate = await submitFalRequest({ imageUrl, prompt })
 
   if (queuedOrImmediate.buffer) {
@@ -683,19 +683,23 @@ async function callFal({ job, prompt }) {
       })
     } catch (error) {
       if (shouldReturnFalPending(error)) {
+        if (job.ai_draft_storage_path || job.result_storage_path) {
+          return settleExistingDraftForReview(job)
+        }
+
+        const pendingProviderPayload =
+          queuedOrImmediate.providerPayload ||
+          buildFalQueuePayload({
+            model: queuedOrImmediate.model,
+            requestId: queuedOrImmediate.requestId,
+          })
+
         return {
           model: queuedOrImmediate.model,
           provider: 'fal',
-          providerPayload:
-            queuedOrImmediate.providerPayload || {
-              request_id: queuedOrImmediate.requestId,
-              response_url: queuedOrImmediate.resultUrl,
-              status_url: queuedOrImmediate.statusUrl,
-            },
+          providerPayload: pendingProviderPayload,
           requestId: queuedOrImmediate.requestId,
-          responseUrl: queuedOrImmediate.resultUrl,
           status: 'pending',
-          statusUrl: queuedOrImmediate.statusUrl,
         }
       }
 
@@ -723,52 +727,8 @@ async function callFal({ job, prompt }) {
   }
 }
 
-async function runCodeformerStage({ contentType, imageBuffer, job }) {
-  const buckets = getHumanRestoreBuckets()
-  const extension = inferImageExtension(contentType)
-  const tempPath = `${
-    job.submission_reference
-  }/pipeline-stage-${Date.now()}.${extension}`
-
-  await uploadObject({
-    bucket: buckets.results,
-    contentType: contentType || 'image/png',
-    data: imageBuffer,
-    path: tempPath,
-  })
-
-  try {
-    const signedUrl = await createSignedUrl({
-      bucket: buckets.results,
-      expiresIn: 60 * 30,
-      path: tempPath,
-    })
-
-    return await callReplicate({
-      imageUrlOverride: signedUrl,
-      job,
-      modelPreset: 'codeformer',
-    })
-  } finally {
-    await deleteObject({
-      bucket: buckets.results,
-      path: tempPath,
-    }).catch(() => null)
-  }
-}
-
-function buildFalOnlyResult({ falResult, codeformerError }) {
-  return {
-    ...falResult,
-    model: falResult.model,
-    provider: 'fal',
-    providerPayload: {
-      codeformer_error: codeformerError || null,
-      fal: falResult.providerPayload || {},
-      pipeline: ['fal'],
-    },
-    source: 'fal',
-  }
+function getPipelineSource(pipeline) {
+  return pipeline?.id ? `pipeline:${pipeline.id}` : 'pipeline'
 }
 
 async function settleExistingDraftForReview(job) {
@@ -779,38 +739,784 @@ async function settleExistingDraftForReview(job) {
   })
 }
 
-async function callFalCodeformerPipeline({ job, prompt }) {
-  const falResult = await callFal({ job, prompt })
-
-  if (falResult.status === 'pending') {
-    return falResult
+function getStageProvider(stage) {
+  if (stage?.type === 'fal') {
+    return 'fal'
   }
 
-  try {
-    const codeformerResult = await runCodeformerStage({
-      contentType: falResult.contentType,
-      imageBuffer: falResult.buffer,
-      job,
+  if (stage?.type === 'openai') {
+    return 'openai'
+  }
+
+  return 'replicate'
+}
+
+function getStageModelPreset(stage) {
+  if (stage?.type === 'replicate_gfpgan') {
+    return 'gfpgan'
+  }
+
+  if (stage?.type === 'replicate_codeformer') {
+    return 'codeformer'
+  }
+
+  return ''
+}
+
+function getStageSource(stageType) {
+  if (stageType === 'replicate_codeformer') {
+    return 'replicate_codeformer'
+  }
+
+  if (stageType === 'replicate_gfpgan') {
+    return 'replicate_gfpgan'
+  }
+
+  if (stageType === 'openai') {
+    return 'openai'
+  }
+
+  if (stageType === 'fal') {
+    return 'fal'
+  }
+
+  return ''
+}
+
+function getPipelineStageTypes(pipeline) {
+  return Array.isArray(pipeline?.stages)
+    ? pipeline.stages.map(stage => String(stage?.type || ''))
+    : []
+}
+
+function isFalCodeformerPipeline(pipeline) {
+  const stageTypes = getPipelineStageTypes(pipeline)
+
+  return (
+    stageTypes.length === 2 &&
+    stageTypes[0] === 'fal' &&
+    stageTypes[1] === 'replicate_codeformer'
+  )
+}
+
+function getJobProviderPayload(job) {
+  return job?.ai_provider_payload && typeof job.ai_provider_payload === 'object'
+    ? job.ai_provider_payload
+    : {}
+}
+
+function normalizePipelineStages(stages) {
+  if (!Array.isArray(stages)) {
+    return []
+  }
+
+  return stages
+    .map((stage, index) => {
+      const type = String(stage?.type || '').trim()
+
+      if (!type) {
+        return null
+      }
+
+      return {
+        id: String(stage?.id || `${type}-${index + 1}`),
+        type,
+      }
+    })
+    .filter(Boolean)
+}
+
+function normalizePipelineTrace(trace) {
+  if (!Array.isArray(trace)) {
+    return []
+  }
+
+  return trace
+    .map(item => {
+      if (!item || typeof item !== 'object') {
+        return null
+      }
+
+      return {
+        model: String(item.model || ''),
+        provider: String(item.provider || ''),
+        providerPayload:
+          item.providerPayload && typeof item.providerPayload === 'object'
+            ? { ...item.providerPayload }
+            : {},
+        stageId: String(item.stageId || ''),
+        stageType: String(item.stageType || ''),
+      }
+    })
+    .filter(Boolean)
+}
+
+function normalizeTempInputs(tempInputs) {
+  if (!Array.isArray(tempInputs)) {
+    return []
+  }
+
+  const seen = new Set()
+
+  return tempInputs
+    .map(input => {
+      if (!input || typeof input !== 'object') {
+        return null
+      }
+
+      const bucket = String(input.bucket || '').trim()
+      const path = String(input.path || '').trim()
+
+      if (!bucket || !path) {
+        return null
+      }
+
+      const key = `${bucket}/${path}`
+
+      if (seen.has(key)) {
+        return null
+      }
+
+      seen.add(key)
+
+      return { bucket, path }
+    })
+    .filter(Boolean)
+}
+
+function getStoredPipelineRuntime(job) {
+  const payload = getJobProviderPayload(job)
+  const runtime = payload.pipeline_runtime
+
+  if (!runtime || typeof runtime !== 'object') {
+    return null
+  }
+
+  return {
+    currentStageIndex: Math.max(0, Number(runtime.currentStageIndex) || 0),
+    pipelineId: String(runtime.pipelineId || ''),
+    pipelineName: String(runtime.pipelineName || ''),
+    stages: normalizePipelineStages(runtime.stages),
+    startedAt: String(runtime.startedAt || ''),
+    tempInputs: normalizeTempInputs(runtime.tempInputs),
+    trace: normalizePipelineTrace(runtime.trace),
+    updatedAt: String(runtime.updatedAt || ''),
+  }
+}
+
+function buildPipelineFromRuntime(runtime) {
+  if (!runtime?.stages?.length) {
+    return null
+  }
+
+  return {
+    enabled: true,
+    id: runtime.pipelineId || 'saved-pipeline',
+    name: runtime.pipelineName || 'Saved pipeline',
+    stages: normalizePipelineStages(runtime.stages),
+  }
+}
+
+function buildLegacyResumePipeline(job) {
+  const payload = getJobProviderPayload(job)
+  const pipelineStages = Array.isArray(payload.pipeline)
+    ? payload.pipeline
+        .map((stageType, index) => {
+          const type = String(stageType || '').trim()
+
+          if (!type) {
+            return null
+          }
+
+          return {
+            id: `${type}-${index + 1}`,
+            type,
+          }
+        })
+        .filter(Boolean)
+    : []
+
+  if (pipelineStages.length) {
+    return {
+      enabled: true,
+      id: String(payload.pipeline_id || 'legacy-pipeline'),
+      name: String(payload.pipeline_name || 'Saved pipeline'),
+      stages: pipelineStages,
+    }
+  }
+
+  const source = String(job?.ai_draft_source || '').trim().toLowerCase()
+
+  if (source === 'fal_codeformer') {
+    return {
+      enabled: true,
+      id: 'legacy-fal-codeformer',
+      name: 'fal + CodeFormer',
+      stages: [
+        { id: 'fal-1', type: 'fal' },
+        { id: 'replicate-codeformer-2', type: 'replicate_codeformer' },
+      ],
+    }
+  }
+
+  if (source.startsWith('replicate_')) {
+    return buildLegacyRequestedPipeline({
+      modelPreset: source.slice('replicate_'.length),
+      provider: 'replicate',
+    })
+  }
+
+  return buildLegacyRequestedPipeline({ provider: job?.ai_provider })
+}
+
+function buildPipelineRuntime({
+  currentStageIndex,
+  existingRuntime,
+  pipeline,
+  tempInputs,
+  trace,
+}) {
+  return {
+    currentStageIndex: Math.max(0, Number(currentStageIndex) || 0),
+    pipelineId: String(pipeline?.id || existingRuntime?.pipelineId || ''),
+    pipelineName: summarizePipeline(pipeline) || existingRuntime?.pipelineName || '',
+    stages: normalizePipelineStages(pipeline?.stages || existingRuntime?.stages),
+    startedAt:
+      existingRuntime?.startedAt ||
+      new Date().toISOString(),
+    tempInputs:
+      tempInputs !== undefined
+        ? normalizeTempInputs(tempInputs)
+        : normalizeTempInputs(existingRuntime?.tempInputs),
+    trace:
+      trace !== undefined
+        ? normalizePipelineTrace(trace)
+        : normalizePipelineTrace(existingRuntime?.trace),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function buildTraceEntry({ result, stage }) {
+  return {
+    model: String(result?.model || ''),
+    provider: String(result?.provider || ''),
+    providerPayload:
+      result?.providerPayload && typeof result.providerPayload === 'object'
+        ? { ...result.providerPayload }
+        : {},
+    stageId: String(stage?.id || ''),
+    stageType: String(stage?.type || ''),
+  }
+}
+
+function createRuntimeAwareProviderPayload({ job, provider, providerPayload, runtime }) {
+  const mergedPayload =
+    provider === 'fal'
+      ? mergeFalProviderPayload(job?.ai_provider_payload, providerPayload || {})
+      : providerPayload && typeof providerPayload === 'object'
+        ? { ...providerPayload }
+        : {}
+
+  return {
+    ...mergedPayload,
+    pipeline: runtime.stages.map(stage => stage.type),
+    pipeline_id: runtime.pipelineId || null,
+    pipeline_name: runtime.pipelineName || '',
+    pipeline_runtime: runtime,
+  }
+}
+
+async function ensureStageInputBuffer(input) {
+  if (input?.buffer) {
+    return input
+  }
+
+  if (input?.storage?.bucket && input?.storage?.path) {
+    const downloaded = await downloadObject({
+      bucket: input.storage.bucket,
+      path: input.storage.path,
     })
 
     return {
-      ...codeformerResult,
-      model: `${falResult.model} -> ${codeformerResult.model}`,
-      provider: 'fal',
-      providerPayload: {
-        codeformer: codeformerResult.providerPayload || {},
-        fal: falResult.providerPayload || {},
-        pipeline: ['fal', 'replicate_codeformer'],
-      },
-      source: 'fal_codeformer',
+      ...input,
+      buffer: downloaded.buffer,
+      contentType: input.contentType || downloaded.contentType,
     }
-  } catch (error) {
-    return buildFalOnlyResult({
-      falResult,
-      codeformerError:
-        error instanceof Error ? error.message : 'CodeFormer enhancement failed.',
+  }
+
+  throw new Error('No input image available for the pipeline stage.')
+}
+
+async function createStageInputAsset({ contentType, imageBuffer, job, stage }) {
+  const buckets = getHumanRestoreBuckets()
+  const extension = inferImageExtension(contentType)
+  const path = `${
+    job.submission_reference
+  }/pipeline-input-${stage.id}-${Date.now()}.${extension}`
+  const bucket = buckets.results
+
+  await uploadObject({
+    bucket,
+    contentType: contentType || 'image/png',
+    data: imageBuffer,
+    path,
+  })
+
+  return {
+    bucket,
+    path,
+    signedUrl: await createSignedUrl({
+      bucket,
+      expiresIn: stage?.type === 'fal' ? 24 * 60 * 60 : 60 * 30,
+      path,
+    }),
+  }
+}
+
+async function resolveStageInputUrl({ input, job, stage }) {
+  if (input?.storage?.bucket && input?.storage?.path) {
+    return {
+      signedUrl: await createSignedUrl({
+        bucket: input.storage.bucket,
+        expiresIn: stage?.type === 'fal' ? 24 * 60 * 60 : 60 * 30,
+        path: input.storage.path,
+      }),
+      tempStorage: null,
+    }
+  }
+
+  const resolvedInput = await ensureStageInputBuffer(input)
+  const uploaded = await createStageInputAsset({
+    contentType: resolvedInput.contentType,
+    imageBuffer: resolvedInput.buffer,
+    job,
+    stage,
+  })
+
+  return {
+    signedUrl: uploaded.signedUrl,
+    tempStorage: {
+      bucket: uploaded.bucket,
+      path: uploaded.path,
+    },
+  }
+}
+
+async function cleanupPipelineTempInputs(tempInputs) {
+  const normalizedInputs = normalizeTempInputs(tempInputs)
+
+  await Promise.all(
+    normalizedInputs.map(input =>
+      deleteObject({ bucket: input.bucket, path: input.path }).catch(() => null)
+    )
+  )
+}
+
+async function runPipelineStage({ input, isResume, job, prompt, stage }) {
+  if (stage?.type === 'fal' && isResume) {
+    const falResumePayload = getFalResumePayload(job)
+
+    try {
+      const polled = await pollFalRequest({
+        model: falResumePayload.model,
+        requestId: falResumePayload.requestId,
+        responseUrl: falResumePayload.rawResponseUrl,
+        statusUrl: falResumePayload.rawStatusUrl,
+      })
+
+      if (polled.status === 'pending') {
+        return {
+          ...polled,
+          providerPayload: falResumePayload.providerPayload,
+          requestId: falResumePayload.requestId,
+        }
+      }
+
+      return polled
+    } catch (error) {
+      if (shouldReturnFalPending(error)) {
+        return {
+          model: falResumePayload.model,
+          provider: 'fal',
+          providerPayload: falResumePayload.providerPayload,
+          requestId: falResumePayload.requestId,
+          status: 'pending',
+        }
+      }
+
+      throw error
+    }
+  }
+
+  if (stage?.type === 'openai') {
+    const resolvedInput = await ensureStageInputBuffer(input)
+
+    return callOpenAI({
+      imageBuffer: resolvedInput.buffer,
+      imageContentType: resolvedInput.contentType,
+      job,
+      prompt,
     })
   }
+
+  if (
+    stage?.type === 'replicate_codeformer' ||
+    stage?.type === 'replicate_gfpgan'
+  ) {
+    const { signedUrl, tempStorage } = await resolveStageInputUrl({
+      input,
+      job,
+      stage,
+    })
+
+    try {
+      return await callReplicate({
+        imageUrlOverride: signedUrl,
+        job,
+        modelPreset: getStageModelPreset(stage),
+      })
+    } finally {
+      if (tempStorage) {
+        await deleteObject({
+          bucket: tempStorage.bucket,
+          path: tempStorage.path,
+        }).catch(() => null)
+      }
+    }
+  }
+
+  if (stage?.type === 'fal') {
+    const { signedUrl, tempStorage } = await resolveStageInputUrl({
+      input,
+      job,
+      stage,
+    })
+
+    try {
+      const result = await callFal({
+        imageUrlOverride: signedUrl,
+        job,
+        prompt,
+      })
+
+      if (result.status === 'pending') {
+        return {
+          ...result,
+          pendingInputStorage: tempStorage,
+        }
+      }
+
+      if (tempStorage) {
+        await deleteObject({
+          bucket: tempStorage.bucket,
+          path: tempStorage.path,
+        }).catch(() => null)
+      }
+
+      return result
+    } catch (error) {
+      if (tempStorage) {
+        await deleteObject({
+          bucket: tempStorage.bucket,
+          path: tempStorage.path,
+        }).catch(() => null)
+      }
+
+      throw error
+    }
+  }
+
+  throw new Error(`Unsupported pipeline stage: ${stage?.type || 'unknown'}`)
+}
+
+function buildFinalPipelineProviderPayload({
+  completedStage,
+  error,
+  pipeline,
+  result,
+  runtime,
+}) {
+  const pipelineMetadata = {
+    pipeline: runtime.stages.map(stage => stage.type),
+    pipeline_id: runtime.pipelineId || null,
+    pipeline_name: runtime.pipelineName || summarizePipeline(pipeline),
+    pipeline_runtime: runtime,
+    pipeline_trace: runtime.trace,
+  }
+
+  if (isFalCodeformerPipeline(pipeline)) {
+    const falTrace = runtime.trace.find(item => item.stageType === 'fal')
+    const codeformerTrace = runtime.trace.find(
+      item => item.stageType === 'replicate_codeformer'
+    )
+
+    if (completedStage?.type === 'replicate_codeformer' && !error) {
+      return {
+        ...pipelineMetadata,
+        codeformer: codeformerTrace?.providerPayload || result.providerPayload || {},
+        fal: falTrace?.providerPayload || {},
+      }
+    }
+
+    if (completedStage?.type === 'fal') {
+      return {
+        ...pipelineMetadata,
+        codeformer_error:
+          error instanceof Error
+            ? error.message
+            : error
+              ? String(error)
+              : null,
+        fal: falTrace?.providerPayload || result.providerPayload || {},
+        pipeline: ['fal'],
+      }
+    }
+  }
+
+  return {
+    ...(result.providerPayload && typeof result.providerPayload === 'object'
+      ? result.providerPayload
+      : {}),
+    ...pipelineMetadata,
+    pipeline_error:
+      error instanceof Error
+        ? error.message
+        : error
+          ? String(error)
+          : null,
+  }
+}
+
+function buildPipelineResult({ completedStage, error, pipeline, result, runtime }) {
+  const modelTrace = runtime.trace
+    .map(item => item.model)
+    .filter(Boolean)
+
+  let provider = result.provider
+  let source =
+    getStageSource(completedStage?.type || '') || getPipelineSource(pipeline)
+
+  if (isFalCodeformerPipeline(pipeline)) {
+    if (completedStage?.type === 'replicate_codeformer' && !error) {
+      provider = 'fal'
+      source = 'fal_codeformer'
+    } else if (completedStage?.type === 'fal') {
+      provider = 'fal'
+      source = 'fal'
+    }
+  }
+
+  return {
+    ...result,
+    model: modelTrace.length ? modelTrace.join(' -> ') : result.model,
+    provider,
+    providerPayload: buildFinalPipelineProviderPayload({
+      completedStage,
+      error,
+      pipeline,
+      result,
+      runtime,
+    }),
+    source,
+  }
+}
+
+async function finalizePipelineResult({
+  completedStage,
+  error,
+  job,
+  pipeline,
+  prompt,
+  result,
+  runtime,
+}) {
+  const finalizedResult = buildPipelineResult({
+    completedStage,
+    error,
+    pipeline,
+    result,
+    runtime,
+  })
+  const updatedJob = await finishJobWithResult({
+    job,
+    prompt,
+    result: finalizedResult,
+  })
+
+  await cleanupPipelineTempInputs(runtime.tempInputs)
+
+  return updatedJob
+}
+
+async function markPipelinePending({
+  currentStage,
+  job,
+  pendingResult,
+  pipeline,
+  prompt,
+  runtime,
+}) {
+  return updateJob(job.id, {
+    ai_draft_error: null,
+    ai_draft_model: pendingResult.model,
+    ai_draft_prompt: prompt,
+    ai_draft_provider: pendingResult.provider,
+    ai_draft_source:
+      pendingResult.source ||
+      getStageSource(currentStage?.type || '') ||
+      getPipelineSource(pipeline),
+    ai_error: null,
+    ai_provider: pendingResult.provider,
+    ai_provider_payload: createRuntimeAwareProviderPayload({
+      job,
+      provider: pendingResult.provider,
+      providerPayload: pendingResult.providerPayload,
+      runtime,
+    }),
+    ai_request_id: pendingResult.requestId,
+    result_model: pendingResult.model,
+    result_prompt: prompt,
+    status: 'processing',
+  })
+}
+
+async function runConfiguredPipeline({ job, pipeline, prompt }) {
+  const storedRuntime = getStoredPipelineRuntime(job)
+  const isResuming = Boolean(
+    job.status === 'processing' && job.ai_request_id && pipeline?.stages?.length
+  )
+  const startingStageIndex = isResuming
+    ? Math.max(0, Number(storedRuntime?.currentStageIndex) || 0)
+    : 0
+  let runtime = buildPipelineRuntime({
+    currentStageIndex: startingStageIndex,
+    existingRuntime: storedRuntime,
+    pipeline,
+  })
+  let input =
+    startingStageIndex === 0
+      ? {
+          contentType: job.original_file_type || '',
+          storage: {
+            bucket: job.original_storage_bucket,
+            path: job.original_storage_path,
+          },
+        }
+      : null
+  let lastSuccessfulResult = null
+  let lastSuccessfulStage = null
+
+  for (
+    let stageIndex = startingStageIndex;
+    stageIndex < pipeline.stages.length;
+    stageIndex += 1
+  ) {
+    const stage = pipeline.stages[stageIndex]
+    const isResumeStage =
+      isResuming && stageIndex === startingStageIndex && stage?.type === 'fal'
+
+    try {
+      const stageResult = await runPipelineStage({
+        input,
+        isResume: isResumeStage,
+        job,
+        prompt,
+        stage,
+      })
+
+      if (stageResult.status === 'pending') {
+        if (job.ai_draft_storage_path || job.result_storage_path) {
+          await cleanupPipelineTempInputs(runtime.tempInputs)
+          return settleExistingDraftForReview(job)
+        }
+
+        const nextTempInputs = normalizeTempInputs([
+          ...runtime.tempInputs,
+          stageResult.pendingInputStorage,
+        ])
+        const pendingRuntime = buildPipelineRuntime({
+          currentStageIndex: stageIndex,
+          existingRuntime: runtime,
+          pipeline,
+          tempInputs: nextTempInputs,
+        })
+
+        if (
+          stage?.type === 'fal' &&
+          shouldMoveFalJobToManualReview({
+            job,
+            falResumePayload: {
+              providerPayload: stageResult.providerPayload,
+            },
+          })
+        ) {
+          const movedJob = await moveFalJobToManualReview({
+            job,
+            falResumePayload: {
+              providerPayload: stageResult.providerPayload,
+            },
+            runtime: pendingRuntime,
+          })
+
+          await cleanupPipelineTempInputs(nextTempInputs)
+
+          return movedJob
+        }
+
+        return markPipelinePending({
+          currentStage: stage,
+          job,
+          pendingResult: stageResult,
+          pipeline,
+          prompt,
+          runtime: pendingRuntime,
+        })
+      }
+
+      const nextTrace = [...runtime.trace, buildTraceEntry({ result: stageResult, stage })]
+
+      runtime = buildPipelineRuntime({
+        currentStageIndex: stageIndex + 1,
+        existingRuntime: runtime,
+        pipeline,
+        trace: nextTrace,
+      })
+      lastSuccessfulResult = stageResult
+      lastSuccessfulStage = stage
+      input = {
+        buffer: stageResult.buffer,
+        contentType: stageResult.contentType,
+      }
+    } catch (error) {
+      if (lastSuccessfulResult) {
+        return finalizePipelineResult({
+          completedStage: lastSuccessfulStage,
+          error,
+          job,
+          pipeline,
+          prompt,
+          result: lastSuccessfulResult,
+          runtime,
+        })
+      }
+
+      await cleanupPipelineTempInputs(runtime.tempInputs)
+      throw error
+    }
+  }
+
+  if (!lastSuccessfulResult) {
+    throw new Error('Restore pipeline did not produce any result.')
+  }
+
+  return finalizePipelineResult({
+    completedStage: lastSuccessfulStage,
+    job,
+    pipeline,
+    prompt,
+    result: lastSuccessfulResult,
+    runtime,
+  })
 }
 
 async function finishJobWithResult({ job, prompt, result }) {
@@ -873,171 +1579,227 @@ async function finishJobWithResult({ job, prompt, result }) {
   })
 }
 
+function normalizeFalModel(model) {
+  const normalized = String(model || '')
+    .split('->')[0]
+    .trim()
+
+  if (normalized.startsWith('fal-ai/')) {
+    return normalized
+  }
+
+  return process.env.FAL_RESTORE_MODEL || defaultFalModel
+}
+
+function buildFalQueueUrl({ model, requestId, type }) {
+  const normalizedModel = normalizeFalModel(model)
+  const normalizedType = type === 'status' ? 'status' : 'response'
+
+  return `https://queue.fal.run/${normalizedModel}/requests/${requestId}/${normalizedType}`
+}
+
+function buildFalQueuePayload({ model, queuedAt, requestId }) {
+  const normalizedModel = normalizeFalModel(model)
+
+  return {
+    model: normalizedModel,
+    queued_at: queuedAt || null,
+    request_id: requestId,
+    response_url: buildFalQueueUrl({
+      model: normalizedModel,
+      requestId,
+      type: 'response',
+    }),
+    status_url: buildFalQueueUrl({
+      model: normalizedModel,
+      requestId,
+      type: 'status',
+    }),
+  }
+}
+
+function mergeFalProviderPayload(existingPayload, falPayload) {
+  const basePayload =
+    existingPayload && typeof existingPayload === 'object' ? { ...existingPayload } : {}
+
+  if (basePayload.fal && typeof basePayload.fal === 'object') {
+    return {
+      ...basePayload,
+      fal: {
+        ...basePayload.fal,
+        ...falPayload,
+      },
+    }
+  }
+
+  return {
+    ...basePayload,
+    fal: falPayload,
+  }
+}
+
+function getFalResumePayload(job) {
+  const topLevelPayload =
+    job?.ai_provider_payload && typeof job.ai_provider_payload === 'object'
+      ? job.ai_provider_payload
+      : {}
+  const nestedFalPayload =
+    topLevelPayload.fal && typeof topLevelPayload.fal === 'object'
+      ? topLevelPayload.fal
+      : {}
+  const rawFalPayload =
+    nestedFalPayload.request_id || nestedFalPayload.response_url || nestedFalPayload.status_url
+      ? nestedFalPayload
+      : topLevelPayload
+  const requestId = rawFalPayload.request_id || rawFalPayload.requestId || job?.ai_request_id
+  const model =
+    rawFalPayload.model ||
+    job?.ai_draft_model ||
+    job?.result_model ||
+    process.env.FAL_RESTORE_MODEL ||
+    defaultFalModel
+  const canonicalPayload = buildFalQueuePayload({
+    model,
+    queuedAt: rawFalPayload.queued_at || rawFalPayload.queuedAt || job?.created_at,
+    requestId,
+  })
+  const rawResponseUrl =
+    rawFalPayload.raw_response_url || rawFalPayload.response_url || null
+  const rawStatusUrl =
+    rawFalPayload.raw_status_url || rawFalPayload.status_url || null
+
+  return {
+    model: normalizeFalModel(model),
+    providerPayload: {
+      ...canonicalPayload,
+      raw_response_url: rawResponseUrl,
+      raw_status_url: rawStatusUrl,
+    },
+    requestId,
+    rawResponseUrl,
+    rawStatusUrl,
+  }
+}
+
+function shouldMoveFalJobToManualReview({ job, falResumePayload }) {
+  if (!job || job.ai_draft_storage_path || job.result_storage_path) {
+    return false
+  }
+
+  const queuedAt =
+    falResumePayload?.providerPayload?.queued_at ||
+    falResumePayload?.providerPayload?.queuedAt ||
+    job?.created_at ||
+    ''
+  const queuedAtMs = Date.parse(String(queuedAt || ''))
+
+  if (!Number.isFinite(queuedAtMs)) {
+    return false
+  }
+
+  return Date.now() - queuedAtMs >= getFalProcessingTimeoutMs()
+}
+
+async function moveFalJobToManualReview({ job, falResumePayload, runtime }) {
+  const timeoutMinutes = Math.round(getFalProcessingTimeoutMs() / 60000)
+
+  return updateJob(job.id, {
+    ai_draft_error: null,
+    ai_error: `fal.ai processing did not finish within ${timeoutMinutes} minutes. Moved to manual review.`,
+    ai_provider_payload: createRuntimeAwareProviderPayload({
+      job,
+      provider: 'fal',
+      providerPayload: falResumePayload.providerPayload,
+      runtime:
+        runtime ||
+        buildPipelineRuntime({
+          currentStageIndex: 0,
+          existingRuntime: getStoredPipelineRuntime(job),
+          pipeline:
+            buildPipelineFromRuntime(getStoredPipelineRuntime(job)) ||
+            buildLegacyResumePipeline(job) || {
+              enabled: true,
+              id: 'legacy-fal',
+              name: 'fal',
+              stages: [{ id: 'fal-1', type: 'fal' }],
+            },
+        }),
+    }),
+    status: 'manual_review',
+  })
+}
+
 export async function runRestoreJob({
   job,
+  pipelineId: requestedPipelineId,
   provider: requestedProvider,
   modelPreset: requestedModelPreset,
 }) {
-  const provider = getProvider(requestedProvider, requestedModelPreset)
   const prompt = buildRestorePrompt(job)
-  const modelPreset =
-    provider === 'replicate'
-      ? normalizeModelPreset(requestedModelPreset) || getDefaultReplicatePreset()
-      : ''
+  const pipelineConfig = await readPipelineConfig()
+  const requestedPipeline = requestedPipelineId
+    ? findPipelineById(pipelineConfig, requestedPipelineId)
+    : null
 
-  if (!provider) {
-    throw new Error('No AI restoration provider is configured.')
+  if (requestedPipelineId && !requestedPipeline) {
+    throw new Error('Requested restore pipeline was not found.')
   }
+
+  const pipeline =
+    requestedPipeline ||
+    buildLegacyRequestedPipeline({
+      modelPreset: requestedModelPreset,
+      provider: requestedProvider,
+    }) ||
+    (job.status === 'processing'
+      ? buildPipelineFromRuntime(getStoredPipelineRuntime(job)) ||
+        buildLegacyResumePipeline(job)
+      : null) ||
+    getDefaultPipeline(pipelineConfig)
+
+  if (!pipeline?.stages?.length) {
+    throw new Error('No AI restore pipeline is configured.')
+  }
+
+  let currentJob = job
 
   if (
-    (!requestedProvider || provider === 'fal') &&
-    job.ai_provider === 'fal' &&
-    job.ai_request_id &&
-    job.status === 'processing'
+    job.status !== 'processing' ||
+    requestedPipeline ||
+    requestedProvider ||
+    requestedModelPreset
   ) {
-    let polled
+    const firstStage = pipeline.stages[0]
+    const initialRuntime = buildPipelineRuntime({
+      currentStageIndex: 0,
+      pipeline,
+    })
 
-    try {
-      polled = await pollFalRequest({
-        model:
-          job.result_model || process.env.FAL_RESTORE_MODEL || defaultFalModel,
-        requestId: job.ai_request_id,
-        responseUrl: job.ai_provider_payload?.fal?.response_url,
-        statusUrl: job.ai_provider_payload?.fal?.status_url,
-      })
-    } catch (error) {
-      if (shouldReturnFalPending(error)) {
-        if (job.ai_draft_storage_path || job.result_storage_path) {
-          return settleExistingDraftForReview(job)
-        }
-
-        return updateJob(job.id, {
-          ai_error: null,
-          ai_draft_error: null,
-          status: 'processing',
-        })
-      }
-
-      throw error
-    }
-
-    if (polled.status === 'pending') {
-      if (job.ai_draft_storage_path || job.result_storage_path) {
-        return settleExistingDraftForReview(job)
-      }
-
-      return updateJob(job.id, {
-        ai_error: null,
-        ai_draft_error: null,
-        status: 'processing',
-      })
-    }
-
-    if (getCodeformerPipelineEnabled()) {
-      try {
-        const piped = await runCodeformerStage({
-          contentType: polled.contentType,
-          imageBuffer: polled.buffer,
-          job,
-        })
-
-        return finishJobWithResult({
-          job,
-          prompt,
-          result: {
-            ...piped,
-            model: `${polled.model} -> ${piped.model}`,
-            provider: 'fal',
-            providerPayload: {
-              codeformer: piped.providerPayload || {},
-              fal: polled.providerPayload || {},
-              pipeline: ['fal', 'replicate_codeformer'],
-            },
-            source: 'fal_codeformer',
-          },
-        })
-      } catch (error) {
-        return finishJobWithResult({
-          job,
-          prompt,
-          result: buildFalOnlyResult({
-            falResult: polled,
-            codeformerError:
-              error instanceof Error
-                ? error.message
-                : 'CodeFormer enhancement failed.',
-          }),
-        })
-      }
-    }
-
-    return finishJobWithResult({ job, prompt, result: polled })
+    currentJob = await updateJob(job.id, {
+      ai_draft_error: null,
+      ai_draft_provider: getStageProvider(firstStage),
+      ai_draft_source: getPipelineSource(pipeline),
+      ai_error: null,
+      ai_provider: getStageProvider(firstStage),
+      ai_provider_payload: {
+        pipeline: initialRuntime.stages.map(stage => stage.type),
+        pipeline_id: initialRuntime.pipelineId || null,
+        pipeline_name: initialRuntime.pipelineName || '',
+        pipeline_runtime: initialRuntime,
+      },
+      ai_request_id: null,
+      status: 'processing',
+    })
   }
 
-  await updateJob(job.id, {
-    ai_draft_error: null,
-    ai_error: null,
-    ai_provider: provider,
-    ai_draft_provider: provider,
-    ai_draft_source:
-      provider === 'fal' && getCodeformerPipelineEnabled()
-        ? 'fal_codeformer'
-        : provider === 'replicate' && modelPreset
-          ? `replicate_${modelPreset}`
-          : provider,
-    status: 'processing',
-  })
-
   try {
-    const original = await downloadObject({
-      bucket: job.original_storage_bucket,
-      path: job.original_storage_path,
+    return await runConfiguredPipeline({
+      job: currentJob,
+      pipeline,
+      prompt,
     })
-    const result =
-      provider === 'openai'
-        ? await callOpenAI({
-            imageBuffer: original.buffer,
-            imageContentType: original.contentType,
-            job,
-            prompt,
-          })
-        : provider === 'replicate'
-          ? await callReplicate({ job, modelPreset })
-          : getCodeformerPipelineEnabled()
-            ? await callFalCodeformerPipeline({ job, prompt })
-            : await callFal({ job, prompt })
-
-    if (result.status === 'pending') {
-      const providerPayload =
-        result.provider === 'fal' &&
-        result.providerPayload &&
-        !result.providerPayload.fal
-          ? { fal: result.providerPayload }
-          : result.providerPayload || {}
-
-      return updateJob(job.id, {
-        ai_draft_error: null,
-        ai_draft_model: result.model,
-        ai_draft_prompt: prompt,
-        ai_draft_provider: result.provider,
-        ai_draft_source:
-          result.source ||
-          (result.modelPreset && result.provider === 'replicate'
-            ? `replicate_${result.modelPreset}`
-            : result.provider),
-        ai_error: null,
-        ai_provider: result.provider,
-        ai_provider_payload: providerPayload,
-        ai_request_id: result.requestId,
-        result_model: result.model,
-        result_prompt: prompt,
-        status: 'processing',
-      })
-    }
-
-    return finishJobWithResult({ job, prompt, result })
   } catch (error) {
-    return updateJob(job.id, {
+    return updateJob(currentJob.id, {
       ai_draft_error:
         error instanceof Error ? error.message : 'AI restore failed.',
       ai_error: error instanceof Error ? error.message : 'AI restore failed.',

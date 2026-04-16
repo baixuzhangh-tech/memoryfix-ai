@@ -8,6 +8,15 @@ import {
   updateOrderByJobId,
 } from '../_lib/supabase.js'
 
+function shouldSkipDefaultTimedOutFalRetry(job, body) {
+  return Boolean(
+    job &&
+      job.status === 'manual_review' &&
+      !body.provider &&
+      !body.modelPreset
+  )
+}
+
 export const config = {
   api: {
     bodyParser: false,
@@ -41,13 +50,33 @@ export default async function handler(req, res) {
       return
     }
 
+    if (shouldSkipDefaultTimedOutFalRetry(job, body)) {
+      await insertEvent(job.id, 'ai_restore_process_skipped', {
+        provider: job.ai_provider || null,
+        reason: 'manual_review_requires_explicit_retry',
+        status: job.status,
+      })
+      await updateOrderByJobId(job.id, {
+        status: job.status,
+      }).catch(() => null)
+
+      json(res, 200, {
+        job: await createJobSignedUrls(job),
+        ok: true,
+        skipped: true,
+      })
+      return
+    }
+
     const updatedJob = await runRestoreJob({
       job,
+      pipelineId: body.pipelineId,
       modelPreset: body.modelPreset,
       provider: body.provider,
     })
 
     await insertEvent(updatedJob.id, 'ai_restore_processed', {
+      pipeline_id: body.pipelineId || null,
       model_preset: body.modelPreset || null,
       provider: updatedJob.ai_provider,
       status: updatedJob.status,
