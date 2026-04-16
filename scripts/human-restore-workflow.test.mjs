@@ -28,6 +28,7 @@ function createMockState() {
   return {
     emails: [],
     events: [],
+    falPostCalls: 0,
     falStatusCalls: 0,
     jobs: [],
     nextEmailId: 1,
@@ -359,6 +360,7 @@ function installMockFetch(state) {
 
     if (url.hostname === 'queue.fal.run') {
       if (method === 'POST') {
+        state.falPostCalls += 1
         return makeJsonResponse({
           request_id: 'fal-request-1',
           response_url:
@@ -849,6 +851,94 @@ async function main() {
   assert.equal(retryOpenAIResponse.body.job.status, 'needs_review')
   assert.equal(retryOpenAIResponse.body.job.ai_provider, 'openai')
 
+  const directOriginalPath = 'manual/default-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', directOriginalPath), {
+    buffer: Buffer.from('direct-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'direct-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-default-fal',
+    notes: 'Default AI restore should use fal pipeline.',
+    order_bound: true,
+    order_number: 'txn_default_fal',
+    original_file_name: 'direct-fal.jpg',
+    original_file_size: Buffer.byteLength('direct-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: directOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-DEFAULT-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const falPostCallsBeforeDefaultRun = state.falPostCalls
+  const defaultFalResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-default-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(defaultFalResponse.statusCode, 200)
+  assert.equal(defaultFalResponse.body.job.status, 'needs_review')
+  assert.equal(defaultFalResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(defaultFalResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(
+    defaultFalResponse.body.job.ai_draft_model,
+    'fal-ai/image-editing/photo-restoration -> lucataco/codeformer'
+  )
+  assert.equal(state.falPostCalls, falPostCallsBeforeDefaultRun + 1)
+
+  const resumedOriginalPath = 'manual/resume-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', resumedOriginalPath), {
+    buffer: Buffer.from('resume-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_draft_source: 'fal',
+    ai_provider: 'fal',
+    ai_provider_payload: {
+      fal: {
+        response_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+        status_url:
+          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+      },
+    },
+    ai_request_id: 'fal-request-1',
+    checkout_email: 'resume-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-resume-fal',
+    notes: 'Resume fal polling without creating a new fal job.',
+    order_bound: true,
+    order_number: 'txn_resume_fal',
+    original_file_name: 'resume-fal.jpg',
+    original_file_size: Buffer.byteLength('resume-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: resumedOriginalPath,
+    status: 'processing',
+    submission_reference: 'MF-RESUME-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const falPostCallsBeforeResume = state.falPostCalls
+  const resumeFalResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-resume-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(resumeFalResponse.statusCode, 200)
+  assert.equal(resumeFalResponse.body.job.status, 'needs_review')
+  assert.equal(resumeFalResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(resumeFalResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(state.falPostCalls, falPostCallsBeforeResume)
+
   const manualReviewResponse = await invoke(adminJobHandler, {
     body: Buffer.from(
       JSON.stringify({
@@ -997,6 +1087,17 @@ async function main() {
 
   state.jobs[0].expires_at = new Date(Date.now() - 1000).toISOString()
   retoucherJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  const defaultFalJob = state.jobs.find(candidate => candidate.id === 'job-default-fal')
+  const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
+
+  if (defaultFalJob) {
+    defaultFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (resumeFalJob) {
+    resumeFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
   const cleanupResponse = await invoke(cleanupHandler, {
     headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
     method: 'GET',
@@ -1005,10 +1106,12 @@ async function main() {
   assert.equal(cleanupResponse.statusCode, 200)
   assert.deepEqual(
     cleanupResponse.body.deleted.sort(),
-    [job.id, retoucherJob.id].sort()
+    [job.id, retoucherJob.id, 'job-default-fal', 'job-resume-fal'].sort()
   )
   assert.equal(state.jobs[0].status, 'deleted')
   assert.equal(retoucherJob.status, 'deleted')
+  assert.equal(defaultFalJob?.status, 'deleted')
+  assert.equal(resumeFalJob?.status, 'deleted')
   assert.equal(state.storage.size, 0)
 
   console.log('Human Restore workflow smoke test passed.')
