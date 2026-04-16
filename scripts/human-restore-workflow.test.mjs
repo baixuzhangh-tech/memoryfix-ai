@@ -1070,6 +1070,50 @@ async function main() {
     'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
   )
 
+  state.falStatusErrorStatus = 401
+  const permanentPollFailureOriginalPath = 'manual/permanent-poll-failure-fal.jpg'
+  state.storage.set(
+    storageKey('human-restore-originals', permanentPollFailureOriginalPath),
+    {
+      buffer: Buffer.from('permanent-poll-failure-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'permanent-poll-failure-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-permanent-poll-failure-fal',
+    notes: 'Permanent fal poll errors should fail loudly instead of staying stuck in processing.',
+    order_bound: true,
+    order_number: 'txn_permanent_poll_failure_fal',
+    original_file_name: 'permanent-poll-failure-fal.jpg',
+    original_file_size: Buffer.byteLength('permanent-poll-failure-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: permanentPollFailureOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-PERMANENT-POLL-FAILURE-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const permanentPollFailureResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(
+      JSON.stringify({ jobId: 'job-permanent-poll-failure-fal' })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.falStatusErrorStatus = 0
+
+  assert.equal(permanentPollFailureResponse.statusCode, 200)
+  assert.equal(permanentPollFailureResponse.body.job.status, 'ai_failed')
+  assert.match(
+    permanentPollFailureResponse.body.job.ai_error,
+    /fal status transient failure/
+  )
+
   const stuckFalOriginalPath = 'manual/stuck-fal.jpg'
   const stuckFalDraftPath = 'manual/stuck-fal-draft.png'
   state.storage.set(storageKey('human-restore-originals', stuckFalOriginalPath), {
@@ -1729,6 +1773,9 @@ async function main() {
   )
   const pendingFalJob = state.jobs.find(candidate => candidate.id === 'job-pending-fal')
   const pollFailureFalJob = state.jobs.find(candidate => candidate.id === 'job-poll-failure-fal')
+  const permanentPollFailureFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-permanent-poll-failure-fal'
+  )
   const stuckFalExistingDraftJob = state.jobs.find(
     candidate => candidate.id === 'job-stuck-fal-existing-draft'
   )
@@ -1789,6 +1836,10 @@ async function main() {
     pollFailureFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
+  if (permanentPollFailureFalJob) {
+    permanentPollFailureFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
   if (stuckFalExistingDraftJob) {
     stuckFalExistingDraftJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
@@ -1811,6 +1862,7 @@ async function main() {
       'job-malformed-submit-fal',
       'job-pending-fal',
       'job-poll-failure-fal',
+      'job-permanent-poll-failure-fal',
       'job-public-resume-fal',
       'job-stale-public-fal',
       'job-resume-fal',
@@ -1826,6 +1878,7 @@ async function main() {
   assert.equal(malformedSubmitFalJob?.status, 'deleted')
   assert.equal(pendingFalJob?.status, 'deleted')
   assert.equal(pollFailureFalJob?.status, 'deleted')
+  assert.equal(permanentPollFailureFalJob?.status, 'deleted')
   assert.equal(publicResumeFalJob?.status, 'deleted')
   assert.equal(stalePublicFalJob?.status, 'deleted')
   assert.equal(resumeFalJob?.status, 'deleted')

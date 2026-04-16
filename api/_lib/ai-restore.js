@@ -132,8 +132,6 @@ function shouldReturnFalPending(error) {
   const message = String(error instanceof Error ? error.message : error || '')
 
   return [
-    'Could not poll fal.ai.',
-    'Could not fetch fal.ai result.',
     'fal.ai result did not include a restored image.',
     'Could not fetch restored image from provider.',
   ].some(fragment => message.includes(fragment))
@@ -380,8 +378,18 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   })
   const rawResponseUrl = String(responseUrl || '').trim()
   const rawStatusUrl = String(statusUrl || '').trim()
+  const statusEndpoint = getPreferredFalQueueUrl(
+    rawStatusUrl,
+    normalizedStatusUrl,
+    'status'
+  )
+  const resultEndpoint = getPreferredFalQueueUrl(
+    rawResponseUrl,
+    normalizedResultUrl,
+    'response'
+  )
 
-  const statusResponse = await fetch(normalizedStatusUrl, {
+  const statusResponse = await fetch(statusEndpoint, {
     method: 'POST',
     headers: {
       Authorization: `Key ${falKey}`,
@@ -419,7 +427,7 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
     }
   }
 
-  const resultResponse = await fetch(normalizedResultUrl, {
+  const resultResponse = await fetch(resultEndpoint, {
     method: 'POST',
     headers: {
       Authorization: `Key ${falKey}`,
@@ -1598,6 +1606,31 @@ function buildFalQueueUrl({ model, requestId, type }) {
   return `https://queue.fal.run/${normalizedModel}/requests/${requestId}/${normalizedType}`
 }
 
+function getPreferredFalQueueUrl(rawUrl, fallbackUrl, type) {
+  const trimmed = String(rawUrl || '').trim()
+
+  if (!trimmed) {
+    return fallbackUrl
+  }
+
+  try {
+    const parsed = new URL(trimmed)
+    const fallback = new URL(fallbackUrl)
+
+    if (
+      parsed.hostname === 'queue.fal.run' &&
+      parsed.pathname === fallback.pathname &&
+      parsed.pathname.endsWith(`/${type === 'status' ? 'status' : 'response'}`)
+    ) {
+      return trimmed
+    }
+  } catch {
+    return fallbackUrl
+  }
+
+  return fallbackUrl
+}
+
 function buildFalQueuePayload({ model, queuedAt, requestId }) {
   const normalizedModel = normalizeFalModel(model)
 
@@ -1729,6 +1762,31 @@ async function moveFalJobToManualReview({ job, falResumePayload, runtime }) {
   })
 }
 
+function shouldResumeRequestedPipeline({
+  job,
+  requestedModelPreset,
+  requestedPipeline,
+  requestedProvider,
+}) {
+  if (
+    !job ||
+    job.status !== 'processing' ||
+    !job.ai_request_id ||
+    !requestedPipeline ||
+    requestedProvider ||
+    requestedModelPreset
+  ) {
+    return false
+  }
+
+  const currentPipelineId =
+    job.ai_provider_payload?.pipeline_id ||
+    job.ai_provider_payload?.pipeline_runtime?.pipelineId ||
+    ''
+
+  return Boolean(currentPipelineId && currentPipelineId === requestedPipeline.id)
+}
+
 export async function runRestoreJob({
   job,
   pipelineId: requestedPipelineId,
@@ -1740,6 +1798,12 @@ export async function runRestoreJob({
   const requestedPipeline = requestedPipelineId
     ? findPipelineById(pipelineConfig, requestedPipelineId)
     : null
+  const shouldResumeRequestedCurrentPipeline = shouldResumeRequestedPipeline({
+    job,
+    requestedModelPreset,
+    requestedPipeline,
+    requestedProvider,
+  })
 
   if (requestedPipelineId && !requestedPipeline) {
     throw new Error('Requested restore pipeline was not found.')
@@ -1765,7 +1829,7 @@ export async function runRestoreJob({
 
   if (
     job.status !== 'processing' ||
-    requestedPipeline ||
+    (requestedPipeline && !shouldResumeRequestedCurrentPipeline) ||
     requestedProvider ||
     requestedModelPreset
   ) {
