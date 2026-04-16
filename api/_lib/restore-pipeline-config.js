@@ -317,7 +317,7 @@ export async function writePipelineConfig(input) {
 
   await uploadObject({
     bucket: storage.bucket,
-    contentType: 'application/json; charset=utf-8',
+    contentType: 'application/json',
     data: Buffer.from(JSON.stringify(normalized, null, 2), 'utf8'),
     path: storage.path,
   })
