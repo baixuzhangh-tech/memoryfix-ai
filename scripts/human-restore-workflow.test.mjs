@@ -29,12 +29,15 @@ function createMockState() {
     emails: [],
     events: [],
     falPostCalls: 0,
+    falResponseErrorStatus: 0,
     falStatusSequence: [],
+    falStatusErrorStatus: 0,
     falStatusCalls: 0,
     jobs: [],
     nextEmailId: 1,
     nextJobId: 1,
     orders: [],
+    replicateShouldFail: false,
     retouchers: [],
     storage: new Map(),
   }
@@ -364,6 +367,12 @@ function installMockFetch(state) {
         if (method !== 'POST') {
           return makeJsonResponse({ error: 'fal status requires POST' }, { status: 405 })
         }
+        if (state.falStatusErrorStatus) {
+          return makeJsonResponse(
+            { error: 'fal status transient failure' },
+            { status: state.falStatusErrorStatus }
+          )
+        }
         state.falStatusCalls += 1
         const nextStatus = state.falStatusSequence.length
           ? state.falStatusSequence.shift()
@@ -374,6 +383,12 @@ function installMockFetch(state) {
       if (url.pathname.endsWith('/response')) {
         if (method !== 'POST') {
           return makeJsonResponse({ error: 'fal response requires POST' }, { status: 405 })
+        }
+        if (state.falResponseErrorStatus) {
+          return makeJsonResponse(
+            { error: 'fal response transient failure' },
+            { status: state.falResponseErrorStatus }
+          )
         }
         return makeJsonResponse({
           image: { url: 'https://fal-cdn.test/restored.jpg' },
@@ -435,6 +450,12 @@ function installMockFetch(state) {
       }
 
       if (method === 'POST' && url.pathname.includes('/predictions')) {
+        if (state.replicateShouldFail) {
+          return makeJsonResponse(
+            { error: 'replicate temporary failure' },
+            { status: 500 }
+          )
+        }
         const body = JSON.parse(getBodyText(options))
         const preset = body.input?.codeformer_fidelity ? 'codeformer' : 'gfpgan'
 
@@ -902,6 +923,53 @@ async function main() {
   )
   assert.equal(state.falPostCalls, falPostCallsBeforeDefaultRun + 1)
 
+  const codeformerFallbackOriginalPath = 'manual/fal-codeformer-fallback.jpg'
+  state.storage.set(
+    storageKey('human-restore-originals', codeformerFallbackOriginalPath),
+    {
+      buffer: Buffer.from('fal-codeformer-fallback-original'),
+      contentType: 'image/jpeg',
+    }
+  )
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'fal-fallback@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-fal-codeformer-fallback',
+    notes: 'If CodeFormer fails, keep the fal draft instead of failing the job.',
+    order_bound: true,
+    order_number: 'txn_fal_codeformer_fallback',
+    original_file_name: 'fal-codeformer-fallback.jpg',
+    original_file_size: Buffer.byteLength('fal-codeformer-fallback-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: codeformerFallbackOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-FAL-CODEFORMER-FALLBACK',
+    updated_at: new Date().toISOString(),
+  })
+  state.replicateShouldFail = true
+  const falCodeformerFallbackResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-fal-codeformer-fallback' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.replicateShouldFail = false
+
+  assert.equal(falCodeformerFallbackResponse.statusCode, 200)
+  assert.equal(falCodeformerFallbackResponse.body.job.status, 'needs_review')
+  assert.equal(falCodeformerFallbackResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(falCodeformerFallbackResponse.body.job.ai_draft_source, 'fal')
+  assert.equal(
+    falCodeformerFallbackResponse.body.job.ai_draft_model,
+    'fal-ai/image-editing/photo-restoration'
+  )
+  assert.equal(
+    falCodeformerFallbackResponse.body.job.ai_provider_payload?.codeformer_error,
+    'replicate temporary failure'
+  )
+
   state.falStatusSequence = ['IN_PROGRESS']
   const pendingOriginalPath = 'manual/pending-fal.jpg'
   state.storage.set(storageKey('human-restore-originals', pendingOriginalPath), {
@@ -951,6 +1019,48 @@ async function main() {
   )
   assert.equal(pendingFalJobPersisted?.ai_request_id, 'fal-request-1')
   assert.equal(state.falPostCalls, falPostCallsBeforePendingRun + 1)
+
+  state.falStatusErrorStatus = 500
+  const pollFailureOriginalPath = 'manual/poll-failure-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', pollFailureOriginalPath), {
+    buffer: Buffer.from('poll-failure-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'poll-failure-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-poll-failure-fal',
+    notes: 'Transient fal poll errors should keep the queued request resumable.',
+    order_bound: true,
+    order_number: 'txn_poll_failure_fal',
+    original_file_name: 'poll-failure-fal.jpg',
+    original_file_size: Buffer.byteLength('poll-failure-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: pollFailureOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-POLL-FAILURE-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const pollFailureResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-poll-failure-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.falStatusErrorStatus = 0
+
+  assert.equal(pollFailureResponse.statusCode, 200)
+  assert.equal(pollFailureResponse.body.job.status, 'processing')
+  assert.equal(pollFailureResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(pollFailureResponse.body.job.ai_draft_source, 'fal')
+  assert.equal(pollFailureResponse.body.job.ai_request_id, 'fal-request-1')
+  assert.equal(
+    pollFailureResponse.body.job.ai_provider_payload?.fal?.status_url,
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+  )
 
   state.falStatusSequence = ['COMPLETED']
   const falPostCallsBeforePendingResume = state.falPostCalls
@@ -1162,11 +1272,19 @@ async function main() {
   state.jobs[0].expires_at = new Date(Date.now() - 1000).toISOString()
   retoucherJob.expires_at = new Date(Date.now() - 1000).toISOString()
   const defaultFalJob = state.jobs.find(candidate => candidate.id === 'job-default-fal')
+  const falCodeformerFallbackJob = state.jobs.find(
+    candidate => candidate.id === 'job-fal-codeformer-fallback'
+  )
   const pendingFalJob = state.jobs.find(candidate => candidate.id === 'job-pending-fal')
+  const pollFailureFalJob = state.jobs.find(candidate => candidate.id === 'job-poll-failure-fal')
   const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
 
   if (defaultFalJob) {
     defaultFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (falCodeformerFallbackJob) {
+    falCodeformerFallbackJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
   if (resumeFalJob) {
@@ -1175,6 +1293,10 @@ async function main() {
 
   if (pendingFalJob) {
     pendingFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
+  if (pollFailureFalJob) {
+    pollFailureFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
   const cleanupResponse = await invoke(cleanupHandler, {
@@ -1189,14 +1311,18 @@ async function main() {
       job.id,
       retoucherJob.id,
       'job-default-fal',
+      'job-fal-codeformer-fallback',
       'job-pending-fal',
+      'job-poll-failure-fal',
       'job-resume-fal',
     ].sort()
   )
   assert.equal(state.jobs[0].status, 'deleted')
   assert.equal(retoucherJob.status, 'deleted')
   assert.equal(defaultFalJob?.status, 'deleted')
+  assert.equal(falCodeformerFallbackJob?.status, 'deleted')
   assert.equal(pendingFalJob?.status, 'deleted')
+  assert.equal(pollFailureFalJob?.status, 'deleted')
   assert.equal(resumeFalJob?.status, 'deleted')
   assert.equal(state.storage.size, 0)
 

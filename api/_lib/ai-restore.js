@@ -127,6 +127,17 @@ function getFalErrorMessage(payload, fallback) {
   )
 }
 
+function shouldReturnFalPending(error) {
+  const message = String(error instanceof Error ? error.message : error || '')
+
+  return [
+    'Could not poll fal.ai.',
+    'Could not fetch fal.ai result.',
+    'fal.ai result did not include a restored image.',
+    'Could not fetch restored image from provider.',
+  ].some(fragment => message.includes(fragment))
+}
+
 function clampNumber(value, min, max, fallback) {
   const numericValue = Number(value)
 
@@ -660,12 +671,36 @@ async function callFal({ job, prompt }) {
 
   for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     await wait(pollIntervalMs)
-    const polled = await pollFalRequest({
-      model: queuedOrImmediate.model,
-      requestId: queuedOrImmediate.requestId,
-      responseUrl: queuedOrImmediate.resultUrl,
-      statusUrl: queuedOrImmediate.statusUrl,
-    })
+
+    let polled
+
+    try {
+      polled = await pollFalRequest({
+        model: queuedOrImmediate.model,
+        requestId: queuedOrImmediate.requestId,
+        responseUrl: queuedOrImmediate.resultUrl,
+        statusUrl: queuedOrImmediate.statusUrl,
+      })
+    } catch (error) {
+      if (shouldReturnFalPending(error)) {
+        return {
+          model: queuedOrImmediate.model,
+          provider: 'fal',
+          providerPayload:
+            queuedOrImmediate.providerPayload || {
+              request_id: queuedOrImmediate.requestId,
+              response_url: queuedOrImmediate.resultUrl,
+              status_url: queuedOrImmediate.statusUrl,
+            },
+          requestId: queuedOrImmediate.requestId,
+          responseUrl: queuedOrImmediate.resultUrl,
+          status: 'pending',
+          statusUrl: queuedOrImmediate.statusUrl,
+        }
+      }
+
+      throw error
+    }
 
     if (polled.buffer) {
       return polled
@@ -722,6 +757,20 @@ async function runCodeformerStage({ contentType, imageBuffer, job }) {
   }
 }
 
+function buildFalOnlyResult({ falResult, codeformerError }) {
+  return {
+    ...falResult,
+    model: falResult.model,
+    provider: 'fal',
+    providerPayload: {
+      codeformer_error: codeformerError || null,
+      fal: falResult.providerPayload || {},
+      pipeline: ['fal'],
+    },
+    source: 'fal',
+  }
+}
+
 async function callFalCodeformerPipeline({ job, prompt }) {
   const falResult = await callFal({ job, prompt })
 
@@ -729,22 +778,30 @@ async function callFalCodeformerPipeline({ job, prompt }) {
     return falResult
   }
 
-  const codeformerResult = await runCodeformerStage({
-    contentType: falResult.contentType,
-    imageBuffer: falResult.buffer,
-    job,
-  })
+  try {
+    const codeformerResult = await runCodeformerStage({
+      contentType: falResult.contentType,
+      imageBuffer: falResult.buffer,
+      job,
+    })
 
-  return {
-    ...codeformerResult,
-    model: `${falResult.model} -> ${codeformerResult.model}`,
-    provider: 'fal',
-    providerPayload: {
-      codeformer: codeformerResult.providerPayload || {},
-      fal: falResult.providerPayload || {},
-      pipeline: ['fal', 'replicate_codeformer'],
-    },
-    source: 'fal_codeformer',
+    return {
+      ...codeformerResult,
+      model: `${falResult.model} -> ${codeformerResult.model}`,
+      provider: 'fal',
+      providerPayload: {
+        codeformer: codeformerResult.providerPayload || {},
+        fal: falResult.providerPayload || {},
+        pipeline: ['fal', 'replicate_codeformer'],
+      },
+      source: 'fal_codeformer',
+    }
+  } catch (error) {
+    return buildFalOnlyResult({
+      falResult,
+      codeformerError:
+        error instanceof Error ? error.message : 'CodeFormer enhancement failed.',
+    })
   }
 }
 
@@ -847,27 +904,41 @@ export async function runRestoreJob({
     }
 
     if (getCodeformerPipelineEnabled()) {
-      const piped = await runCodeformerStage({
-        contentType: polled.contentType,
-        imageBuffer: polled.buffer,
-        job,
-      })
+      try {
+        const piped = await runCodeformerStage({
+          contentType: polled.contentType,
+          imageBuffer: polled.buffer,
+          job,
+        })
 
-      return finishJobWithResult({
-        job,
-        prompt,
-        result: {
-          ...piped,
-          model: `${polled.model} -> ${piped.model}`,
-          provider: 'fal',
-          providerPayload: {
-            codeformer: piped.providerPayload || {},
-            fal: polled.providerPayload || {},
-            pipeline: ['fal', 'replicate_codeformer'],
+        return finishJobWithResult({
+          job,
+          prompt,
+          result: {
+            ...piped,
+            model: `${polled.model} -> ${piped.model}`,
+            provider: 'fal',
+            providerPayload: {
+              codeformer: piped.providerPayload || {},
+              fal: polled.providerPayload || {},
+              pipeline: ['fal', 'replicate_codeformer'],
+            },
+            source: 'fal_codeformer',
           },
-          source: 'fal_codeformer',
-        },
-      })
+        })
+      } catch (error) {
+        return finishJobWithResult({
+          job,
+          prompt,
+          result: buildFalOnlyResult({
+            falResult: polled,
+            codeformerError:
+              error instanceof Error
+                ? error.message
+                : 'CodeFormer enhancement failed.',
+          }),
+        })
+      }
     }
 
     return finishJobWithResult({ job, prompt, result: polled })
