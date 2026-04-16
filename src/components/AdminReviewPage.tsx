@@ -291,7 +291,10 @@ export default function AdminReviewPage() {
     }
 
     try {
-      const body = await adminFetch('/api/admin/human-restore-pipelines')
+      const searchParams = new URLSearchParams({ resource: 'pipelines' })
+      const body = await adminFetch(
+        `/api/admin/human-restore-jobs?${searchParams.toString()}`
+      )
 
       setPipelineConfig(body.config || null)
       setStageDefinitions(body.stageDefinitions || [])
@@ -313,9 +316,12 @@ export default function AdminReviewPage() {
     setMessage('')
 
     try {
-      const body = await adminFetch('/api/admin/human-restore-pipelines', {
+      const body = await adminFetch('/api/admin/human-restore-jobs', {
         method: 'POST',
-        body: JSON.stringify({ config: pipelineConfig }),
+        body: JSON.stringify({
+          action: 'save_pipeline_config',
+          config: pipelineConfig,
+        }),
       })
 
       setPipelineConfig(body.config || pipelineConfig)

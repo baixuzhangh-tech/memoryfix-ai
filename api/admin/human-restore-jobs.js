@@ -1,5 +1,10 @@
 import { requireAdmin } from '../_lib/admin.js'
-import { json } from '../_lib/human-restore.js'
+import { json, readRawBody } from '../_lib/human-restore.js'
+import {
+  listStageDefinitions,
+  readPipelineConfig,
+  writePipelineConfig,
+} from '../_lib/restore-pipeline-config.js'
 import {
   createJobSignedUrls,
   getJob,
@@ -7,23 +12,58 @@ import {
   listJobs,
 } from '../_lib/supabase.js'
 
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+}
+
 export default async function handler(req, res) {
   if (!requireAdmin(req, res)) {
     return
   }
 
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     json(res, 405, { error: 'Method not allowed.' })
     return
   }
 
   try {
+    if (req.method === 'POST') {
+      const rawBody = await readRawBody(req)
+      const body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {}
+
+      if (body.action === 'save_pipeline_config') {
+        json(res, 200, {
+          config: await writePipelineConfig(body.config || {}),
+          ok: true,
+          stageDefinitions: listStageDefinitions(),
+        })
+        return
+      }
+
+      json(res, 400, { error: 'Unknown admin jobs action.' })
+      return
+    }
+
     const jobId = Array.isArray(req.query.jobId)
       ? req.query.jobId[0]
       : req.query.jobId
+    const resource = Array.isArray(req.query.resource)
+      ? req.query.resource[0]
+      : req.query.resource
     const status = Array.isArray(req.query.status)
       ? req.query.status[0]
       : req.query.status || 'active'
+
+    if (resource === 'pipelines') {
+      json(res, 200, {
+        config: await readPipelineConfig(),
+        ok: true,
+        stageDefinitions: listStageDefinitions(),
+      })
+      return
+    }
 
     if (jobId) {
       const job = await getJob(jobId)
