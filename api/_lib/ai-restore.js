@@ -379,6 +379,7 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
     `https://queue.fal.run/${model}/requests/${requestId}/response`
 
   const statusResponse = await fetch(normalizedStatusUrl, {
+    method: 'POST',
     headers: {
       Authorization: `Key ${falKey}`,
     },
@@ -416,6 +417,7 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   }
 
   const resultResponse = await fetch(normalizedResultUrl, {
+    method: 'POST',
     headers: {
       Authorization: `Key ${falKey}`,
     },

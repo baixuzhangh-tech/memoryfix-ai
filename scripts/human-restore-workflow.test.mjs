@@ -360,18 +360,10 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'queue.fal.run') {
-      if (method === 'POST') {
-        state.falPostCalls += 1
-        return makeJsonResponse({
-          request_id: 'fal-request-1',
-          response_url:
-            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
-          status_url:
-            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
-        })
-      }
-
       if (url.pathname.endsWith('/status')) {
+        if (method !== 'POST') {
+          return makeJsonResponse({ error: 'fal status requires POST' }, { status: 405 })
+        }
         state.falStatusCalls += 1
         const nextStatus = state.falStatusSequence.length
           ? state.falStatusSequence.shift()
@@ -380,8 +372,22 @@ function installMockFetch(state) {
       }
 
       if (url.pathname.endsWith('/response')) {
+        if (method !== 'POST') {
+          return makeJsonResponse({ error: 'fal response requires POST' }, { status: 405 })
+        }
         return makeJsonResponse({
           image: { url: 'https://fal-cdn.test/restored.jpg' },
+        })
+      }
+
+      if (method === 'POST') {
+        state.falPostCalls += 1
+        return makeJsonResponse({
+          request_id: 'fal-request-1',
+          response_url:
+            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+          status_url:
+            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
         })
       }
     }
