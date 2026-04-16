@@ -29,6 +29,7 @@ function createMockState() {
     emails: [],
     events: [],
     falPostCalls: 0,
+    falStatusSequence: [],
     falStatusCalls: 0,
     jobs: [],
     nextEmailId: 1,
@@ -372,7 +373,10 @@ function installMockFetch(state) {
 
       if (url.pathname.endsWith('/status')) {
         state.falStatusCalls += 1
-        return makeJsonResponse({ status: 'COMPLETED' })
+        const nextStatus = state.falStatusSequence.length
+          ? state.falStatusSequence.shift()
+          : 'COMPLETED'
+        return makeJsonResponse({ status: nextStatus })
       }
 
       if (url.pathname.endsWith('/response')) {
@@ -892,6 +896,70 @@ async function main() {
   )
   assert.equal(state.falPostCalls, falPostCallsBeforeDefaultRun + 1)
 
+  state.falStatusSequence = ['IN_PROGRESS']
+  const pendingOriginalPath = 'manual/pending-fal.jpg'
+  state.storage.set(storageKey('human-restore-originals', pendingOriginalPath), {
+    buffer: Buffer.from('pending-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'pending-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-pending-fal',
+    notes: 'Pending fal requests should persist queue URLs for resume.',
+    order_bound: true,
+    order_number: 'txn_pending_fal',
+    original_file_name: 'pending-fal.jpg',
+    original_file_size: Buffer.byteLength('pending-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: pendingOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-PENDING-FAL',
+    updated_at: new Date().toISOString(),
+  })
+
+  const falPostCallsBeforePendingRun = state.falPostCalls
+  const pendingFalResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-pending-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(pendingFalResponse.statusCode, 200)
+  assert.equal(pendingFalResponse.body.job.status, 'processing')
+  assert.equal(pendingFalResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(pendingFalResponse.body.job.ai_draft_source, 'fal')
+  const pendingFalJobPersisted = state.jobs.find(
+    candidate => candidate.id === 'job-pending-fal'
+  )
+  assert.equal(
+    pendingFalJobPersisted?.ai_provider_payload?.fal?.response_url,
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+  )
+  assert.equal(
+    pendingFalJobPersisted?.ai_provider_payload?.fal?.status_url,
+    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+  )
+  assert.equal(pendingFalJobPersisted?.ai_request_id, 'fal-request-1')
+  assert.equal(state.falPostCalls, falPostCallsBeforePendingRun + 1)
+
+  state.falStatusSequence = ['COMPLETED']
+  const falPostCallsBeforePendingResume = state.falPostCalls
+  const pendingResumeResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-pending-fal' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(pendingResumeResponse.statusCode, 200)
+  assert.equal(pendingResumeResponse.body.job.status, 'needs_review')
+  assert.equal(pendingResumeResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(pendingResumeResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(state.falPostCalls, falPostCallsBeforePendingResume)
+
   const resumedOriginalPath = 'manual/resume-fal.jpg'
   state.storage.set(storageKey('human-restore-originals', resumedOriginalPath), {
     buffer: Buffer.from('resume-fal-original'),
@@ -1088,6 +1156,7 @@ async function main() {
   state.jobs[0].expires_at = new Date(Date.now() - 1000).toISOString()
   retoucherJob.expires_at = new Date(Date.now() - 1000).toISOString()
   const defaultFalJob = state.jobs.find(candidate => candidate.id === 'job-default-fal')
+  const pendingFalJob = state.jobs.find(candidate => candidate.id === 'job-pending-fal')
   const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
 
   if (defaultFalJob) {
@@ -1098,6 +1167,10 @@ async function main() {
     resumeFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
+  if (pendingFalJob) {
+    pendingFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
   const cleanupResponse = await invoke(cleanupHandler, {
     headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
     method: 'GET',
@@ -1106,11 +1179,18 @@ async function main() {
   assert.equal(cleanupResponse.statusCode, 200)
   assert.deepEqual(
     cleanupResponse.body.deleted.sort(),
-    [job.id, retoucherJob.id, 'job-default-fal', 'job-resume-fal'].sort()
+    [
+      job.id,
+      retoucherJob.id,
+      'job-default-fal',
+      'job-pending-fal',
+      'job-resume-fal',
+    ].sort()
   )
   assert.equal(state.jobs[0].status, 'deleted')
   assert.equal(retoucherJob.status, 'deleted')
   assert.equal(defaultFalJob?.status, 'deleted')
+  assert.equal(pendingFalJob?.status, 'deleted')
   assert.equal(resumeFalJob?.status, 'deleted')
   assert.equal(state.storage.size, 0)
 

@@ -358,6 +358,11 @@ async function submitFalRequest({ imageUrl, prompt }) {
   return {
     model,
     provider: 'fal',
+    providerPayload: {
+      request_id: requestId,
+      response_url: resultUrl,
+      status_url: statusUrl,
+    },
     requestId,
     resultUrl,
     statusUrl,
@@ -668,6 +673,12 @@ async function callFal({ job, prompt }) {
   return {
     model: queuedOrImmediate.model,
     provider: 'fal',
+    providerPayload:
+      queuedOrImmediate.providerPayload || {
+        request_id: queuedOrImmediate.requestId,
+        response_url: queuedOrImmediate.resultUrl,
+        status_url: queuedOrImmediate.statusUrl,
+      },
     requestId: queuedOrImmediate.requestId,
     responseUrl: queuedOrImmediate.resultUrl,
     status: 'pending',
@@ -894,6 +905,13 @@ export async function runRestoreJob({
             : await callFal({ job, prompt })
 
     if (result.status === 'pending') {
+      const providerPayload =
+        result.provider === 'fal' &&
+        result.providerPayload &&
+        !result.providerPayload.fal
+          ? { fal: result.providerPayload }
+          : result.providerPayload || {}
+
       return updateJob(job.id, {
         ai_draft_error: null,
         ai_draft_model: result.model,
@@ -906,7 +924,7 @@ export async function runRestoreJob({
             : result.provider),
         ai_error: null,
         ai_provider: result.provider,
-        ai_provider_payload: result.providerPayload || {},
+        ai_provider_payload: providerPayload,
         ai_request_id: result.requestId,
         result_model: result.model,
         result_prompt: prompt,
