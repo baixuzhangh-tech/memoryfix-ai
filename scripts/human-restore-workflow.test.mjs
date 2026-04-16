@@ -1062,6 +1062,64 @@ async function main() {
     'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
   )
 
+  const stuckFalOriginalPath = 'manual/stuck-fal.jpg'
+  const stuckFalDraftPath = 'manual/stuck-fal-draft.png'
+  state.storage.set(storageKey('human-restore-originals', stuckFalOriginalPath), {
+    buffer: Buffer.from('stuck-fal-original'),
+    contentType: 'image/jpeg',
+  })
+  state.storage.set(storageKey('human-restore-results', stuckFalDraftPath), {
+    buffer: Buffer.from('stuck-fal-draft'),
+    contentType: 'image/png',
+  })
+  state.jobs.push({
+    ai_draft_created_at: new Date().toISOString(),
+    ai_draft_file_type: 'image/png',
+    ai_draft_model: 'fal-ai/image-editing/photo-restoration',
+    ai_draft_provider: 'fal',
+    ai_draft_prompt: 'stuck fal prompt',
+    ai_draft_source: 'fal',
+    ai_draft_storage_bucket: 'human-restore-results',
+    ai_draft_storage_path: stuckFalDraftPath,
+    ai_provider: 'fal',
+    ai_provider_payload: {},
+    ai_request_id: 'fal-request-1',
+    checkout_email: 'stuck-fal@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-stuck-fal-existing-draft',
+    notes: 'Existing fal draft should settle to review when polling cannot complete.',
+    order_bound: true,
+    order_number: 'txn_stuck_fal_existing_draft',
+    original_file_name: 'stuck-fal.jpg',
+    original_file_size: Buffer.byteLength('stuck-fal-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: stuckFalOriginalPath,
+    result_file_type: 'image/png',
+    result_model: 'fal-ai/image-editing/photo-restoration',
+    result_prompt: 'stuck fal prompt',
+    result_storage_bucket: 'human-restore-results',
+    result_storage_path: stuckFalDraftPath,
+    status: 'processing',
+    submission_reference: 'MF-STUCK-FAL-DRAFT',
+    updated_at: new Date().toISOString(),
+  })
+
+  state.falStatusErrorStatus = 500
+  const stuckFalResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(JSON.stringify({ jobId: 'job-stuck-fal-existing-draft' })),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.falStatusErrorStatus = 0
+
+  assert.equal(stuckFalResponse.statusCode, 200)
+  assert.equal(stuckFalResponse.body.job.status, 'needs_review')
+  assert.equal(stuckFalResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(stuckFalResponse.body.job.ai_draft_source, 'fal')
+  assert.equal(stuckFalResponse.body.job.ai_draft_storage_path, stuckFalDraftPath)
+
   state.falStatusSequence = ['COMPLETED']
   const falPostCallsBeforePendingResume = state.falPostCalls
   const pendingResumeResponse = await invoke(adminProcessHandler, {
@@ -1277,6 +1335,9 @@ async function main() {
   )
   const pendingFalJob = state.jobs.find(candidate => candidate.id === 'job-pending-fal')
   const pollFailureFalJob = state.jobs.find(candidate => candidate.id === 'job-poll-failure-fal')
+  const stuckFalExistingDraftJob = state.jobs.find(
+    candidate => candidate.id === 'job-stuck-fal-existing-draft'
+  )
   const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
 
   if (defaultFalJob) {
@@ -1299,6 +1360,10 @@ async function main() {
     pollFailureFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
+  if (stuckFalExistingDraftJob) {
+    stuckFalExistingDraftJob.expires_at = new Date(Date.now() - 1000).toISOString()
+  }
+
   const cleanupResponse = await invoke(cleanupHandler, {
     headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
     method: 'GET',
@@ -1315,6 +1380,7 @@ async function main() {
       'job-pending-fal',
       'job-poll-failure-fal',
       'job-resume-fal',
+      'job-stuck-fal-existing-draft',
     ].sort()
   )
   assert.equal(state.jobs[0].status, 'deleted')
@@ -1324,6 +1390,7 @@ async function main() {
   assert.equal(pendingFalJob?.status, 'deleted')
   assert.equal(pollFailureFalJob?.status, 'deleted')
   assert.equal(resumeFalJob?.status, 'deleted')
+  assert.equal(stuckFalExistingDraftJob?.status, 'deleted')
   assert.equal(state.storage.size, 0)
 
   console.log('Human Restore workflow smoke test passed.')

@@ -771,6 +771,14 @@ function buildFalOnlyResult({ falResult, codeformerError }) {
   }
 }
 
+async function settleExistingDraftForReview(job) {
+  return updateJob(job.id, {
+    ai_draft_error: null,
+    ai_error: null,
+    status: 'needs_review',
+  })
+}
+
 async function callFalCodeformerPipeline({ job, prompt }) {
   const falResult = await callFal({ job, prompt })
 
@@ -887,15 +895,37 @@ export async function runRestoreJob({
     job.ai_request_id &&
     job.status === 'processing'
   ) {
-    const polled = await pollFalRequest({
-      model:
-        job.result_model || process.env.FAL_RESTORE_MODEL || defaultFalModel,
-      requestId: job.ai_request_id,
-      responseUrl: job.ai_provider_payload?.fal?.response_url,
-      statusUrl: job.ai_provider_payload?.fal?.status_url,
-    })
+    let polled
+
+    try {
+      polled = await pollFalRequest({
+        model:
+          job.result_model || process.env.FAL_RESTORE_MODEL || defaultFalModel,
+        requestId: job.ai_request_id,
+        responseUrl: job.ai_provider_payload?.fal?.response_url,
+        statusUrl: job.ai_provider_payload?.fal?.status_url,
+      })
+    } catch (error) {
+      if (shouldReturnFalPending(error)) {
+        if (job.ai_draft_storage_path || job.result_storage_path) {
+          return settleExistingDraftForReview(job)
+        }
+
+        return updateJob(job.id, {
+          ai_error: null,
+          ai_draft_error: null,
+          status: 'processing',
+        })
+      }
+
+      throw error
+    }
 
     if (polled.status === 'pending') {
+      if (job.ai_draft_storage_path || job.result_storage_path) {
+        return settleExistingDraftForReview(job)
+      }
+
       return updateJob(job.id, {
         ai_error: null,
         ai_draft_error: null,
