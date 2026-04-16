@@ -343,18 +343,30 @@ async function submitFalRequest({ imageUrl, prompt }) {
     queuedAt: new Date().toISOString(),
     requestId,
   })
+  const statusUrl = getPreferredFalQueueUrl(
+    rawStatusUrl,
+    queuePayload.status_url,
+    'status'
+  )
+  const resultUrl = getPreferredFalQueueUrl(
+    rawResultUrl,
+    queuePayload.response_url,
+    'response'
+  )
 
   return {
     model,
     provider: 'fal',
     providerPayload: {
       ...queuePayload,
+      response_url: resultUrl,
+      status_url: statusUrl,
       raw_response_url: rawResultUrl || null,
       raw_status_url: rawStatusUrl || null,
     },
     requestId,
-    resultUrl: rawResultUrl || queuePayload.response_url,
-    statusUrl: rawStatusUrl || queuePayload.status_url,
+    resultUrl,
+    statusUrl,
   }
 }
 
@@ -390,7 +402,7 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   )
 
   const statusResponse = await fetch(statusEndpoint, {
-    method: 'POST',
+    method: 'GET',
     headers: {
       Authorization: `Key ${falKey}`,
     },
@@ -428,7 +440,7 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   }
 
   const resultResponse = await fetch(resultEndpoint, {
-    method: 'POST',
+    method: 'GET',
     headers: {
       Authorization: `Key ${falKey}`,
     },
@@ -1599,11 +1611,28 @@ function normalizeFalModel(model) {
   return process.env.FAL_RESTORE_MODEL || defaultFalModel
 }
 
-function buildFalQueueUrl({ model, requestId, type }) {
+function getFalQueueModel(model) {
   const normalizedModel = normalizeFalModel(model)
-  const normalizedType = type === 'status' ? 'status' : 'response'
 
-  return `https://queue.fal.run/${normalizedModel}/requests/${requestId}/${normalizedType}`
+  if (process.env.FAL_RESTORE_QUEUE_MODEL) {
+    return String(process.env.FAL_RESTORE_QUEUE_MODEL).trim()
+  }
+
+  if (normalizedModel === defaultFalModel) {
+    return 'fal-ai/image-editing'
+  }
+
+  return normalizedModel
+}
+
+function buildFalQueueUrl({ model, requestId, type }) {
+  const queueModel = getFalQueueModel(model)
+
+  if (type === 'status') {
+    return `https://queue.fal.run/${queueModel}/requests/${requestId}/status`
+  }
+
+  return `https://queue.fal.run/${queueModel}/requests/${requestId}`
 }
 
 function getPreferredFalQueueUrl(rawUrl, fallbackUrl, type) {
@@ -1615,12 +1644,14 @@ function getPreferredFalQueueUrl(rawUrl, fallbackUrl, type) {
 
   try {
     const parsed = new URL(trimmed)
-    const fallback = new URL(fallbackUrl)
 
     if (
       parsed.hostname === 'queue.fal.run' &&
-      parsed.pathname === fallback.pathname &&
-      parsed.pathname.endsWith(`/${type === 'status' ? 'status' : 'response'}`)
+      parsed.pathname.includes('/requests/') &&
+      ((type === 'status' && parsed.pathname.endsWith('/status')) ||
+        (type !== 'status' &&
+          !parsed.pathname.endsWith('/status') &&
+          !parsed.pathname.endsWith('/cancel')))
     ) {
       return trimmed
     }

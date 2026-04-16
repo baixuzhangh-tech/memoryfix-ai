@@ -368,8 +368,8 @@ function installMockFetch(state) {
 
     if (url.hostname === 'queue.fal.run') {
       if (url.pathname.endsWith('/status')) {
-        if (method !== 'POST') {
-          return makeJsonResponse({ error: 'fal status requires POST' }, { status: 405 })
+        if (method !== 'GET') {
+          return makeJsonResponse({ error: 'fal status requires GET' }, { status: 405 })
         }
         state.falStatusRequestUrls.push(url.toString())
         if (state.falStatusErrorStatus) {
@@ -385,9 +385,13 @@ function installMockFetch(state) {
         return makeJsonResponse({ status: nextStatus })
       }
 
-      if (url.pathname.endsWith('/response')) {
-        if (method !== 'POST') {
-          return makeJsonResponse({ error: 'fal response requires POST' }, { status: 405 })
+      if (
+        url.pathname.includes('/requests/') &&
+        !url.pathname.endsWith('/status') &&
+        !url.pathname.endsWith('/cancel')
+      ) {
+        if (method !== 'GET') {
+          return makeJsonResponse({ error: 'fal response requires GET' }, { status: 405 })
         }
         state.falResponseRequestUrls.push(url.toString())
         if (state.falResponseErrorStatus) {
@@ -407,10 +411,10 @@ function installMockFetch(state) {
           request_id: 'fal-request-1',
           response_url:
             state.falSubmitResponseUrl ||
-            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+            'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
           status_url:
             state.falSubmitStatusUrl ||
-            'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+            'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
         })
       }
     }
@@ -1019,11 +1023,11 @@ async function main() {
   )
   assert.equal(
     pendingFalJobPersisted?.ai_provider_payload?.fal?.response_url,
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
   assert.equal(
     pendingFalJobPersisted?.ai_provider_payload?.fal?.status_url,
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
   assert.equal(pendingFalJobPersisted?.ai_request_id, 'fal-request-1')
   assert.equal(state.falPostCalls, falPostCallsBeforePendingRun + 1)
@@ -1067,7 +1071,7 @@ async function main() {
   assert.equal(pollFailureResponse.body.job.ai_request_id, 'fal-request-1')
   assert.equal(
     pollFailureResponse.body.job.ai_provider_payload?.fal?.status_url,
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
 
   state.falStatusErrorStatus = 401
@@ -1219,11 +1223,11 @@ async function main() {
   assert.equal(state.falPostCalls, falPostCallsBeforeMalformedSubmit + 1)
   assert.equal(
     state.falStatusRequestUrls[statusUrlCallsBeforeMalformedSubmit],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
   assert.equal(
     state.falResponseRequestUrls[responseUrlCallsBeforeMalformedSubmit],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
   assert.equal(
     malformedSubmitResponse.body.job.ai_provider_payload?.fal?.raw_status_url,
@@ -1259,9 +1263,9 @@ async function main() {
     ai_provider_payload: {
       fal: {
         response_url:
-          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
         status_url:
-          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
       },
     },
     ai_request_id: 'fal-request-1',
@@ -1344,11 +1348,11 @@ async function main() {
   assert.equal(state.falPostCalls, falPostCallsBeforeLegacyMalformedResume)
   assert.equal(
     state.falStatusRequestUrls[statusUrlCallsBeforeLegacyMalformedResume],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
   assert.equal(
     state.falResponseRequestUrls[responseUrlCallsBeforeLegacyMalformedResume],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
   assert.equal(
     legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal?.raw_status_url,
@@ -1424,11 +1428,11 @@ async function main() {
   assert.equal(state.falPostCalls, falPostCallsBeforePublicResume)
   assert.equal(
     state.falStatusRequestUrls[statusUrlCallsBeforePublicResume],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
   assert.equal(
     state.falResponseRequestUrls[responseUrlCallsBeforePublicResume],
-    'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response'
+    'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
   const publicResumeJob = state.jobs.find(candidate => candidate.id === 'job-public-resume-fal')
   const publicResumeOrder = state.orders.find(
@@ -1451,9 +1455,9 @@ async function main() {
         model: 'fal-ai/image-editing/photo-restoration',
         queued_at: staleFalQueuedAt,
         response_url:
-          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/response',
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
         status_url:
-          'https://queue.fal.run/fal-ai/image-editing/photo-restoration/requests/fal-request-1/status',
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
       },
     },
     ai_request_id: 'fal-request-1',
