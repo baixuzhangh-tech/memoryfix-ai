@@ -15,6 +15,7 @@ import HumanRestoreUploadForm from './components/HumanRestoreUploadForm'
 import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
+import LandingPage from './pages/LandingPage'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -641,6 +642,11 @@ function App() {
   const isAdminReviewPage = currentPath === adminReviewPath
   const isRetoucherPortalPage = currentPath === retoucherPortalPath
   const isLegalRoute = isLegalPage(currentPath)
+  // Feature flag for the Phase 2-A warm-humanist Landing redesign. Opt-in
+  // via `?v=2` so the legacy home keeps serving all production traffic
+  // until we explicitly cut over. Remove this flag and the legacy home
+  // block once the new landing is validated.
+  const isNewLandingEnabled = currentSearchParams.get('v') === '2'
   const secureUploadToken = currentSearchParams.get('token') || ''
   const defaultCheckoutEmail =
     currentSearchParams.get('checkout_email') ||
@@ -1964,7 +1970,14 @@ function App() {
               </section>
             </div>
           ))}
-        {mainView === 'home' && (
+        {mainView === 'home' && isNewLandingEnabled && (
+          <LandingPage
+            isHumanRestorePaymentReady={isHumanRestorePaymentReady}
+            onFileSelection={handleFileSelection}
+            onLaunchPaidCheckout={handleLaunchHumanRestoreCheckout}
+          />
+        )}
+        {mainView === 'home' && !isNewLandingEnabled && (
           <div className="relative overflow-hidden">
             <div className="pointer-events-none absolute left-[-8rem] top-20 h-72 w-72 rounded-full bg-[#d7a65f]/20 blur-3xl" />
             <div className="pointer-events-none absolute right-[-10rem] top-[28rem] h-96 w-96 rounded-full bg-[#211915]/10 blur-3xl" />

@@ -55,10 +55,21 @@
     {
       "files": [
         "src/components/ui/**/*.{ts,tsx}",
+        "src/components/domain/**/*.{ts,tsx}",
         "src/sections/**/*.{ts,tsx}",
-        "src/pages/**/*.{ts,tsx}"
+        "src/pages/**/*.{ts,tsx}",
+        "src/lib/**/*.{ts,tsx}",
+        "src/config/**/*.{ts,tsx}"
       ],
       "rules": {
+        "react/jsx-props-no-spreading": "off",
+        "jsx-a11y/heading-has-content": "off",
+        "import/prefer-default-export": "off",
+        "@typescript-eslint/no-unused-vars": [
+          "warn",
+          { "argsIgnorePattern": "^_", "varsIgnorePattern": "^(React|_)" }
+        ],
+        "react/require-default-props": "off",
         "no-restricted-syntax": [
           "warn",
           {
