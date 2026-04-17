@@ -53,7 +53,16 @@ async function syncOrderWithLinkedJob(order) {
   let effectiveJob = linkedJob
 
   if (shouldResumeLinkedFalJob(linkedJob)) {
-    effectiveJob = await runRestoreJob({ job: linkedJob }).catch(() => linkedJob)
+    // Resume-only path: forceRerun is intentionally false so runRestoreJob
+    // can ONLY continue an already-submitted fal request via pollFalRequest.
+    // If the job has already settled into needs_review / delivered, the
+    // idempotent guard inside runRestoreJob will no-op here instead of
+    // triggering a new billable fal submission on every order page refresh.
+    effectiveJob = await runRestoreJob({
+      job: linkedJob,
+      forceRerun: false,
+      triggeredBy: 'order_sync',
+    }).catch(() => linkedJob)
   }
 
   const nextOrderStatus = mapJobStatusToOrderStatus(effectiveJob.status)

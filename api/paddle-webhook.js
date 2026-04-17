@@ -461,7 +461,10 @@ async function handlePreuploadedPaidOrder({
   let currentJob = job
 
   if (shouldAutoProcessAfterPayment()) {
-    currentJob = await runRestoreJob({ job }).catch(async error => {
+    currentJob = await runRestoreJob({
+      job,
+      triggeredBy: 'payment_confirmed',
+    }).catch(async error => {
       await insertEvent(job.id, 'ai_restore_auto_start_failed', {
         error: error instanceof Error ? error.message : 'Auto restore failed.',
       })

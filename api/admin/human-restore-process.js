@@ -8,13 +8,34 @@ import {
   updateOrderByJobId,
 } from '../_lib/supabase.js'
 
-function shouldSkipDefaultTimedOutFalRetry(job, body) {
+const terminalOrSettledStatuses = new Set([
+  'needs_review',
+  'delivered',
+  'assigned',
+  'manual_review',
+  'failed',
+])
+
+function hasExplicitRerunIntent(body) {
   return Boolean(
-    job &&
-      job.status === 'manual_review' &&
-      !body.provider &&
-      !body.modelPreset
+    body &&
+      (body.pipelineId ||
+        body.provider ||
+        body.modelPreset ||
+        body.forceRerun === true)
   )
+}
+
+function shouldSkipDefaultTimedOutFalRetry(job, body) {
+  if (!job) {
+    return false
+  }
+
+  if (hasExplicitRerunIntent(body)) {
+    return false
+  }
+
+  return terminalOrSettledStatuses.has(job.status)
 }
 
 export const config = {
@@ -73,6 +94,8 @@ export default async function handler(req, res) {
       pipelineId: body.pipelineId,
       modelPreset: body.modelPreset,
       provider: body.provider,
+      forceRerun: body.forceRerun === true,
+      triggeredBy: 'admin_manual',
     })
 
     await insertEvent(updatedJob.id, 'ai_restore_processed', {

@@ -3,6 +3,7 @@ import {
   deleteObject,
   downloadObject,
   getHumanRestoreBuckets,
+  insertEvent,
   updateJob,
   uploadObject,
 } from './supabase.js'
@@ -13,6 +14,18 @@ import {
   readPipelineConfig,
   summarizePipeline,
 } from './restore-pipeline-config.js'
+import {
+  analyzeRestorationImage,
+  applyReplicateEnhancementBlend,
+  applyVintageRestoreFinish,
+  buildAdaptiveCodeformerVariants,
+  deriveAdaptiveFinishParams,
+  evaluateStageConditions,
+  finalizeRestoredDeliveryImage,
+  scoreAdaptiveCodeformerCandidate,
+  selectAdaptiveCodeformerProfile,
+  summarizeRestorationAnalysis,
+} from './restore-stage-processing.js'
 
 const defaultFalModel = 'fal-ai/image-editing/photo-restoration'
 const defaultFalProcessingTimeoutMinutes = 60
@@ -21,6 +34,14 @@ const defaultReplicateCodeformerModel = 'lucataco/codeformer'
 const defaultReplicateGfpganModel =
   'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
 const defaultReplicatePreset = 'codeformer'
+const defaultDeliveryExportParams = {
+  export_format: 'png',
+  jpeg_quality: 97,
+  preserve_metadata: true,
+  preserve_original_dimensions: true,
+  resize_kernel: 'lanczos3',
+  webp_quality: 96,
+}
 
 function wait(ms) {
   return new Promise(resolve => {
@@ -109,7 +130,9 @@ function isTransientFalPollFailure(response, payload) {
   }
 
   const status = String(payload?.status || '').toUpperCase()
-  const errorType = String(payload?.error_type || payload?.errorType || '').toUpperCase()
+  const errorType = String(
+    payload?.error_type || payload?.errorType || ''
+  ).toUpperCase()
 
   if (response.status === 404) {
     return ['IN_QUEUE', 'IN_PROGRESS', 'NOT_FOUND'].includes(status)
@@ -154,7 +177,9 @@ function getFalProcessingTimeoutMs() {
       5,
       24 * 60,
       defaultFalProcessingTimeoutMinutes
-    ) * 60 * 1000
+    ) *
+    60 *
+    1000
   )
 }
 
@@ -199,8 +224,20 @@ function inferImageExtension(contentType) {
   return 'png'
 }
 
-async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
+async function callOpenAI({
+  imageBuffer,
+  imageContentType,
+  job,
+  prompt,
+  stageParams,
+}) {
   const apiKey = process.env.OPENAI_API_KEY
+  const params =
+    stageParams && typeof stageParams === 'object' ? stageParams : {}
+  const model =
+    params.model ||
+    process.env.OPENAI_IMAGE_EDIT_MODEL ||
+    defaultOpenAIImageModel
 
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured.')
@@ -211,23 +248,26 @@ async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
     type: imageContentType || 'image/png',
   })
 
-  formData.append(
-    'model',
-    process.env.OPENAI_IMAGE_EDIT_MODEL || defaultOpenAIImageModel
-  )
+  formData.append('model', model)
   formData.append('image', imageBlob, job.original_file_name || 'photo.png')
   formData.append('prompt', prompt)
 
-  if (process.env.OPENAI_IMAGE_SIZE) {
-    formData.append('size', process.env.OPENAI_IMAGE_SIZE)
+  if (params.size || process.env.OPENAI_IMAGE_SIZE) {
+    formData.append('size', params.size || process.env.OPENAI_IMAGE_SIZE)
   }
 
-  if (process.env.OPENAI_IMAGE_QUALITY) {
-    formData.append('quality', process.env.OPENAI_IMAGE_QUALITY)
+  if (params.quality || process.env.OPENAI_IMAGE_QUALITY) {
+    formData.append(
+      'quality',
+      params.quality || process.env.OPENAI_IMAGE_QUALITY
+    )
   }
 
-  if (process.env.OPENAI_IMAGE_OUTPUT_FORMAT) {
-    formData.append('output_format', process.env.OPENAI_IMAGE_OUTPUT_FORMAT)
+  if (params.output_format || process.env.OPENAI_IMAGE_OUTPUT_FORMAT) {
+    formData.append(
+      'output_format',
+      params.output_format || process.env.OPENAI_IMAGE_OUTPUT_FORMAT
+    )
   }
 
   const response = await fetch('https://api.openai.com/v1/images/edits', {
@@ -251,7 +291,7 @@ async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
     return {
       buffer: Buffer.from(firstImage.b64_json, 'base64'),
       contentType: 'image/png',
-      model: process.env.OPENAI_IMAGE_EDIT_MODEL || defaultOpenAIImageModel,
+      model,
       provider: 'openai',
       providerPayload: { source: 'b64_json' },
     }
@@ -264,7 +304,7 @@ async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
 
     return {
       ...fetched,
-      model: process.env.OPENAI_IMAGE_EDIT_MODEL || defaultOpenAIImageModel,
+      model,
       provider: 'openai',
       providerPayload: { source: 'url' },
     }
@@ -273,24 +313,88 @@ async function callOpenAI({ imageBuffer, imageContentType, job, prompt }) {
   throw new Error('OpenAI did not return a restored image.')
 }
 
-async function submitFalRequest({ imageUrl, prompt }) {
+async function recordFalSubmission({
+  job,
+  model,
+  requestId,
+  source,
+  triggeredBy,
+}) {
+  // This runs immediately after a billable POST to queue.fal.run has
+  // succeeded. Emit both a structured log (for Vercel Logs grep) and a
+  // persistent event row (for billing reconciliation / daily double-charge
+  // alerts). Failures here must never fail the restore itself.
+  const logLine = {
+    event: 'fal_submit',
+    job_id: job?.id || null,
+    model,
+    request_id: requestId,
+    source: source || 'queued',
+    timestamp: new Date().toISOString(),
+    triggered_by: triggeredBy || 'unknown',
+  }
+
+  try {
+    console.log(JSON.stringify(logLine))
+  } catch {
+    // Logging must never break the restore flow.
+  }
+
+  if (!job?.id) {
+    return
+  }
+
+  await insertEvent(job.id, 'fal_submitted', {
+    model,
+    request_id: requestId,
+    source: source || 'queued',
+    triggered_by: triggeredBy || 'unknown',
+  }).catch(() => null)
+}
+
+async function submitFalRequest({
+  imageUrl,
+  job,
+  prompt,
+  stageParams,
+  triggeredBy,
+}) {
   const falKey = process.env.FAL_KEY
+  const params =
+    stageParams && typeof stageParams === 'object' ? stageParams : {}
 
   if (!falKey) {
     throw new Error('FAL_KEY is not configured.')
   }
 
-  const model = normalizeFalModel(process.env.FAL_RESTORE_MODEL || defaultFalModel)
+  const model = normalizeFalModel(
+    params.model || process.env.FAL_RESTORE_MODEL || defaultFalModel
+  )
   const input = {
-    guidance_scale: Number(process.env.FAL_RESTORE_GUIDANCE_SCALE) || 3.5,
+    guidance_scale:
+      Number(params.guidance_scale) ||
+      Number(process.env.FAL_RESTORE_GUIDANCE_SCALE) ||
+      3.5,
     image_url: imageUrl,
     num_inference_steps:
-      Number(process.env.FAL_RESTORE_NUM_INFERENCE_STEPS) || 30,
-    output_format: process.env.FAL_RESTORE_OUTPUT_FORMAT || 'jpeg',
-    safety_tolerance: process.env.FAL_RESTORE_SAFETY_TOLERANCE || '2',
+      Number(params.num_inference_steps) ||
+      Number(process.env.FAL_RESTORE_NUM_INFERENCE_STEPS) ||
+      30,
+    output_format:
+      params.output_format || process.env.FAL_RESTORE_OUTPUT_FORMAT || 'png',
+    safety_tolerance:
+      params.safety_tolerance ||
+      process.env.FAL_RESTORE_SAFETY_TOLERANCE ||
+      '2',
   }
 
-  if (process.env.FAL_RESTORE_INCLUDE_PROMPT === 'true') {
+  const includePrompt =
+    params.include_prompt !== undefined
+      ? params.include_prompt === true ||
+        String(params.include_prompt).toLowerCase() === 'true'
+      : process.env.FAL_RESTORE_INCLUDE_PROMPT === 'true'
+
+  if (includePrompt) {
     input.prompt = prompt
   }
 
@@ -325,6 +429,14 @@ async function submitFalRequest({ imageUrl, prompt }) {
     const imageUrlFromPayload = extractFalImageUrl(payload)
 
     if (imageUrlFromPayload) {
+      await recordFalSubmission({
+        job,
+        model,
+        requestId: null,
+        source: 'immediate',
+        triggeredBy,
+      })
+
       const fetched = await fetchImageBuffer(imageUrlFromPayload)
 
       return {
@@ -337,6 +449,14 @@ async function submitFalRequest({ imageUrl, prompt }) {
 
     throw new Error('fal.ai did not return a request id.')
   }
+
+  await recordFalSubmission({
+    job,
+    model,
+    requestId,
+    source: 'queued',
+    triggeredBy,
+  })
 
   const queuePayload = buildFalQueuePayload({
     model,
@@ -484,7 +604,9 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   }
 }
 
-function buildReplicateRequest({ imageUrl, modelPreset }) {
+function buildReplicateRequest({ imageUrl, modelPreset, stageParams }) {
+  const params =
+    stageParams && typeof stageParams === 'object' ? stageParams : {}
   const preset =
     normalizeModelPreset(modelPreset) || getDefaultReplicatePreset()
 
@@ -492,10 +614,17 @@ function buildReplicateRequest({ imageUrl, modelPreset }) {
     return {
       input: {
         img: imageUrl,
-        scale: clampNumber(process.env.REPLICATE_GFPGAN_SCALE, 1, 10, 2),
-        version: process.env.REPLICATE_GFPGAN_VERSION || 'v1.4',
+        scale: clampNumber(
+          params.scale ?? process.env.REPLICATE_GFPGAN_SCALE,
+          1,
+          10,
+          2
+        ),
+        version:
+          params.version || process.env.REPLICATE_GFPGAN_VERSION || 'v1.4',
       },
       model:
+        params.model ||
         process.env.REPLICATE_GFPGAN_MODEL ||
         process.env.REPLICATE_RESTORE_MODEL ||
         defaultReplicateGfpganModel,
@@ -506,19 +635,31 @@ function buildReplicateRequest({ imageUrl, modelPreset }) {
   return {
     input: {
       background_enhance:
-        process.env.REPLICATE_CODEFORMER_BACKGROUND_ENHANCE !== 'false',
+        params.background_enhance !== undefined
+          ? params.background_enhance !== false &&
+            String(params.background_enhance).toLowerCase() !== 'false'
+          : process.env.REPLICATE_CODEFORMER_BACKGROUND_ENHANCE !== 'false',
       codeformer_fidelity: clampNumber(
-        process.env.REPLICATE_CODEFORMER_FIDELITY,
+        params.codeformer_fidelity ?? process.env.REPLICATE_CODEFORMER_FIDELITY,
         0,
         1,
         0.7
       ),
       face_upsample:
-        process.env.REPLICATE_CODEFORMER_FACE_UPSAMPLE !== 'false',
+        params.face_upsample !== undefined
+          ? params.face_upsample !== false &&
+            String(params.face_upsample).toLowerCase() !== 'false'
+          : process.env.REPLICATE_CODEFORMER_FACE_UPSAMPLE !== 'false',
       image: imageUrl,
-      upscale: clampNumber(process.env.REPLICATE_CODEFORMER_UPSCALE, 1, 4, 2),
+      upscale: clampNumber(
+        params.upscale ?? process.env.REPLICATE_CODEFORMER_UPSCALE,
+        1,
+        4,
+        2
+      ),
     },
     model:
+      params.model ||
       process.env.REPLICATE_CODEFORMER_MODEL ||
       defaultReplicateCodeformerModel,
     preset: 'codeformer',
@@ -530,7 +671,9 @@ async function resolveReplicateModelVersion({ apiToken, model }) {
   const [name, version] = String(rest || '').split(':')
 
   if (!owner || !name) {
-    throw new Error('Replicate model must be formatted as owner/name[:version].')
+    throw new Error(
+      'Replicate model must be formatted as owner/name[:version].'
+    )
   }
 
   if (version) {
@@ -541,11 +684,14 @@ async function resolveReplicateModelVersion({ apiToken, model }) {
     }
   }
 
-  const response = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}`, {
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
-  })
+  const response = await fetch(
+    `https://api.replicate.com/v1/models/${owner}/${name}`,
+    {
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+      },
+    }
+  )
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
@@ -569,7 +715,12 @@ async function resolveReplicateModelVersion({ apiToken, model }) {
   }
 }
 
-async function callReplicate({ imageUrlOverride, job, modelPreset }) {
+async function callReplicate({
+  imageUrlOverride,
+  job,
+  modelPreset,
+  stageParams,
+}) {
   const apiToken = process.env.REPLICATE_API_TOKEN
 
   if (!apiToken) {
@@ -583,7 +734,11 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
       expiresIn: 60 * 30,
       path: job.original_storage_path,
     }))
-  const request = buildReplicateRequest({ imageUrl, modelPreset })
+  const request = buildReplicateRequest({
+    imageUrl,
+    modelPreset,
+    stageParams,
+  })
   const model = request.model
   const resolvedModel = await resolveReplicateModelVersion({
     apiToken,
@@ -606,7 +761,9 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
 
   if (!createResponse.ok) {
     throw new Error(
-      payload?.detail || payload?.error || 'Replicate prediction request failed.'
+      payload?.detail ||
+        payload?.error ||
+        'Replicate prediction request failed.'
     )
   }
 
@@ -617,9 +774,10 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
   let output = payload?.output
 
   if (payload?.status === 'processing' || payload?.status === 'starting') {
-    const pollUrl = payload?.urls?.get || payload?.id
-      ? `https://api.replicate.com/v1/predictions/${payload.id}`
-      : null
+    const pollUrl =
+      payload?.urls?.get || payload?.id
+        ? `https://api.replicate.com/v1/predictions/${payload.id}`
+        : null
 
     if (pollUrl) {
       const maxPolls = 15
@@ -648,8 +806,8 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
     typeof output === 'string'
       ? output
       : Array.isArray(output)
-        ? output[0]
-        : output?.image || output?.url || ''
+      ? output[0]
+      : output?.image || output?.url || ''
 
   if (!resultImageUrl) {
     throw new Error('Replicate did not return a restored image.')
@@ -671,7 +829,13 @@ async function callReplicate({ imageUrlOverride, job, modelPreset }) {
   }
 }
 
-async function callFal({ imageUrlOverride, job, prompt }) {
+async function callFal({
+  imageUrlOverride,
+  job,
+  prompt,
+  stageParams,
+  triggeredBy,
+}) {
   const imageUrl =
     imageUrlOverride ||
     (await createSignedUrl({
@@ -679,7 +843,13 @@ async function callFal({ imageUrlOverride, job, prompt }) {
       expiresIn: 60 * 30,
       path: job.original_storage_path,
     }))
-  const queuedOrImmediate = await submitFalRequest({ imageUrl, prompt })
+  const queuedOrImmediate = await submitFalRequest({
+    imageUrl,
+    job,
+    prompt,
+    stageParams,
+    triggeredBy,
+  })
 
   if (queuedOrImmediate.buffer) {
     return queuedOrImmediate
@@ -734,12 +904,11 @@ async function callFal({ imageUrlOverride, job, prompt }) {
   return {
     model: queuedOrImmediate.model,
     provider: 'fal',
-    providerPayload:
-      queuedOrImmediate.providerPayload || {
-        request_id: queuedOrImmediate.requestId,
-        response_url: queuedOrImmediate.resultUrl,
-        status_url: queuedOrImmediate.statusUrl,
-      },
+    providerPayload: queuedOrImmediate.providerPayload || {
+      request_id: queuedOrImmediate.requestId,
+      response_url: queuedOrImmediate.resultUrl,
+      status_url: queuedOrImmediate.statusUrl,
+    },
     requestId: queuedOrImmediate.requestId,
     responseUrl: queuedOrImmediate.resultUrl,
     status: 'pending',
@@ -749,6 +918,18 @@ async function callFal({ imageUrlOverride, job, prompt }) {
 
 function getPipelineSource(pipeline) {
   return pipeline?.id ? `pipeline:${pipeline.id}` : 'pipeline'
+}
+
+function getPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {}
+}
+
+function isInternalStageType(stageType) {
+  return ['analyze_photo', 'postprocess_preserve'].includes(
+    String(stageType || '').trim()
+  )
 }
 
 async function settleExistingDraftForReview(job) {
@@ -766,6 +947,10 @@ function getStageProvider(stage) {
 
   if (stage?.type === 'openai') {
     return 'openai'
+  }
+
+  if (isInternalStageType(stage?.type)) {
+    return 'internal'
   }
 
   return 'replicate'
@@ -800,6 +985,14 @@ function getStageSource(stageType) {
     return 'fal'
   }
 
+  if (stageType === 'analyze_photo') {
+    return 'analyze_photo'
+  }
+
+  if (stageType === 'postprocess_preserve') {
+    return 'postprocess_preserve'
+  }
+
   return ''
 }
 
@@ -809,13 +1002,19 @@ function getPipelineStageTypes(pipeline) {
     : []
 }
 
+function getSignificantPipelineStageTypes(pipeline) {
+  return getPipelineStageTypes(pipeline).filter(
+    stageType => !isInternalStageType(stageType)
+  )
+}
+
 function isFalCodeformerPipeline(pipeline) {
-  const stageTypes = getPipelineStageTypes(pipeline)
+  const stageTypes = getSignificantPipelineStageTypes(pipeline)
 
   return (
-    stageTypes.length === 2 &&
-    stageTypes[0] === 'fal' &&
-    stageTypes[1] === 'replicate_codeformer'
+    stageTypes.includes('fal') &&
+    stageTypes.includes('replicate_codeformer') &&
+    stageTypes.indexOf('fal') < stageTypes.indexOf('replicate_codeformer')
   )
 }
 
@@ -823,6 +1022,60 @@ function getJobProviderPayload(job) {
   return job?.ai_provider_payload && typeof job.ai_provider_payload === 'object'
     ? job.ai_provider_payload
     : {}
+}
+
+function summarizeCodeformerVariantSelection({
+  applied,
+  candidateCount,
+  selectedLabel,
+  selectedScore,
+  summary,
+}) {
+  if (!applied) {
+    return (
+      summary || `CodeFormer ${selectedLabel || 'balanced'} fell back to fal.`
+    )
+  }
+
+  return [
+    `Selected ${selectedLabel || 'balanced'} CodeFormer candidate`,
+    candidateCount > 1 ? `from ${candidateCount} variants` : null,
+    Number.isFinite(Number(selectedScore))
+      ? `score ${Number(selectedScore).toFixed(2)}`
+      : null,
+    summary || null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function getResultPipelineRuntime(result) {
+  const providerPayload =
+    result?.providerPayload && typeof result.providerPayload === 'object'
+      ? result.providerPayload
+      : {}
+
+  return providerPayload.pipeline_runtime &&
+    typeof providerPayload.pipeline_runtime === 'object'
+    ? providerPayload.pipeline_runtime
+    : null
+}
+
+function getDeliveryExportParams(result) {
+  const runtime = getResultPipelineRuntime(result)
+  const stages = Array.isArray(runtime?.stages) ? runtime.stages : []
+  const postprocessStage = [...stages]
+    .reverse()
+    .find(stage => stage?.type === 'postprocess_preserve')
+  const stageParams =
+    postprocessStage?.params && typeof postprocessStage.params === 'object'
+      ? postprocessStage.params
+      : {}
+
+  return {
+    ...defaultDeliveryExportParams,
+    ...stageParams,
+  }
 }
 
 function normalizePipelineStages(stages) {
@@ -839,7 +1092,9 @@ function normalizePipelineStages(stages) {
       }
 
       return {
+        conditions: getPlainObject(stage?.conditions),
         id: String(stage?.id || `${type}-${index + 1}`),
+        params: getPlainObject(stage?.params),
         type,
       }
     })
@@ -864,7 +1119,9 @@ function normalizePipelineTrace(trace) {
           item.providerPayload && typeof item.providerPayload === 'object'
             ? { ...item.providerPayload }
             : {},
+        skipped: item.skipped === true,
         stageId: String(item.stageId || ''),
+        summary: String(item.summary || ''),
         stageType: String(item.stageType || ''),
       }
     })
@@ -965,18 +1222,12 @@ function buildLegacyResumePipeline(job) {
     }
   }
 
-  const source = String(job?.ai_draft_source || '').trim().toLowerCase()
+  const source = String(job?.ai_draft_source || '')
+    .trim()
+    .toLowerCase()
 
   if (source === 'fal_codeformer') {
-    return {
-      enabled: true,
-      id: 'legacy-fal-codeformer',
-      name: 'fal + CodeFormer',
-      stages: [
-        { id: 'fal-1', type: 'fal' },
-        { id: 'replicate-codeformer-2', type: 'replicate_codeformer' },
-      ],
-    }
+    return buildLegacyRequestedPipeline({ provider: 'fal' })
   }
 
   if (source.startsWith('replicate_')) {
@@ -999,11 +1250,12 @@ function buildPipelineRuntime({
   return {
     currentStageIndex: Math.max(0, Number(currentStageIndex) || 0),
     pipelineId: String(pipeline?.id || existingRuntime?.pipelineId || ''),
-    pipelineName: summarizePipeline(pipeline) || existingRuntime?.pipelineName || '',
-    stages: normalizePipelineStages(pipeline?.stages || existingRuntime?.stages),
-    startedAt:
-      existingRuntime?.startedAt ||
-      new Date().toISOString(),
+    pipelineName:
+      summarizePipeline(pipeline) || existingRuntime?.pipelineName || '',
+    stages: normalizePipelineStages(
+      pipeline?.stages || existingRuntime?.stages
+    ),
+    startedAt: existingRuntime?.startedAt || new Date().toISOString(),
     tempInputs:
       tempInputs !== undefined
         ? normalizeTempInputs(tempInputs)
@@ -1024,18 +1276,25 @@ function buildTraceEntry({ result, stage }) {
       result?.providerPayload && typeof result.providerPayload === 'object'
         ? { ...result.providerPayload }
         : {},
+    skipped: result?.skipped === true,
     stageId: String(stage?.id || ''),
+    summary: String(result?.summary || ''),
     stageType: String(stage?.type || ''),
   }
 }
 
-function createRuntimeAwareProviderPayload({ job, provider, providerPayload, runtime }) {
+function createRuntimeAwareProviderPayload({
+  job,
+  provider,
+  providerPayload,
+  runtime,
+}) {
   const mergedPayload =
     provider === 'fal'
       ? mergeFalProviderPayload(job?.ai_provider_payload, providerPayload || {})
       : providerPayload && typeof providerPayload === 'object'
-        ? { ...providerPayload }
-        : {}
+      ? { ...providerPayload }
+      : {}
 
   return {
     ...mergedPayload,
@@ -1070,9 +1329,9 @@ async function ensureStageInputBuffer(input) {
 async function createStageInputAsset({ contentType, imageBuffer, job, stage }) {
   const buckets = getHumanRestoreBuckets()
   const extension = inferImageExtension(contentType)
-  const path = `${
-    job.submission_reference
-  }/pipeline-input-${stage.id}-${Date.now()}.${extension}`
+  const path = `${job.submission_reference}/pipeline-input-${
+    stage.id
+  }-${Date.now()}.${extension}`
   const bucket = buckets.results
 
   await uploadObject({
@@ -1132,7 +1391,119 @@ async function cleanupPipelineTempInputs(tempInputs) {
   )
 }
 
-async function runPipelineStage({ input, isResume, job, prompt, stage }) {
+function getExpectedStageModel(stage) {
+  if (stage?.type === 'replicate_codeformer') {
+    return (
+      stage?.params?.model ||
+      process.env.REPLICATE_CODEFORMER_MODEL ||
+      defaultReplicateCodeformerModel
+    )
+  }
+
+  if (stage?.type === 'replicate_gfpgan') {
+    return (
+      stage?.params?.model ||
+      process.env.REPLICATE_GFPGAN_MODEL ||
+      process.env.REPLICATE_RESTORE_MODEL ||
+      defaultReplicateGfpganModel
+    )
+  }
+
+  if (stage?.type === 'openai') {
+    return (
+      stage?.params?.model ||
+      process.env.OPENAI_IMAGE_EDIT_MODEL ||
+      defaultOpenAIImageModel
+    )
+  }
+
+  if (stage?.type === 'fal') {
+    return normalizeFalModel(
+      stage?.params?.model || process.env.FAL_RESTORE_MODEL || defaultFalModel
+    )
+  }
+
+  if (stage?.type === 'analyze_photo') {
+    return 'internal/analyze-photo'
+  }
+
+  if (stage?.type === 'postprocess_preserve') {
+    return 'internal/postprocess-preserve'
+  }
+
+  return String(stage?.type || 'stage')
+}
+
+function buildSkippedStageResult({
+  analysis,
+  inputContentType,
+  inputBuffer,
+  reason,
+  stage,
+}) {
+  const summary = analysis?.valid
+    ? `Skipped ${stage?.type} because ${
+        reason || 'the analysis thresholds said no extra enhancement was needed'
+      }.`
+    : `Skipped ${stage?.type} because ${
+        reason || 'the stage conditions requested a bypass'
+      }.`
+
+  return {
+    buffer: inputBuffer,
+    contentType: inputContentType || 'image/png',
+    model: getExpectedStageModel(stage),
+    provider: getStageProvider(stage),
+    providerPayload: {
+      analysis,
+      skipped: true,
+      skip_reason: reason || 'condition_not_met',
+      summary,
+    },
+    skipped: true,
+    summary,
+  }
+}
+
+async function resolveStageConditionEvaluation({ input, stage }) {
+  const conditions = getPlainObject(stage?.conditions)
+  const stageParams = getPlainObject(stage?.params)
+  const requiresAnalysis =
+    Object.keys(conditions).length > 0 ||
+    stage?.type === 'replicate_codeformer' ||
+    stage?.type === 'replicate_gfpgan' ||
+    (stage?.type === 'postprocess_preserve' &&
+      stageParams.auto_finish_profile !== false)
+
+  if (!requiresAnalysis) {
+    return {
+      analysis: null,
+      resolvedInput: null,
+      shouldRun: true,
+    }
+  }
+
+  const resolvedInput = await ensureStageInputBuffer(input)
+  const analysis = await analyzeRestorationImage({
+    imageBuffer: resolvedInput.buffer,
+  })
+  const evaluation = evaluateStageConditions({ analysis, conditions })
+
+  return {
+    ...evaluation,
+    analysis,
+    resolvedInput,
+  }
+}
+
+async function runPipelineStage({
+  input,
+  isResume,
+  job,
+  prompt,
+  stage,
+  triggeredBy,
+}) {
   if (stage?.type === 'fal' && isResume) {
     const falResumePayload = getFalResumePayload(job)
 
@@ -1168,33 +1539,218 @@ async function runPipelineStage({ input, isResume, job, prompt, stage }) {
     }
   }
 
-  if (stage?.type === 'openai') {
+  if (stage?.type === 'analyze_photo') {
     const resolvedInput = await ensureStageInputBuffer(input)
-
-    return callOpenAI({
+    const analysis = await analyzeRestorationImage({
       imageBuffer: resolvedInput.buffer,
-      imageContentType: resolvedInput.contentType,
+      params: stage?.params,
+    })
+    const summary = analysis?.summary || summarizeRestorationAnalysis(analysis)
+
+    return {
+      buffer: resolvedInput.buffer,
+      contentType: resolvedInput.contentType || 'image/png',
+      model: getExpectedStageModel(stage),
+      provider: 'internal',
+      providerPayload: {
+        analysis,
+        summary,
+      },
+      summary,
+    }
+  }
+
+  const conditionEvaluation = await resolveStageConditionEvaluation({
+    input,
+    stage,
+  })
+  const resolvedInput = conditionEvaluation.resolvedInput
+
+  if (conditionEvaluation.shouldRun === false) {
+    const stageInput = resolvedInput || (await ensureStageInputBuffer(input))
+
+    return buildSkippedStageResult({
+      analysis: conditionEvaluation.analysis,
+      inputBuffer: stageInput.buffer,
+      inputContentType: stageInput.contentType,
+      reason: conditionEvaluation.reason,
+      stage,
+    })
+  }
+
+  if (stage?.type === 'openai') {
+    const openAiInput = resolvedInput || (await ensureStageInputBuffer(input))
+
+    const result = await callOpenAI({
+      imageBuffer: openAiInput.buffer,
+      imageContentType: openAiInput.contentType,
       job,
       prompt,
+      stageParams: stage?.params,
     })
+
+    return {
+      ...result,
+      providerPayload: {
+        ...getPlainObject(result.providerPayload),
+        input_analysis: conditionEvaluation.analysis,
+      },
+      summary:
+        conditionEvaluation.analysis?.summary ||
+        'Restored with the configured OpenAI image stage.',
+    }
   }
 
   if (
     stage?.type === 'replicate_codeformer' ||
     stage?.type === 'replicate_gfpgan'
   ) {
+    const replicateInput =
+      resolvedInput || (await ensureStageInputBuffer(input))
     const { signedUrl, tempStorage } = await resolveStageInputUrl({
-      input,
+      input: replicateInput,
       job,
       stage,
     })
 
     try {
-      return await callReplicate({
+      if (stage?.type === 'replicate_codeformer') {
+        const adaptiveProfile = selectAdaptiveCodeformerProfile({
+          analysis: conditionEvaluation.analysis,
+          params: stage?.params,
+        })
+        const adaptiveVariants = buildAdaptiveCodeformerVariants({
+          analysis: conditionEvaluation.analysis,
+          params: stage?.params,
+        })
+        const candidateResults = []
+        const candidateErrors = []
+
+        for (
+          let variantIndex = 0;
+          variantIndex < adaptiveVariants.variants.length;
+          variantIndex += 1
+        ) {
+          const variant = adaptiveVariants.variants[variantIndex]
+          try {
+            const replicateResult = await callReplicate({
+              imageUrlOverride: signedUrl,
+              job,
+              modelPreset: getStageModelPreset(stage),
+              stageParams: variant.params,
+            })
+            const blendResult = await applyReplicateEnhancementBlend({
+              baseBuffer: replicateInput.buffer,
+              baseContentType: replicateInput.contentType,
+              enhancedBuffer: replicateResult.buffer,
+              params: variant.params,
+            })
+            const scoredCandidate = await scoreAdaptiveCodeformerCandidate({
+              baseAnalysis: conditionEvaluation.analysis,
+              baseBuffer: replicateInput.buffer,
+              blendResult,
+              candidateBuffer: blendResult.buffer,
+              variant,
+            })
+
+            candidateResults.push({
+              blendResult,
+              contentType:
+                blendResult.contentType || replicateInput.contentType,
+              providerPayload: {
+                ...getPlainObject(replicateResult.providerPayload),
+                adaptive_profile: adaptiveProfile,
+                input_analysis: conditionEvaluation.analysis,
+                scoring: getPlainObject(scoredCandidate.metrics),
+                variant_label: variant.label,
+              },
+              replicateResult,
+              score: scoredCandidate.score,
+              variant,
+            })
+          } catch (error) {
+            candidateErrors.push({
+              error,
+              label: variant.label,
+            })
+          }
+        }
+
+        if (!candidateResults.length) {
+          throw (
+            candidateErrors[0]?.error ||
+            new Error('CodeFormer candidate race failed for every variant.')
+          )
+        }
+
+        candidateResults.sort((left, right) => right.score - left.score)
+        const selectedCandidate = candidateResults[0]
+        const compactCandidates = candidateResults.map(candidate => ({
+          applied: candidate.blendResult.applied === true,
+          blend: {
+            mask: getPlainObject(candidate.blendResult.mask),
+            mode: candidate.blendResult.mode || 'difference_mask',
+            reason: candidate.blendResult.reason || null,
+          },
+          label: candidate.variant.label,
+          profile: candidate.variant.profile,
+          score: candidate.score,
+        }))
+
+        return {
+          ...selectedCandidate.replicateResult,
+          buffer: selectedCandidate.blendResult.buffer,
+          contentType: selectedCandidate.contentType,
+          providerPayload: {
+            ...getPlainObject(selectedCandidate.providerPayload),
+            blend: {
+              applied: selectedCandidate.blendResult.applied === true,
+              mask: getPlainObject(selectedCandidate.blendResult.mask),
+              mode: selectedCandidate.blendResult.mode || 'difference_mask',
+              reason: selectedCandidate.blendResult.reason || null,
+            },
+            candidate_race: {
+              candidates: compactCandidates,
+              errors: candidateErrors.map(candidate => ({
+                label: candidate.label,
+                reason:
+                  candidate.error instanceof Error
+                    ? candidate.error.message
+                    : String(candidate.error || 'unknown_error'),
+              })),
+              enabled: adaptiveVariants.variants.length > 1,
+              selected_label: selectedCandidate.variant.label,
+              selected_profile: selectedCandidate.variant.profile,
+              selected_score: selectedCandidate.score,
+            },
+          },
+          summary: summarizeCodeformerVariantSelection({
+            applied: selectedCandidate.blendResult.applied === true,
+            candidateCount: adaptiveVariants.variants.length,
+            selectedLabel: selectedCandidate.variant.label,
+            selectedScore: selectedCandidate.score,
+            summary: selectedCandidate.blendResult.summary,
+          }),
+        }
+      }
+
+      const replicateResult = await callReplicate({
         imageUrlOverride: signedUrl,
         job,
         modelPreset: getStageModelPreset(stage),
+        stageParams: stage?.params,
       })
+
+      return {
+        ...replicateResult,
+        providerPayload: {
+          ...getPlainObject(replicateResult.providerPayload),
+          input_analysis: conditionEvaluation.analysis,
+        },
+        summary:
+          conditionEvaluation.analysis?.summary ||
+          'Applied the configured Replicate enhancement.',
+      }
     } finally {
       if (tempStorage) {
         await deleteObject({
@@ -1205,9 +1761,40 @@ async function runPipelineStage({ input, isResume, job, prompt, stage }) {
     }
   }
 
+  if (stage?.type === 'postprocess_preserve') {
+    const postprocessInput =
+      resolvedInput || (await ensureStageInputBuffer(input))
+    const adaptiveFinish = deriveAdaptiveFinishParams({
+      analysis: conditionEvaluation.analysis,
+      params: stage?.params,
+    })
+    const postprocessed = await applyVintageRestoreFinish({
+      imageBuffer: postprocessInput.buffer,
+      inputContentType: postprocessInput.contentType,
+      params: adaptiveFinish.params,
+    })
+
+    return {
+      buffer: postprocessed.buffer,
+      contentType: postprocessed.contentType,
+      model: getExpectedStageModel(stage),
+      provider: 'internal',
+      providerPayload: {
+        applied: postprocessed.applied === true,
+        adaptive_finish_profile: adaptiveFinish.profile,
+        reason: postprocessed.reason || null,
+        settings: getPlainObject(postprocessed.settings),
+        source_analysis: conditionEvaluation.analysis,
+      },
+      summary: postprocessed.summary,
+    }
+  }
+
   if (stage?.type === 'fal') {
+    const stageInput =
+      resolvedInput && resolvedInput.buffer ? resolvedInput : input
     const { signedUrl, tempStorage } = await resolveStageInputUrl({
-      input,
+      input: stageInput,
       job,
       stage,
     })
@@ -1217,6 +1804,8 @@ async function runPipelineStage({ input, isResume, job, prompt, stage }) {
         imageUrlOverride: signedUrl,
         job,
         prompt,
+        stageParams: stage?.params,
+        triggeredBy,
       })
 
       if (result.status === 'pending') {
@@ -1233,7 +1822,14 @@ async function runPipelineStage({ input, isResume, job, prompt, stage }) {
         }).catch(() => null)
       }
 
-      return result
+      return {
+        ...result,
+        providerPayload: {
+          ...getPlainObject(result.providerPayload),
+          input_analysis: conditionEvaluation.analysis,
+        },
+        summary: 'Restored with fal.ai.',
+      }
     } catch (error) {
       if (tempStorage) {
         await deleteObject({
@@ -1263,31 +1859,61 @@ function buildFinalPipelineProviderPayload({
     pipeline_runtime: runtime,
     pipeline_trace: runtime.trace,
   }
+  const latestAnalysisTrace =
+    [...runtime.trace]
+      .reverse()
+      .find(item => item.stageType === 'analyze_photo') || null
+  const falTrace =
+    [...runtime.trace].reverse().find(item => item.stageType === 'fal') || null
+  const codeformerTrace =
+    [...runtime.trace]
+      .reverse()
+      .find(item => item.stageType === 'replicate_codeformer') || null
+  const finishTrace =
+    [...runtime.trace]
+      .reverse()
+      .find(item => item.stageType === 'postprocess_preserve') || null
 
   if (isFalCodeformerPipeline(pipeline)) {
-    const falTrace = runtime.trace.find(item => item.stageType === 'fal')
-    const codeformerTrace = runtime.trace.find(
-      item => item.stageType === 'replicate_codeformer'
+    const codeformerBlend = getPlainObject(
+      codeformerTrace?.providerPayload?.blend
     )
+    const codeformerFallbackToBase =
+      codeformerTrace &&
+      !codeformerTrace.skipped &&
+      codeformerBlend.applied === false &&
+      (codeformerBlend.reason === 'no_local_regions_detected' ||
+        String(codeformerTrace.summary || '').includes('Kept the base restore'))
+    const codeformerApplied = Boolean(
+      codeformerTrace && !codeformerTrace.skipped && !codeformerFallbackToBase
+    )
+    const codeformerFallbackReason = codeformerFallbackToBase
+      ? codeformerBlend.reason || 'no_local_regions_detected'
+      : null
 
-    if (completedStage?.type === 'replicate_codeformer' && !error) {
+    if (codeformerApplied && !error) {
       return {
         ...pipelineMetadata,
-        codeformer: codeformerTrace?.providerPayload || result.providerPayload || {},
+        analysis: latestAnalysisTrace?.providerPayload?.analysis || null,
+        codeformer:
+          codeformerTrace?.providerPayload || result.providerPayload || {},
+        codeformer_effective: true,
         fal: falTrace?.providerPayload || {},
+        finish: finishTrace?.providerPayload || {},
       }
     }
 
-    if (completedStage?.type === 'fal') {
+    if (falTrace) {
       return {
         ...pipelineMetadata,
+        analysis: latestAnalysisTrace?.providerPayload?.analysis || null,
+        codeformer: codeformerTrace?.providerPayload || {},
+        codeformer_effective: false,
         codeformer_error:
-          error instanceof Error
-            ? error.message
-            : error
-              ? String(error)
-              : null,
+          error instanceof Error ? error.message : error ? String(error) : null,
+        codeformer_fallback_reason: codeformerFallbackReason,
         fal: falTrace?.providerPayload || result.providerPayload || {},
+        finish: finishTrace?.providerPayload || {},
         pipeline: ['fal'],
       }
     }
@@ -1297,30 +1923,66 @@ function buildFinalPipelineProviderPayload({
     ...(result.providerPayload && typeof result.providerPayload === 'object'
       ? result.providerPayload
       : {}),
+    analysis: latestAnalysisTrace?.providerPayload?.analysis || null,
     ...pipelineMetadata,
     pipeline_error:
-      error instanceof Error
-        ? error.message
-        : error
-          ? String(error)
-          : null,
+      error instanceof Error ? error.message : error ? String(error) : null,
   }
 }
 
-function buildPipelineResult({ completedStage, error, pipeline, result, runtime }) {
+function buildPipelineResult({
+  completedStage,
+  error,
+  pipeline,
+  result,
+  runtime,
+}) {
+  const codeformerTrace =
+    [...runtime.trace]
+      .reverse()
+      .find(item => item.stageType === 'replicate_codeformer') || null
+  const codeformerBlend = getPlainObject(
+    codeformerTrace?.providerPayload?.blend
+  )
+  const codeformerFallbackToBase =
+    codeformerTrace &&
+    !codeformerTrace.skipped &&
+    codeformerBlend.applied === false &&
+    (codeformerBlend.reason === 'no_local_regions_detected' ||
+      String(codeformerTrace.summary || '').includes('Kept the base restore'))
+  const codeformerApplied = Boolean(
+    codeformerTrace && !codeformerTrace.skipped && !codeformerFallbackToBase
+  )
   const modelTrace = runtime.trace
+    .filter(item => !isInternalStageType(item.stageType))
+    .filter(
+      item =>
+        !(
+          item.stageType === 'replicate_codeformer' &&
+          codeformerFallbackToBase === true
+        )
+    )
     .map(item => item.model)
     .filter(Boolean)
+  const lastVisibleTrace =
+    [...runtime.trace]
+      .reverse()
+      .find(item => !isInternalStageType(item.stageType) && !item.skipped) ||
+    null
 
-  let provider = result.provider
+  let provider =
+    isInternalStageType(completedStage?.type) && lastVisibleTrace?.stageType
+      ? getStageProvider({ type: lastVisibleTrace?.stageType })
+      : result.provider
   let source =
-    getStageSource(completedStage?.type || '') || getPipelineSource(pipeline)
+    getStageSource(lastVisibleTrace?.stageType || completedStage?.type || '') ||
+    getPipelineSource(pipeline)
 
   if (isFalCodeformerPipeline(pipeline)) {
-    if (completedStage?.type === 'replicate_codeformer' && !error) {
+    if (codeformerApplied && !error) {
       provider = 'fal'
       source = 'fal_codeformer'
-    } else if (completedStage?.type === 'fal') {
+    } else if (runtime.trace.some(item => item.stageType === 'fal')) {
       provider = 'fal'
       source = 'fal'
     }
@@ -1400,13 +2062,24 @@ async function markPipelinePending({
   })
 }
 
-async function runConfiguredPipeline({ job, pipeline, prompt }) {
+async function runConfiguredPipeline({ job, pipeline, prompt, triggeredBy }) {
   const storedRuntime = getStoredPipelineRuntime(job)
   const isResuming = Boolean(
     job.status === 'processing' && job.ai_request_id && pipeline?.stages?.length
   )
+  const fallbackResumeStageIndex = isResuming
+    ? Math.max(
+        0,
+        pipeline?.stages?.findIndex(stage => stage?.type === 'fal') || 0
+      )
+    : 0
   const startingStageIndex = isResuming
-    ? Math.max(0, Number(storedRuntime?.currentStageIndex) || 0)
+    ? Math.max(
+        0,
+        storedRuntime
+          ? Number(storedRuntime.currentStageIndex) || 0
+          : fallbackResumeStageIndex
+      )
     : 0
   let runtime = buildPipelineRuntime({
     currentStageIndex: startingStageIndex,
@@ -1442,6 +2115,7 @@ async function runConfiguredPipeline({ job, pipeline, prompt }) {
         job,
         prompt,
         stage,
+        triggeredBy,
       })
 
       if (stageResult.status === 'pending') {
@@ -1493,7 +2167,10 @@ async function runConfiguredPipeline({ job, pipeline, prompt }) {
         })
       }
 
-      const nextTrace = [...runtime.trace, buildTraceEntry({ result: stageResult, stage })]
+      const nextTrace = [
+        ...runtime.trace,
+        buildTraceEntry({ result: stageResult, stage }),
+      ]
 
       runtime = buildPipelineRuntime({
         currentStageIndex: stageIndex + 1,
@@ -1501,8 +2178,10 @@ async function runConfiguredPipeline({ job, pipeline, prompt }) {
         pipeline,
         trace: nextTrace,
       })
-      lastSuccessfulResult = stageResult
-      lastSuccessfulStage = stage
+      if (stage?.type !== 'analyze_photo') {
+        lastSuccessfulResult = stageResult
+        lastSuccessfulStage = stage
+      }
       input = {
         buffer: stageResult.buffer,
         contentType: stageResult.contentType,
@@ -1541,7 +2220,26 @@ async function runConfiguredPipeline({ job, pipeline, prompt }) {
 
 async function finishJobWithResult({ job, prompt, result }) {
   const buckets = getHumanRestoreBuckets()
-  const extension = result.contentType?.includes('jpeg') ? 'jpg' : 'png'
+  const originalAsset =
+    job.original_storage_bucket && job.original_storage_path
+      ? await downloadObject({
+          bucket: job.original_storage_bucket,
+          path: job.original_storage_path,
+        }).catch(() => null)
+      : null
+  const deliveryExportParams = getDeliveryExportParams(result)
+  const deliveryExport = await finalizeRestoredDeliveryImage({
+    imageBuffer: result.buffer,
+    inputContentType: result.contentType || 'image/png',
+    originalBuffer: originalAsset?.buffer,
+    originalContentType:
+      job.original_file_type || originalAsset?.contentType || 'image/png',
+    params: deliveryExportParams,
+  })
+  const finalizedBuffer = deliveryExport.buffer || result.buffer
+  const finalizedContentType =
+    deliveryExport.contentType || result.contentType || 'image/png'
+  const extension = inferImageExtension(finalizedContentType)
   const resultPath = `${
     job.submission_reference
   }/ai-draft-${Date.now()}.${extension}`
@@ -1549,8 +2247,8 @@ async function finishJobWithResult({ job, prompt, result }) {
 
   await uploadObject({
     bucket: buckets.results,
-    contentType: result.contentType || 'image/png',
-    data: result.buffer,
+    contentType: finalizedContentType,
+    data: finalizedBuffer,
     path: resultPath,
   })
 
@@ -1564,7 +2262,8 @@ async function finishJobWithResult({ job, prompt, result }) {
   if (
     previousDraftBucket &&
     previousDraftPath &&
-    (previousDraftBucket !== buckets.results || previousDraftPath !== resultPath)
+    (previousDraftBucket !== buckets.results ||
+      previousDraftPath !== resultPath)
   ) {
     await deleteObject({
       bucket: previousDraftBucket,
@@ -1575,7 +2274,7 @@ async function finishJobWithResult({ job, prompt, result }) {
   return updateJob(job.id, {
     ai_draft_created_at: now,
     ai_draft_error: null,
-    ai_draft_file_type: result.contentType || 'image/png',
+    ai_draft_file_type: finalizedContentType,
     ai_draft_model: result.model,
     ai_draft_prompt: prompt,
     ai_draft_provider: result.provider,
@@ -1588,9 +2287,19 @@ async function finishJobWithResult({ job, prompt, result }) {
     ai_draft_storage_path: resultPath,
     ai_error: null,
     ai_provider: result.provider,
-    ai_provider_payload: result.providerPayload || {},
+    ai_provider_payload: {
+      ...(result.providerPayload || {}),
+      delivery_export: {
+        ...(deliveryExport.export || {}),
+        applied: deliveryExport.applied === true,
+        content_type: finalizedContentType,
+        reason: deliveryExport.reason || null,
+        settings: deliveryExportParams,
+        summary: deliveryExport.summary || '',
+      },
+    },
     ai_request_id: result.requestId || null,
-    result_file_type: result.contentType || 'image/png',
+    result_file_type: finalizedContentType,
     result_model: result.model,
     result_prompt: prompt,
     result_storage_bucket: buckets.results,
@@ -1684,7 +2393,9 @@ function buildFalQueuePayload({ model, queuedAt, requestId }) {
 
 function mergeFalProviderPayload(existingPayload, falPayload) {
   const basePayload =
-    existingPayload && typeof existingPayload === 'object' ? { ...existingPayload } : {}
+    existingPayload && typeof existingPayload === 'object'
+      ? { ...existingPayload }
+      : {}
 
   if (basePayload.fal && typeof basePayload.fal === 'object') {
     return {
@@ -1712,10 +2423,13 @@ function getFalResumePayload(job) {
       ? topLevelPayload.fal
       : {}
   const rawFalPayload =
-    nestedFalPayload.request_id || nestedFalPayload.response_url || nestedFalPayload.status_url
+    nestedFalPayload.request_id ||
+    nestedFalPayload.response_url ||
+    nestedFalPayload.status_url
       ? nestedFalPayload
       : topLevelPayload
-  const requestId = rawFalPayload.request_id || rawFalPayload.requestId || job?.ai_request_id
+  const requestId =
+    rawFalPayload.request_id || rawFalPayload.requestId || job?.ai_request_id
   const model =
     rawFalPayload.model ||
     job?.ai_draft_model ||
@@ -1724,7 +2438,8 @@ function getFalResumePayload(job) {
     defaultFalModel
   const canonicalPayload = buildFalQueuePayload({
     model,
-    queuedAt: rawFalPayload.queued_at || rawFalPayload.queuedAt || job?.created_at,
+    queuedAt:
+      rawFalPayload.queued_at || rawFalPayload.queuedAt || job?.created_at,
     requestId,
   })
   const rawResponseUrl =
@@ -1779,8 +2494,7 @@ async function moveFalJobToManualReview({ job, falResumePayload, runtime }) {
         buildPipelineRuntime({
           currentStageIndex: 0,
           existingRuntime: getStoredPipelineRuntime(job),
-          pipeline:
-            buildPipelineFromRuntime(getStoredPipelineRuntime(job)) ||
+          pipeline: buildPipelineFromRuntime(getStoredPipelineRuntime(job)) ||
             buildLegacyResumePipeline(job) || {
               enabled: true,
               id: 'legacy-fal',
@@ -1815,7 +2529,9 @@ function shouldResumeRequestedPipeline({
     job.ai_provider_payload?.pipeline_runtime?.pipelineId ||
     ''
 
-  return Boolean(currentPipelineId && currentPipelineId === requestedPipeline.id)
+  return Boolean(
+    currentPipelineId && currentPipelineId === requestedPipeline.id
+  )
 }
 
 export async function runRestoreJob({
@@ -1823,7 +2539,50 @@ export async function runRestoreJob({
   pipelineId: requestedPipelineId,
   provider: requestedProvider,
   modelPreset: requestedModelPreset,
+  forceRerun = false,
+  triggeredBy = 'unknown',
 }) {
+  // Defense-in-depth guard against accidental re-submission of paid AI work.
+  // If this job already has a completed AI draft or final result and the
+  // caller did not express explicit rerun intent (forceRerun / specific
+  // pipelineId / provider / modelPreset), return the job as-is so we never
+  // trigger a new billable pipeline run for idempotent pollers or auto-sync
+  // callers. Resume polling (job.status === 'processing') is allowed so that
+  // ongoing fal jobs can still finish via pollFalRequest (which is free).
+  const hasCompletedResult = Boolean(
+    job?.result_storage_path || job?.ai_draft_storage_path
+  )
+  const isExplicitRerun = Boolean(
+    forceRerun ||
+      requestedPipelineId ||
+      requestedProvider ||
+      requestedModelPreset
+  )
+
+  if (
+    hasCompletedResult &&
+    !isExplicitRerun &&
+    job?.status &&
+    job.status !== 'processing'
+  ) {
+    console.log(
+      JSON.stringify({
+        event: 'run_restore_job_skipped',
+        job_id: job?.id,
+        reason: 'already_completed_no_explicit_rerun',
+        status: job?.status,
+        timestamp: new Date().toISOString(),
+        triggered_by: triggeredBy,
+      })
+    )
+    await insertEvent(job.id, 'ai_restore_skipped_idempotent', {
+      reason: 'already_completed_no_explicit_rerun',
+      status: job?.status,
+      triggered_by: triggeredBy,
+    }).catch(() => null)
+    return job
+  }
+
   const prompt = buildRestorePrompt(job)
   const pipelineConfig = await readPipelineConfig()
   const requestedPipeline = requestedPipelineId
@@ -1892,6 +2651,7 @@ export async function runRestoreJob({
       job: currentJob,
       pipeline,
       prompt,
+      triggeredBy,
     })
   } catch (error) {
     return updateJob(currentJob.id, {

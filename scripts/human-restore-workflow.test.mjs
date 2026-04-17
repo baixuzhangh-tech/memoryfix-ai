@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 import { Readable } from 'node:stream'
+import sharp from 'sharp'
 import adminDeliverHandler from '../api/admin/human-restore-deliver.js'
 import adminJobHandler from '../api/admin/human-restore-job.js'
 import adminJobsHandler from '../api/admin/human-restore-jobs.js'
@@ -10,6 +11,18 @@ import checkoutHandler from '../api/human-restore-checkout.js'
 import orderHandler from '../api/human-restore-order.js'
 import webhookHandler from '../api/paddle-webhook.js'
 import retoucherPortalHandler from '../api/retoucher-portal.js'
+import {
+  analyzeRestorationImage,
+  applyReplicateEnhancementBlend,
+  applyVintageRestoreFinish,
+  buildAdaptiveCodeformerVariants,
+  deriveAdaptiveFinishParams,
+  evaluateStageConditions,
+  finalizeRestoredDeliveryImage,
+  scoreAdaptiveCodeformerCandidate,
+  selectAdaptiveCodeformerProfile,
+} from '../api/_lib/restore-stage-processing.js'
+import { normalizePipelineConfig } from '../api/_lib/restore-pipeline-config.js'
 import {
   readHumanRestoreCheckoutContext,
   rememberHumanRestorePendingCheckout,
@@ -28,6 +41,8 @@ function createMockState() {
   return {
     emails: [],
     events: [],
+    falOutputBuffer: null,
+    falOutputContentType: 'image/jpeg',
     falPostCalls: 0,
     falResponseRequestUrls: [],
     falResponseErrorStatus: 0,
@@ -41,6 +56,8 @@ function createMockState() {
     nextEmailId: 1,
     nextJobId: 1,
     orders: [],
+    replicatePredictionInputs: [],
+    replicateOutputs: new Map(),
     replicateShouldFail: false,
     retouchers: [],
     storage: new Map(),
@@ -240,11 +257,43 @@ function installMockFetch(state) {
       if (url.pathname.startsWith('/rest/v1/human_restore_events')) {
         if (method === 'POST') {
           const body = JSON.parse(getBodyText(options))
-          state.events.push({
+          const event = {
             ...body,
+            created_at: new Date().toISOString(),
             id: `event-${state.events.length + 1}`,
-          })
+          }
+          state.events.push(event)
+
+          if (
+            String(options.headers?.Prefer || '').includes(
+              'return=representation'
+            )
+          ) {
+            return makeJsonResponse([event])
+          }
+
           return makeJsonResponse([])
+        }
+
+        if (method === 'GET') {
+          let events = [...state.events]
+          const typeFilter = url.searchParams.get('event_type')
+
+          if (typeFilter?.startsWith('eq.')) {
+            events = events.filter(
+              event => event.event_type === typeFilter.slice(3)
+            )
+          }
+
+          events.sort(
+            (left, right) =>
+              Date.parse(right.created_at || 0) -
+              Date.parse(left.created_at || 0)
+          )
+
+          const limit = Number(url.searchParams.get('limit') || '0')
+
+          return makeJsonResponse(limit ? events.slice(0, limit) : events)
         }
       }
 
@@ -286,7 +335,9 @@ function installMockFetch(state) {
           const idFilter = url.searchParams.get('id')
           const id = idFilter?.startsWith('eq.') ? idFilter.slice(3) : ''
           const patch = JSON.parse(getBodyText(options))
-          const retoucher = state.retouchers.find(candidate => candidate.id === id)
+          const retoucher = state.retouchers.find(
+            candidate => candidate.id === id
+          )
 
           if (!retoucher) {
             return makeJsonResponse({ message: 'not found' }, { status: 404 })
@@ -369,7 +420,10 @@ function installMockFetch(state) {
     if (url.hostname === 'queue.fal.run') {
       if (url.pathname.endsWith('/status')) {
         if (method !== 'GET') {
-          return makeJsonResponse({ error: 'fal status requires GET' }, { status: 405 })
+          return makeJsonResponse(
+            { error: 'fal status requires GET' },
+            { status: 405 }
+          )
         }
         state.falStatusRequestUrls.push(url.toString())
         if (state.falStatusErrorStatus) {
@@ -391,7 +445,10 @@ function installMockFetch(state) {
         !url.pathname.endsWith('/cancel')
       ) {
         if (method !== 'GET') {
-          return makeJsonResponse({ error: 'fal response requires GET' }, { status: 405 })
+          return makeJsonResponse(
+            { error: 'fal response requires GET' },
+            { status: 405 }
+          )
         }
         state.falResponseRequestUrls.push(url.toString())
         if (state.falResponseErrorStatus) {
@@ -420,10 +477,15 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'fal-cdn.test') {
-      return new Response(Buffer.from('restored-image'), {
-        headers: { 'Content-Type': 'image/jpeg' },
-        status: 200,
-      })
+      return new Response(
+        state.falOutputBuffer || Buffer.from('restored-image'),
+        {
+          headers: {
+            'Content-Type': state.falOutputContentType || 'image/jpeg',
+          },
+          status: 200,
+        }
+      )
     }
 
     if (url.hostname === 'api.openai.com') {
@@ -453,7 +515,10 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'api.replicate.com') {
-      if (method === 'GET' && url.pathname === '/v1/models/lucataco/codeformer') {
+      if (
+        method === 'GET' &&
+        url.pathname === '/v1/models/lucataco/codeformer'
+      ) {
         return makeJsonResponse({
           latest_version: {
             id: '78f2bab438ab0ffc85a68cdfd316a2ecd3994b5dd26aa6b3d203357b45e5eb1b',
@@ -470,10 +535,17 @@ function installMockFetch(state) {
         }
         const body = JSON.parse(getBodyText(options))
         const preset = body.input?.codeformer_fidelity ? 'codeformer' : 'gfpgan'
+        state.replicatePredictionInputs.push(body.input || {})
+        const outputPath =
+          preset === 'codeformer'
+            ? `/codeformer-${Number(
+                body.input?.codeformer_fidelity || 0
+              ).toFixed(2)}.jpg`
+            : '/gfpgan.jpg'
 
         return makeJsonResponse({
           id: `prediction-${preset}`,
-          output: `https://replicate.test/${preset}.jpg`,
+          output: `https://replicate.test${outputPath}`,
           status: 'succeeded',
         })
       }
@@ -488,10 +560,20 @@ function installMockFetch(state) {
     }
 
     if (url.hostname === 'replicate.test') {
-      return new Response(Buffer.from(`replicate-${url.pathname}`), {
-        headers: { 'Content-Type': 'image/jpeg' },
-        status: 200,
-      })
+      const configuredOutput =
+        state.replicateOutputs.get(url.pathname) ||
+        state.replicateOutputs.get('/codeformer.jpg') ||
+        state.replicateOutputs.get('/gfpgan.jpg')
+
+      return new Response(
+        configuredOutput?.buffer || Buffer.from(`replicate-${url.pathname}`),
+        {
+          headers: {
+            'Content-Type': configuredOutput?.contentType || 'image/jpeg',
+          },
+          status: 200,
+        }
+      )
     }
 
     if (
@@ -597,6 +679,587 @@ async function invoke(handler, reqOptions = {}) {
   }
 }
 
+async function createSyntheticImage({
+  background = { b: 194, g: 180, r: 165 },
+  foreground = { b: 82, g: 78, r: 75 },
+  width = 240,
+} = {}) {
+  const height = 320
+
+  return sharp({
+    create: {
+      background,
+      channels: 3,
+      height,
+      width,
+    },
+  })
+    .composite([
+      {
+        input: {
+          create: {
+            background: foreground,
+            channels: 3,
+            height: 96,
+            width: 72,
+          },
+        },
+        left: 84,
+        top: 46,
+      },
+      {
+        input: {
+          create: {
+            background: { r: 225, g: 212, b: 195 },
+            channels: 3,
+            height: 110,
+            width: 92,
+          },
+        },
+        left: 74,
+        top: 148,
+      },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+}
+
+async function assertRestoreStageProcessingHelpers() {
+  const baseBuffer = await createSyntheticImage()
+  const enhancedBuffer = await sharp(baseBuffer)
+    .composite([
+      {
+        input: {
+          create: {
+            background: { r: 246, g: 233, b: 220 },
+            channels: 3,
+            height: 72,
+            width: 52,
+          },
+        },
+        left: 94,
+        top: 58,
+      },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+
+  const analysis = await analyzeRestorationImage({ imageBuffer: baseBuffer })
+  assert.equal(analysis.valid, true)
+  assert.ok(analysis.restore_need_score >= 0)
+
+  const decision = evaluateStageConditions({
+    analysis,
+    conditions: {
+      run_if_restore_need_above: 0.1,
+    },
+  })
+  assert.equal(decision.shouldRun, true)
+
+  const blendResult = await applyReplicateEnhancementBlend({
+    baseBuffer,
+    baseContentType: 'image/jpeg',
+    enhancedBuffer,
+    params: {
+      blend_alpha: 0.45,
+      diff_mask_max_coverage: 0.2,
+      diff_mask_min_diff: 10,
+    },
+  })
+  assert.equal(blendResult.applied, true)
+  assert.ok(Buffer.isBuffer(blendResult.buffer))
+  assert.ok((blendResult.mask?.regions_kept || 0) >= 1)
+
+  const relaxedEnhancedBuffer = await sharp(baseBuffer)
+    .composite([
+      {
+        input: {
+          create: {
+            background: { r: 235, g: 225, b: 214 },
+            channels: 3,
+            height: 118,
+            width: 132,
+          },
+        },
+        left: 54,
+        top: 26,
+      },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  const relaxedBlendResult = await applyReplicateEnhancementBlend({
+    baseBuffer,
+    baseContentType: 'image/jpeg',
+    enhancedBuffer: relaxedEnhancedBuffer,
+    params: {
+      allow_relaxed_blend_fallback: true,
+      diff_mask_max_region_ratio: 0.09,
+      diff_mask_min_diff: 10,
+      relaxed_diff_mask_max_region_ratio: 0.28,
+      relaxed_diff_mask_max_regions: 18,
+      relaxed_diff_mask_upper_focus: 0.99,
+    },
+  })
+  assert.equal(relaxedBlendResult.applied, true)
+  assert.equal(
+    relaxedBlendResult.mask?.selection_mode,
+    'relaxed_upper_portrait'
+  )
+
+  const fragmentedEnhancedBuffer = await sharp(baseBuffer)
+    .composite(
+      [
+        [98, 64],
+        [104, 70],
+        [111, 75],
+        [119, 69],
+        [128, 77],
+        [136, 71],
+        [143, 80],
+        [151, 74],
+      ].map(([left, top]) => ({
+        input: {
+          create: {
+            background: { r: 242, g: 228, b: 214 },
+            channels: 3,
+            height: 3,
+            width: 3,
+          },
+        },
+        left,
+        top,
+      }))
+    )
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  const fragmentedBlendResult = await applyReplicateEnhancementBlend({
+    baseBuffer,
+    baseContentType: 'image/jpeg',
+    enhancedBuffer: fragmentedEnhancedBuffer,
+    params: {
+      allow_portrait_energy_fallback: true,
+      allow_relaxed_blend_fallback: true,
+      diff_mask_min_diff: 8,
+      portrait_energy_cell_size: 16,
+      portrait_energy_max_cells: 8,
+      portrait_energy_min_cell_score: 3.6,
+      portrait_energy_min_diff: 4,
+      relaxed_diff_mask_min_region_ratio: 0.0003,
+    },
+  })
+  assert.equal(fragmentedBlendResult.applied, true)
+  assert.equal(
+    fragmentedBlendResult.mask?.selection_mode,
+    'portrait_energy_cells'
+  )
+
+  const finished = await applyVintageRestoreFinish({
+    imageBuffer: blendResult.buffer,
+    inputContentType: 'image/jpeg',
+    params: {
+      brightness: 0.99,
+      contrast: 0.99,
+      export_format: 'png',
+      grain_amount: 0.04,
+      preserve_metadata: true,
+      saturation: 0.95,
+    },
+  })
+  assert.equal(finished.applied, true)
+  assert.ok(Buffer.isBuffer(finished.buffer))
+  assert.equal(finished.contentType, 'image/png')
+  const finishedAnalysis = await analyzeRestorationImage({
+    imageBuffer: finished.buffer,
+  })
+  assert.ok(finishedAnalysis.portrait_detail_score > 0)
+
+  const originalBuffer = await sharp(baseBuffer)
+    .resize({ fit: 'fill', height: 420, width: 300 })
+    .png()
+    .toBuffer()
+  const deliveryExport = await finalizeRestoredDeliveryImage({
+    imageBuffer: blendResult.buffer,
+    inputContentType: 'image/jpeg',
+    originalBuffer,
+    originalContentType: 'image/png',
+    params: {
+      export_format: 'png',
+      preserve_metadata: true,
+      preserve_original_dimensions: true,
+      resize_kernel: 'lanczos3',
+    },
+  })
+  const deliveryMeta = await sharp(deliveryExport.buffer).metadata()
+
+  assert.equal(deliveryExport.applied, true)
+  assert.equal(deliveryExport.contentType, 'image/png')
+  assert.ok((deliveryMeta.width || 0) >= 300)
+  assert.ok((deliveryMeta.height || 0) >= 420)
+}
+
+async function assertAdaptiveRestoreStrategyHelpers() {
+  const conservativeProfile = selectAdaptiveCodeformerProfile({
+    analysis: {
+      damage_score: 0.08,
+      detail_score: 0.46,
+      restore_need_score: 0.28,
+      valid: true,
+      width: 820,
+    },
+  })
+  const strongFaceProfile = selectAdaptiveCodeformerProfile({
+    analysis: {
+      damage_score: 0.2,
+      detail_score: 0.24,
+      restore_need_score: 0.56,
+      valid: true,
+      width: 1200,
+    },
+  })
+  const balancedProfile = selectAdaptiveCodeformerProfile({
+    analysis: {
+      damage_score: 0.11,
+      detail_score: 0.37,
+      restore_need_score: 0.39,
+      valid: true,
+      width: 900,
+    },
+  })
+
+  assert.equal(conservativeProfile, 'conservative')
+  assert.equal(strongFaceProfile, 'strong_face')
+  assert.equal(balancedProfile, 'balanced')
+
+  const adaptiveVariants = buildAdaptiveCodeformerVariants({
+    analysis: {
+      damage_score: 0.18,
+      detail_score: 0.25,
+      restore_need_score: 0.52,
+      valid: true,
+      width: 1024,
+    },
+    params: {
+      blend_alpha: 0.6,
+      candidate_race_enabled: true,
+      candidate_race_max_variants: 3,
+      codeformer_fidelity: 0.74,
+      diff_mask_blur: 11,
+      diff_mask_max_coverage: 0.26,
+      diff_mask_max_regions: 22,
+      diff_mask_min_diff: 7,
+      portrait_energy_max_cells: 22,
+      upper_portrait_alpha_boost: 0.18,
+    },
+  })
+
+  assert.equal(adaptiveVariants.profile, 'strong_face')
+  assert.equal(adaptiveVariants.variants.length, 3)
+  assert.equal(adaptiveVariants.variants[0].label, 'strong_face')
+  assert.equal(adaptiveVariants.variants[1].label, 'balanced')
+
+  const adaptiveFinish = deriveAdaptiveFinishParams({
+    analysis: {
+      clipped_highlights: 0.026,
+      detail_score: 0.28,
+      mean_luma: 0.56,
+      saturation_score: 0.11,
+      valid: true,
+    },
+    params: {
+      brightness: 0.975,
+      contrast: 1.01,
+      green_balance: -0.045,
+      saturation: 0.985,
+      sharpen_sigma: 0.7,
+      warmth: 0.055,
+    },
+  })
+
+  assert.equal(adaptiveFinish.profile, 'dehaze_portrait')
+  assert.ok(adaptiveFinish.params.brightness < 0.975)
+  assert.ok(adaptiveFinish.params.contrast >= 1.01)
+  assert.ok(adaptiveFinish.params.green_balance < -0.045)
+  assert.ok(adaptiveFinish.params.portrait_detail_alpha >= 0.18)
+  assert.ok(adaptiveFinish.params.portrait_detail_sharpen_sigma >= 1.08)
+  assert.ok(adaptiveFinish.params.sharpen_sigma > 0.7)
+
+  const baseBuffer = await createSyntheticImage()
+  const baseAnalysis = await analyzeRestorationImage({
+    imageBuffer: baseBuffer,
+  })
+  const enhancedBuffer = await sharp(baseBuffer)
+    .composite([
+      {
+        input: {
+          create: {
+            background: { r: 242, g: 229, b: 216 },
+            channels: 3,
+            height: 68,
+            width: 56,
+          },
+        },
+        left: 94,
+        top: 56,
+      },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  const successfulBlend = await applyReplicateEnhancementBlend({
+    baseBuffer,
+    baseContentType: 'image/jpeg',
+    enhancedBuffer,
+    params: {
+      blend_alpha: 0.6,
+      diff_mask_max_coverage: 0.24,
+      diff_mask_max_regions: 18,
+      diff_mask_min_diff: 8,
+      portrait_energy_max_cells: 18,
+      upper_portrait_alpha_boost: 0.18,
+    },
+  })
+  const successfulScore = await scoreAdaptiveCodeformerCandidate({
+    baseAnalysis,
+    baseBuffer,
+    blendResult: successfulBlend,
+    candidateBuffer: successfulBlend.buffer,
+    variant: { profile: 'balanced' },
+  })
+  const fallbackScore = await scoreAdaptiveCodeformerCandidate({
+    baseAnalysis,
+    baseBuffer,
+    blendResult: {
+      applied: false,
+      buffer: baseBuffer,
+      contentType: 'image/jpeg',
+      reason: 'no_local_regions_detected',
+    },
+    candidateBuffer: baseBuffer,
+    variant: { profile: 'balanced' },
+  })
+
+  assert.ok(successfulScore.score > fallbackScore.score)
+
+  const greenishCandidateBuffer = await sharp(successfulBlend.buffer)
+    .linear([0.98, 1.08, 0.95], [0, 0, 0])
+    .blur(0.4)
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  const greenishScore = await scoreAdaptiveCodeformerCandidate({
+    baseAnalysis,
+    baseBuffer,
+    blendResult: {
+      applied: true,
+      mask: {
+        region_coverage: 0.065,
+        regions_kept: 10,
+      },
+    },
+    candidateBuffer: greenishCandidateBuffer,
+    variant: {
+      params: {
+        score_green_cast_penalty: 8,
+        score_portrait_detail_weight: 10.5,
+        score_portrait_green_cast_penalty: 10,
+      },
+      profile: 'balanced',
+    },
+  })
+
+  assert.ok(successfulScore.score > greenishScore.score)
+
+  const greenBiasedBuffer = await sharp(baseBuffer)
+    .linear([0.97, 1.08, 0.95], [0, 0, 0])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  const greenBiasedAnalysis = await analyzeRestorationImage({
+    imageBuffer: greenBiasedBuffer,
+  })
+  const greenAdaptiveFinish = deriveAdaptiveFinishParams({
+    analysis: greenBiasedAnalysis,
+    params: {
+      brightness: 0.975,
+      contrast: 1.01,
+      green_balance: -0.045,
+      portrait_detail_alpha: 0.18,
+      portrait_detail_contrast: 1.026,
+      portrait_detail_sharpen_sigma: 1.08,
+      saturation: 0.985,
+      sharpen_sigma: 0.7,
+      warmth: 0.055,
+    },
+  })
+  const greenFinished = await applyVintageRestoreFinish({
+    imageBuffer: greenBiasedBuffer,
+    inputContentType: 'image/jpeg',
+    params: {
+      ...greenAdaptiveFinish.params,
+      grain_amount: 0,
+      output_format: 'png',
+      preserve_metadata: true,
+    },
+  })
+  const greenFinishedAnalysis = await analyzeRestorationImage({
+    imageBuffer: greenFinished.buffer,
+  })
+
+  assert.ok(
+    greenFinishedAnalysis.green_cast_score <
+      greenBiasedAnalysis.green_cast_score
+  )
+  assert.ok(
+    greenFinishedAnalysis.portrait_detail_score >=
+      greenBiasedAnalysis.portrait_detail_score
+  )
+}
+
+function assertPipelineConfigMigration() {
+  const legacyConfig = normalizePipelineConfig({
+    defaultPipelineId: 'legacy-fal-codeformer',
+    pipelines: [
+      {
+        enabled: true,
+        id: 'legacy-fal-codeformer',
+        name: 'Legacy fal + CodeFormer',
+        stages: [
+          { id: 'analyze-1', type: 'analyze_photo' },
+          { id: 'fal-2', type: 'fal' },
+          {
+            conditions: {
+              run_if_restore_need_above: 0.35,
+              skip_if_detail_above: 0.72,
+            },
+            id: 'codeformer-3',
+            params: {
+              allow_portrait_energy_fallback: true,
+              allow_relaxed_blend_fallback: true,
+              background_enhance: false,
+              blend_alpha: 0.42,
+              blend_mode: 'difference_mask',
+              codeformer_fidelity: 0.86,
+              diff_mask_blur: 16,
+              diff_mask_max_coverage: 0.18,
+              diff_mask_max_region_ratio: 0.14,
+              diff_mask_max_regions: 12,
+              diff_mask_min_diff: 12,
+              diff_mask_min_region_ratio: 0.0006,
+              diff_mask_upper_focus: 0.92,
+              face_upsample: false,
+              portrait_energy_cell_size: 16,
+              portrait_energy_max_cells: 12,
+              portrait_energy_min_cell_score: 4.8,
+              portrait_energy_min_diff: 4,
+              portrait_energy_upper_focus: 0.96,
+              relaxed_diff_mask_max_region_ratio: 0.24,
+              relaxed_diff_mask_max_regions: 24,
+              relaxed_diff_mask_min_region_ratio: 0.0002,
+              relaxed_diff_mask_upper_focus: 0.99,
+              upscale: 1,
+            },
+            type: 'replicate_codeformer',
+          },
+          {
+            id: 'finish-4',
+            params: {
+              brightness: 0.99,
+              contrast: 0.985,
+              grain_amount: 0.035,
+              grain_scale: 0.16,
+              saturation: 0.96,
+            },
+            type: 'postprocess_preserve',
+          },
+        ],
+      },
+    ],
+    version: 2,
+  })
+  const migratedStage = legacyConfig.pipelines[0].stages[2]
+  const migratedFinishStage = legacyConfig.pipelines[0].stages[3]
+  const migratedFalStage = legacyConfig.pipelines[0].stages[1]
+
+  assert.equal(legacyConfig.version, 6)
+  assert.equal(migratedFalStage.params.output_format, 'png')
+  assert.equal(migratedStage.conditions.run_if_restore_need_above, 0.24)
+  assert.equal(migratedStage.conditions.skip_if_detail_above, 0.88)
+  assert.equal(migratedStage.params.blend_alpha, 0.6)
+  assert.equal(migratedStage.params.codeformer_fidelity, 0.74)
+  assert.equal(migratedStage.params.diff_mask_blur, 11)
+  assert.equal(migratedStage.params.face_upsample, true)
+  assert.equal(migratedStage.params.upscale, 2)
+  assert.equal(migratedStage.params.portrait_energy_cell_size, 12)
+  assert.equal(migratedStage.params.relaxed_diff_mask_max_regions, 36)
+  assert.equal(migratedStage.params.score_green_cast_penalty, 8)
+  assert.equal(migratedStage.params.score_portrait_detail_weight, 10.5)
+  assert.equal(migratedStage.params.upper_portrait_alpha_boost, 0.18)
+  assert.equal(migratedFinishStage.params.brightness, 0.975)
+  assert.equal(migratedFinishStage.params.contrast, 1.01)
+  assert.equal(migratedFinishStage.params.warmth, 0.055)
+  assert.equal(migratedFinishStage.params.green_balance, -0.045)
+  assert.equal(migratedFinishStage.params.sharpen_sigma, 0.7)
+  assert.equal(migratedFinishStage.params.export_format, 'png')
+  assert.equal(migratedFinishStage.params.jpeg_quality, 97)
+  assert.equal(migratedFinishStage.params.preserve_original_dimensions, true)
+  assert.equal(migratedFinishStage.params.portrait_detail_alpha, 0.18)
+  assert.equal(migratedFinishStage.params.portrait_detail_sharpen_sigma, 1.08)
+
+  const customConfig = normalizePipelineConfig({
+    defaultPipelineId: 'legacy-fal-codeformer',
+    pipelines: [
+      {
+        enabled: true,
+        id: 'legacy-fal-codeformer',
+        name: 'Legacy fal + CodeFormer',
+        stages: [
+          { id: 'analyze-1', type: 'analyze_photo' },
+          { id: 'fal-2', type: 'fal' },
+          {
+            conditions: {
+              run_if_restore_need_above: 0.4,
+              skip_if_detail_above: 0.9,
+            },
+            id: 'codeformer-3',
+            params: {
+              blend_alpha: 0.49,
+              codeformer_fidelity: 0.91,
+            },
+            type: 'replicate_codeformer',
+          },
+          {
+            id: 'finish-4',
+            params: {
+              brightness: 0.97,
+              contrast: 1.03,
+              warmth: 0.08,
+            },
+            type: 'postprocess_preserve',
+          },
+        ],
+      },
+    ],
+    version: 3,
+  })
+  const customFalStage = customConfig.pipelines[0].stages[1]
+  const customStage = customConfig.pipelines[0].stages[2]
+  const customFinishStage = customConfig.pipelines[0].stages[3]
+
+  assert.equal(customFalStage.params.output_format, 'png')
+  assert.equal(customStage.conditions.run_if_restore_need_above, 0.4)
+  assert.equal(customStage.conditions.skip_if_detail_above, 0.9)
+  assert.equal(customStage.params.blend_alpha, 0.49)
+  assert.equal(customStage.params.codeformer_fidelity, 0.91)
+  assert.equal(customStage.params.face_upsample, true)
+  assert.equal(customStage.params.score_green_cast_penalty, 8)
+  assert.equal(customStage.params.upscale, 2)
+  assert.equal(customFinishStage.params.brightness, 0.97)
+  assert.equal(customFinishStage.params.contrast, 1.03)
+  assert.equal(customFinishStage.params.warmth, 0.08)
+  assert.equal(customFinishStage.params.green_balance, -0.045)
+  assert.equal(customFinishStage.params.export_format, 'png')
+  assert.equal(customFinishStage.params.preserve_original_dimensions, true)
+  assert.equal(customFinishStage.params.portrait_detail_alpha, 0.18)
+  assert.equal(customFinishStage.params.sharpen_sigma, 0.7)
+}
+
 function createSignedPaddleWebhookBody(payload) {
   const body = Buffer.from(JSON.stringify(payload))
   const timestamp = '1712345678'
@@ -648,6 +1311,9 @@ function installEnv() {
 
 async function main() {
   installEnv()
+  await assertRestoreStageProcessingHelpers()
+  await assertAdaptiveRestoreStrategyHelpers()
+  assertPipelineConfigMigration()
 
   const state = createMockState()
   installMockFetch(state)
@@ -865,6 +1531,93 @@ async function main() {
   assert.ok(listResponse.body.jobs[0].ai_draft_signed_url)
   assert.ok(listResponse.body.jobs[0].result_signed_url)
 
+  const pipelineResourceResponse = await invoke(adminJobsHandler, {
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'GET',
+    query: { resource: 'pipelines' },
+  })
+
+  assert.equal(pipelineResourceResponse.statusCode, 200)
+  assert.ok(
+    pipelineResourceResponse.body.stageDefinitions.some(
+      stage => stage.type === 'analyze_photo'
+    )
+  )
+  assert.ok(
+    pipelineResourceResponse.body.stageDefinitions.some(
+      stage => stage.type === 'postprocess_preserve'
+    )
+  )
+
+  const savedPipelineResponse = await invoke(adminJobsHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        action: 'save_pipeline_config',
+        config: {
+          defaultPipelineId: 'quality-gate',
+          pipelines: [
+            {
+              enabled: true,
+              id: 'quality-gate',
+              name: 'Quality gate',
+              stages: [
+                {
+                  conditions: {},
+                  id: 'analyze-1',
+                  params: { downsample_width: 192 },
+                  type: 'analyze_photo',
+                },
+                {
+                  conditions: {
+                    run_if_restore_need_above: 0.25,
+                  },
+                  id: 'fal-2',
+                  params: {
+                    guidance_scale: 3.1,
+                  },
+                  type: 'fal',
+                },
+                {
+                  conditions: {
+                    skip_if_detail_above: 0.7,
+                  },
+                  id: 'codeformer-3',
+                  params: {
+                    blend_alpha: 0.33,
+                    codeformer_fidelity: 0.88,
+                  },
+                  type: 'replicate_codeformer',
+                },
+                {
+                  conditions: {},
+                  id: 'finish-4',
+                  params: {
+                    grain_amount: 0.02,
+                  },
+                  type: 'postprocess_preserve',
+                },
+              ],
+            },
+          ],
+        },
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(savedPipelineResponse.statusCode, 200)
+  assert.equal(
+    savedPipelineResponse.body.config.defaultPipelineId,
+    'quality-gate'
+  )
+  assert.equal(savedPipelineResponse.body.config.pipelines[0].stages.length, 4)
+  assert.equal(
+    savedPipelineResponse.body.config.pipelines[0].stages[2].params
+      .codeformer_fidelity,
+    0.88
+  )
+
   const retryGfpganResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(
       JSON.stringify({
@@ -879,10 +1632,7 @@ async function main() {
 
   assert.equal(retryGfpganResponse.statusCode, 200)
   assert.equal(retryGfpganResponse.body.job.status, 'needs_review')
-  assert.equal(
-    retryGfpganResponse.body.job.ai_draft_source,
-    'replicate_gfpgan'
-  )
+  assert.equal(retryGfpganResponse.body.job.ai_draft_source, 'replicate_gfpgan')
 
   const retryOpenAIResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(JSON.stringify({ jobId: job.id, provider: 'openai' })),
@@ -919,6 +1669,7 @@ async function main() {
   })
 
   const falPostCallsBeforeDefaultRun = state.falPostCalls
+  const replicateCallsBeforeDefaultRun = state.replicatePredictionInputs.length
   const defaultFalResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(JSON.stringify({ jobId: 'job-default-fal' })),
     headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
@@ -934,6 +1685,83 @@ async function main() {
     'fal-ai/image-editing/photo-restoration -> lucataco/codeformer'
   )
   assert.equal(state.falPostCalls, falPostCallsBeforeDefaultRun + 1)
+  assert.ok(
+    state.replicatePredictionInputs.length >= replicateCallsBeforeDefaultRun + 2
+  )
+  assert.equal(
+    defaultFalResponse.body.job.ai_provider_payload?.codeformer?.candidate_race
+      ?.enabled,
+    true
+  )
+
+  const noEffectFalBuffer = await createSyntheticImage({ width: 320 })
+  const codeformerNoEffectOriginalPath = 'manual/fal-codeformer-no-effect.jpg'
+  state.storage.set(
+    storageKey('human-restore-originals', codeformerNoEffectOriginalPath),
+    {
+      buffer: Buffer.from('fal-codeformer-no-effect-original'),
+      contentType: 'image/jpeg',
+    }
+  )
+  state.falOutputBuffer = noEffectFalBuffer
+  state.falOutputContentType = 'image/jpeg'
+  state.replicateOutputs.set('/codeformer.jpg', {
+    buffer: noEffectFalBuffer,
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'fal-no-effect@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-fal-codeformer-no-effect',
+    notes:
+      'If CodeFormer produces no usable local repair, the final result should stay on fal.',
+    order_bound: true,
+    order_number: 'txn_fal_codeformer_no_effect',
+    original_file_name: 'fal-codeformer-no-effect.jpg',
+    original_file_size: Buffer.byteLength('fal-codeformer-no-effect-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: codeformerNoEffectOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-FAL-CODEFORMER-NO-EFFECT',
+    updated_at: new Date().toISOString(),
+  })
+  const falCodeformerNoEffectResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(
+      JSON.stringify({ jobId: 'job-fal-codeformer-no-effect' })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+  state.falOutputBuffer = null
+  state.falOutputContentType = 'image/jpeg'
+  state.replicateOutputs.delete('/codeformer.jpg')
+
+  assert.equal(falCodeformerNoEffectResponse.statusCode, 200)
+  assert.equal(falCodeformerNoEffectResponse.body.job.status, 'needs_review')
+  assert.equal(falCodeformerNoEffectResponse.body.job.ai_draft_provider, 'fal')
+  assert.equal(falCodeformerNoEffectResponse.body.job.ai_draft_source, 'fal')
+  assert.equal(
+    falCodeformerNoEffectResponse.body.job.ai_draft_model,
+    'fal-ai/image-editing/photo-restoration'
+  )
+  assert.equal(
+    falCodeformerNoEffectResponse.body.job.ai_provider_payload
+      ?.codeformer_effective,
+    false
+  )
+  assert.equal(
+    falCodeformerNoEffectResponse.body.job.ai_provider_payload
+      ?.codeformer_fallback_reason,
+    'no_local_regions_detected'
+  )
+  assert.equal(
+    falCodeformerNoEffectResponse.body.job.ai_provider_payload?.codeformer
+      ?.blend?.applied,
+    false
+  )
 
   const codeformerFallbackOriginalPath = 'manual/fal-codeformer-fallback.jpg'
   state.storage.set(
@@ -949,7 +1777,8 @@ async function main() {
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     id: 'job-fal-codeformer-fallback',
-    notes: 'If CodeFormer fails, keep the fal draft instead of failing the job.',
+    notes:
+      'If CodeFormer fails, keep the fal draft instead of failing the job.',
     order_bound: true,
     order_number: 'txn_fal_codeformer_fallback',
     original_file_name: 'fal-codeformer-fallback.jpg',
@@ -978,16 +1807,20 @@ async function main() {
     'fal-ai/image-editing/photo-restoration'
   )
   assert.equal(
-    falCodeformerFallbackResponse.body.job.ai_provider_payload?.codeformer_error,
+    falCodeformerFallbackResponse.body.job.ai_provider_payload
+      ?.codeformer_error,
     'replicate temporary failure'
   )
 
   state.falStatusSequence = ['IN_PROGRESS']
   const pendingOriginalPath = 'manual/pending-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', pendingOriginalPath), {
-    buffer: Buffer.from('pending-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', pendingOriginalPath),
+    {
+      buffer: Buffer.from('pending-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_provider_payload: {},
     checkout_email: 'pending-fal@example.com',
@@ -1034,17 +1867,21 @@ async function main() {
 
   state.falStatusErrorStatus = 500
   const pollFailureOriginalPath = 'manual/poll-failure-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', pollFailureOriginalPath), {
-    buffer: Buffer.from('poll-failure-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', pollFailureOriginalPath),
+    {
+      buffer: Buffer.from('poll-failure-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_provider_payload: {},
     checkout_email: 'poll-failure-fal@example.com',
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     id: 'job-poll-failure-fal',
-    notes: 'Transient fal poll errors should keep the queued request resumable.',
+    notes:
+      'Transient fal poll errors should keep the queued request resumable.',
     order_bound: true,
     order_number: 'txn_poll_failure_fal',
     original_file_name: 'poll-failure-fal.jpg',
@@ -1075,7 +1912,8 @@ async function main() {
   )
 
   state.falStatusErrorStatus = 401
-  const permanentPollFailureOriginalPath = 'manual/permanent-poll-failure-fal.jpg'
+  const permanentPollFailureOriginalPath =
+    'manual/permanent-poll-failure-fal.jpg'
   state.storage.set(
     storageKey('human-restore-originals', permanentPollFailureOriginalPath),
     {
@@ -1089,11 +1927,14 @@ async function main() {
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     id: 'job-permanent-poll-failure-fal',
-    notes: 'Permanent fal poll errors should fail loudly instead of staying stuck in processing.',
+    notes:
+      'Permanent fal poll errors should fail loudly instead of staying stuck in processing.',
     order_bound: true,
     order_number: 'txn_permanent_poll_failure_fal',
     original_file_name: 'permanent-poll-failure-fal.jpg',
-    original_file_size: Buffer.byteLength('permanent-poll-failure-fal-original'),
+    original_file_size: Buffer.byteLength(
+      'permanent-poll-failure-fal-original'
+    ),
     original_file_type: 'image/jpeg',
     original_storage_bucket: 'human-restore-originals',
     original_storage_path: permanentPollFailureOriginalPath,
@@ -1120,10 +1961,13 @@ async function main() {
 
   const stuckFalOriginalPath = 'manual/stuck-fal.jpg'
   const stuckFalDraftPath = 'manual/stuck-fal-draft.png'
-  state.storage.set(storageKey('human-restore-originals', stuckFalOriginalPath), {
-    buffer: Buffer.from('stuck-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', stuckFalOriginalPath),
+    {
+      buffer: Buffer.from('stuck-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.storage.set(storageKey('human-restore-results', stuckFalDraftPath), {
     buffer: Buffer.from('stuck-fal-draft'),
     contentType: 'image/png',
@@ -1144,7 +1988,8 @@ async function main() {
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     id: 'job-stuck-fal-existing-draft',
-    notes: 'Existing fal draft should settle to review when polling cannot complete.',
+    notes:
+      'Existing fal draft should settle to review when polling cannot complete.',
     order_bound: true,
     order_number: 'txn_stuck_fal_existing_draft',
     original_file_name: 'stuck-fal.jpg',
@@ -1164,7 +2009,9 @@ async function main() {
 
   state.falStatusErrorStatus = 500
   const stuckFalResponse = await invoke(adminProcessHandler, {
-    body: Buffer.from(JSON.stringify({ jobId: 'job-stuck-fal-existing-draft' })),
+    body: Buffer.from(
+      JSON.stringify({ jobId: 'job-stuck-fal-existing-draft' })
+    ),
     headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
     method: 'POST',
   })
@@ -1174,17 +2021,23 @@ async function main() {
   assert.equal(stuckFalResponse.body.job.status, 'needs_review')
   assert.equal(stuckFalResponse.body.job.ai_draft_provider, 'fal')
   assert.equal(stuckFalResponse.body.job.ai_draft_source, 'fal')
-  assert.equal(stuckFalResponse.body.job.ai_draft_storage_path, stuckFalDraftPath)
+  assert.equal(
+    stuckFalResponse.body.job.ai_draft_storage_path,
+    stuckFalDraftPath
+  )
 
   state.falSubmitResponseUrl =
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   state.falSubmitStatusUrl =
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   const malformedSubmitOriginalPath = 'manual/malformed-submit-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', malformedSubmitOriginalPath), {
-    buffer: Buffer.from('malformed-submit-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', malformedSubmitOriginalPath),
+    {
+      buffer: Buffer.from('malformed-submit-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_provider_payload: {},
     checkout_email: 'malformed-submit-fal@example.com',
@@ -1205,7 +2058,8 @@ async function main() {
   })
 
   const statusUrlCallsBeforeMalformedSubmit = state.falStatusRequestUrls.length
-  const responseUrlCallsBeforeMalformedSubmit = state.falResponseRequestUrls.length
+  const responseUrlCallsBeforeMalformedSubmit =
+    state.falResponseRequestUrls.length
   const falPostCallsBeforeMalformedSubmit = state.falPostCalls
   const malformedSubmitResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(JSON.stringify({ jobId: 'job-malformed-submit-fal' })),
@@ -1218,7 +2072,10 @@ async function main() {
   assert.equal(malformedSubmitResponse.statusCode, 200)
   assert.equal(malformedSubmitResponse.body.job.status, 'needs_review')
   assert.equal(malformedSubmitResponse.body.job.ai_draft_provider, 'fal')
-  assert.equal(malformedSubmitResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(
+    malformedSubmitResponse.body.job.ai_draft_source,
+    'fal_codeformer'
+  )
   assert.ok(malformedSubmitResponse.body.job.ai_draft_storage_path)
   assert.equal(state.falPostCalls, falPostCallsBeforeMalformedSubmit + 1)
   assert.equal(
@@ -1253,10 +2110,13 @@ async function main() {
   assert.equal(state.falPostCalls, falPostCallsBeforePendingResume)
 
   const resumedOriginalPath = 'manual/resume-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', resumedOriginalPath), {
-    buffer: Buffer.from('resume-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', resumedOriginalPath),
+    {
+      buffer: Buffer.from('resume-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_draft_source: 'fal',
     ai_provider: 'fal',
@@ -1300,16 +2160,20 @@ async function main() {
   assert.equal(state.falPostCalls, falPostCallsBeforeResume)
 
   const legacyMalformedOriginalPath = 'manual/legacy-malformed-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', legacyMalformedOriginalPath), {
-    buffer: Buffer.from('legacy-malformed-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', legacyMalformedOriginalPath),
+    {
+      buffer: Buffer.from('legacy-malformed-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_draft_source: 'fal',
     ai_provider: 'fal',
     ai_provider_payload: {
       fal: {
-        response_url: 'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
+        response_url:
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
         status_url:
           'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
       },
@@ -1319,7 +2183,8 @@ async function main() {
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     id: 'job-legacy-malformed-fal',
-    notes: 'Legacy malformed fal payload URLs should resume via canonical queue endpoints.',
+    notes:
+      'Legacy malformed fal payload URLs should resume via canonical queue endpoints.',
     order_bound: true,
     order_number: 'txn_legacy_malformed_fal',
     original_file_name: 'legacy-malformed-fal.jpg',
@@ -1333,8 +2198,10 @@ async function main() {
   })
 
   const falPostCallsBeforeLegacyMalformedResume = state.falPostCalls
-  const statusUrlCallsBeforeLegacyMalformedResume = state.falStatusRequestUrls.length
-  const responseUrlCallsBeforeLegacyMalformedResume = state.falResponseRequestUrls.length
+  const statusUrlCallsBeforeLegacyMalformedResume =
+    state.falStatusRequestUrls.length
+  const responseUrlCallsBeforeLegacyMalformedResume =
+    state.falResponseRequestUrls.length
   const legacyMalformedResumeResponse = await invoke(adminProcessHandler, {
     body: Buffer.from(JSON.stringify({ jobId: 'job-legacy-malformed-fal' })),
     headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
@@ -1344,7 +2211,10 @@ async function main() {
   assert.equal(legacyMalformedResumeResponse.statusCode, 200)
   assert.equal(legacyMalformedResumeResponse.body.job.status, 'needs_review')
   assert.equal(legacyMalformedResumeResponse.body.job.ai_draft_provider, 'fal')
-  assert.equal(legacyMalformedResumeResponse.body.job.ai_draft_source, 'fal_codeformer')
+  assert.equal(
+    legacyMalformedResumeResponse.body.job.ai_draft_source,
+    'fal_codeformer'
+  )
   assert.equal(state.falPostCalls, falPostCallsBeforeLegacyMalformedResume)
   assert.equal(
     state.falStatusRequestUrls[statusUrlCallsBeforeLegacyMalformedResume],
@@ -1355,24 +2225,30 @@ async function main() {
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
   assert.equal(
-    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal?.raw_status_url,
+    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal
+      ?.raw_status_url,
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status'
   )
   assert.equal(
-    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal?.raw_response_url,
+    legacyMalformedResumeResponse.body.job.ai_provider_payload?.fal
+      ?.raw_response_url,
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
 
   const publicResumeOriginalPath = 'manual/public-resume-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', publicResumeOriginalPath), {
-    buffer: Buffer.from('public-resume-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', publicResumeOriginalPath),
+    {
+      buffer: Buffer.from('public-resume-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   state.jobs.push({
     ai_provider: 'fal',
     ai_provider_payload: {
       fal: {
-        response_url: 'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
+        response_url:
+          'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1',
         status_url:
           'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1/status',
       },
@@ -1383,7 +2259,8 @@ async function main() {
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     human_restore_order_id: 'order-public-resume-fal',
     id: 'job-public-resume-fal',
-    notes: 'Public order status polling should resume linked fal processing jobs.',
+    notes:
+      'Public order status polling should resume linked fal processing jobs.',
     order_bound: true,
     order_number: 'txn_public_resume_fal',
     original_file_name: 'public-resume-fal.jpg',
@@ -1434,7 +2311,9 @@ async function main() {
     state.falResponseRequestUrls[responseUrlCallsBeforePublicResume],
     'https://queue.fal.run/fal-ai/image-editing/requests/fal-request-1'
   )
-  const publicResumeJob = state.jobs.find(candidate => candidate.id === 'job-public-resume-fal')
+  const publicResumeJob = state.jobs.find(
+    candidate => candidate.id === 'job-public-resume-fal'
+  )
   const publicResumeOrder = state.orders.find(
     candidate => candidate.id === 'order-public-resume-fal'
   )
@@ -1443,11 +2322,16 @@ async function main() {
   assert.ok(publicResumeJob?.ai_draft_storage_path)
 
   const stalePublicOriginalPath = 'manual/stale-public-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', stalePublicOriginalPath), {
-    buffer: Buffer.from('stale-public-fal-original'),
-    contentType: 'image/jpeg',
-  })
-  const staleFalQueuedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
+  state.storage.set(
+    storageKey('human-restore-originals', stalePublicOriginalPath),
+    {
+      buffer: Buffer.from('stale-public-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
+  const staleFalQueuedAt = new Date(
+    Date.now() - 3 * 60 * 60 * 1000
+  ).toISOString()
   state.jobs.push({
     ai_provider: 'fal',
     ai_provider_payload: {
@@ -1504,7 +2388,9 @@ async function main() {
 
   assert.equal(stalePublicResponse.statusCode, 200)
   assert.equal(stalePublicResponse.body.order.status, 'manual_review')
-  const stalePublicJob = state.jobs.find(candidate => candidate.id === 'job-stale-public-fal')
+  const stalePublicJob = state.jobs.find(
+    candidate => candidate.id === 'job-stale-public-fal'
+  )
   const stalePublicOrder = state.orders.find(
     candidate => candidate.id === 'order-stale-public-fal'
   )
@@ -1533,17 +2419,26 @@ async function main() {
   assert.equal(staleManualRetryResponse.body.ok, true)
   assert.equal(staleManualRetryResponse.body.skipped, true)
   assert.equal(staleManualRetryResponse.body.job.status, 'manual_review')
-  assert.equal(staleManualRetryResponse.body.job.ai_request_id, stalePublicRequestIdBeforeSkip)
+  assert.equal(
+    staleManualRetryResponse.body.job.ai_request_id,
+    stalePublicRequestIdBeforeSkip
+  )
   assert.equal(state.falPostCalls, falPostCallsBeforeSkip)
   assert.equal(stalePublicJobAfterSkip?.status, 'manual_review')
-  assert.equal(stalePublicJobAfterSkip?.ai_request_id, stalePublicRequestIdBeforeSkip)
+  assert.equal(
+    stalePublicJobAfterSkip?.ai_request_id,
+    stalePublicRequestIdBeforeSkip
+  )
   assert.equal(stalePublicOrderAfterSkip?.status, 'manual_review')
 
   const manualOnlyOriginalPath = 'manual/manual-only-fal.jpg'
-  state.storage.set(storageKey('human-restore-originals', manualOnlyOriginalPath), {
-    buffer: Buffer.from('manual-only-fal-original'),
-    contentType: 'image/jpeg',
-  })
+  state.storage.set(
+    storageKey('human-restore-originals', manualOnlyOriginalPath),
+    {
+      buffer: Buffer.from('manual-only-fal-original'),
+      contentType: 'image/jpeg',
+    }
+  )
   const manualOnlyCreatedAt = new Date().toISOString()
   state.jobs.push({
     ai_provider: 'fal',
@@ -1607,7 +2502,9 @@ async function main() {
     headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
     method: 'POST',
   })
-  const manualOnlyJob = state.jobs.find(candidate => candidate.id === 'job-manual-only-fal')
+  const manualOnlyJob = state.jobs.find(
+    candidate => candidate.id === 'job-manual-only-fal'
+  )
   const manualOnlyOrder = state.orders.find(
     candidate => candidate.id === 'order-manual-only-fal'
   )
@@ -1618,7 +2515,10 @@ async function main() {
   assert.equal(manualOnlyRetryResponse.body.ok, true)
   assert.equal(manualOnlyRetryResponse.body.skipped, true)
   assert.equal(manualOnlyRetryResponse.body.job.status, 'manual_review')
-  assert.equal(manualOnlyRetryResponse.body.job.ai_request_id, 'fal-request-manual-only')
+  assert.equal(
+    manualOnlyRetryResponse.body.job.ai_request_id,
+    'fal-request-manual-only'
+  )
   assert.equal(state.falPostCalls, falPostCallsBeforeManualOnlySkip)
   assert.equal(manualOnlyJob?.status, 'manual_review')
   assert.equal(manualOnlyOrder?.status, 'manual_review')
@@ -1669,13 +2569,10 @@ async function main() {
       contentType: 'image/jpeg',
     }
   )
-  state.storage.set(
-    storageKey('human-restore-results', retoucherDraftPath),
-    {
-      buffer: Buffer.from('retoucher-draft'),
-      contentType: 'image/jpeg',
-    }
-  )
+  state.storage.set(storageKey('human-restore-results', retoucherDraftPath), {
+    buffer: Buffer.from('retoucher-draft'),
+    contentType: 'image/jpeg',
+  })
   state.jobs.push({
     ai_draft_file_type: 'image/jpeg',
     ai_draft_model: 'lucataco/codeformer',
@@ -1762,7 +2659,9 @@ async function main() {
   })
 
   assert.equal(retoucherUploadResponse.statusCode, 200)
-  const retoucherJob = state.jobs.find(candidate => candidate.id === 'job-retoucher')
+  const retoucherJob = state.jobs.find(
+    candidate => candidate.id === 'job-retoucher'
+  )
   assert.equal(retoucherJob.status, 'delivered')
   assert.equal(retoucherJob.delivery_source, 'human_uploaded_final')
   assert.equal(retoucherJob.ai_draft_storage_path, retoucherDraftPath)
@@ -1771,19 +2670,30 @@ async function main() {
 
   state.jobs[0].expires_at = new Date(Date.now() - 1000).toISOString()
   retoucherJob.expires_at = new Date(Date.now() - 1000).toISOString()
-  const defaultFalJob = state.jobs.find(candidate => candidate.id === 'job-default-fal')
+  const defaultFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-default-fal'
+  )
+  const falCodeformerNoEffectJob = state.jobs.find(
+    candidate => candidate.id === 'job-fal-codeformer-no-effect'
+  )
   const falCodeformerFallbackJob = state.jobs.find(
     candidate => candidate.id === 'job-fal-codeformer-fallback'
   )
-  const pendingFalJob = state.jobs.find(candidate => candidate.id === 'job-pending-fal')
-  const pollFailureFalJob = state.jobs.find(candidate => candidate.id === 'job-poll-failure-fal')
+  const pendingFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-pending-fal'
+  )
+  const pollFailureFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-poll-failure-fal'
+  )
   const permanentPollFailureFalJob = state.jobs.find(
     candidate => candidate.id === 'job-permanent-poll-failure-fal'
   )
   const stuckFalExistingDraftJob = state.jobs.find(
     candidate => candidate.id === 'job-stuck-fal-existing-draft'
   )
-  const resumeFalJob = state.jobs.find(candidate => candidate.id === 'job-resume-fal')
+  const resumeFalJob = state.jobs.find(
+    candidate => candidate.id === 'job-resume-fal'
+  )
   const malformedSubmitFalJob = state.jobs.find(
     candidate => candidate.id === 'job-malformed-submit-fal'
   )
@@ -1804,8 +2714,16 @@ async function main() {
     defaultFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
+  if (falCodeformerNoEffectJob) {
+    falCodeformerNoEffectJob.expires_at = new Date(
+      Date.now() - 1000
+    ).toISOString()
+  }
+
   if (falCodeformerFallbackJob) {
-    falCodeformerFallbackJob.expires_at = new Date(Date.now() - 1000).toISOString()
+    falCodeformerFallbackJob.expires_at = new Date(
+      Date.now() - 1000
+    ).toISOString()
   }
 
   if (resumeFalJob) {
@@ -1841,11 +2759,15 @@ async function main() {
   }
 
   if (permanentPollFailureFalJob) {
-    permanentPollFailureFalJob.expires_at = new Date(Date.now() - 1000).toISOString()
+    permanentPollFailureFalJob.expires_at = new Date(
+      Date.now() - 1000
+    ).toISOString()
   }
 
   if (stuckFalExistingDraftJob) {
-    stuckFalExistingDraftJob.expires_at = new Date(Date.now() - 1000).toISOString()
+    stuckFalExistingDraftJob.expires_at = new Date(
+      Date.now() - 1000
+    ).toISOString()
   }
 
   const cleanupResponse = await invoke(cleanupHandler, {
@@ -1860,6 +2782,7 @@ async function main() {
       job.id,
       retoucherJob.id,
       'job-default-fal',
+      'job-fal-codeformer-no-effect',
       'job-fal-codeformer-fallback',
       'job-legacy-malformed-fal',
       'job-manual-only-fal',
@@ -1876,6 +2799,7 @@ async function main() {
   assert.equal(state.jobs[0].status, 'deleted')
   assert.equal(retoucherJob.status, 'deleted')
   assert.equal(defaultFalJob?.status, 'deleted')
+  assert.equal(falCodeformerNoEffectJob?.status, 'deleted')
   assert.equal(falCodeformerFallbackJob?.status, 'deleted')
   assert.equal(legacyMalformedFalJob?.status, 'deleted')
   assert.equal(manualOnlyFalJob?.status, 'deleted')

@@ -545,7 +545,10 @@ export default async function handler(req, res) {
     let currentJob = job
 
     if (shouldAutoProcessAfterUpload()) {
-      currentJob = await runRestoreJob({ job }).catch(async error => {
+      currentJob = await runRestoreJob({
+        job,
+        triggeredBy: 'upload_auto',
+      }).catch(async error => {
         await insertEvent(job.id, 'ai_restore_auto_start_failed', {
           error:
             error instanceof Error ? error.message : 'Auto restore failed.',

@@ -28,12 +28,18 @@ function isAuthorized(req) {
 
 async function deleteStoredJobFiles(job) {
   const uniquePaths = new Set()
+  const pipelineTempInputs = Array.isArray(
+    job?.ai_provider_payload?.pipeline_runtime?.tempInputs
+  )
+    ? job.ai_provider_payload.pipeline_runtime.tempInputs
+    : []
 
   for (const [bucket, path] of [
     [job.original_storage_bucket, job.original_storage_path],
     [job.ai_draft_storage_bucket, job.ai_draft_storage_path],
     [job.final_storage_bucket, job.final_storage_path],
     [job.result_storage_bucket, job.result_storage_path],
+    ...pipelineTempInputs.map(input => [input?.bucket, input?.path]),
   ]) {
     if (!bucket || !path) {
       continue

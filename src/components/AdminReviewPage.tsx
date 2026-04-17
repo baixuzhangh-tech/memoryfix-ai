@@ -12,12 +12,88 @@ type RestoreJob = {
   ai_draft_provider?: string | null
   ai_draft_signed_url?: string
   ai_provider_payload?: {
+    analysis?: {
+      contrast_score?: number
+      damage_score?: number
+      detail_score?: number
+      green_cast_score?: number
+      portrait_detail_score?: number
+      portrait_green_cast_score?: number
+      restore_need_score?: number
+      summary?: string
+      valid?: boolean
+    } | null
+    codeformer?: {
+      adaptive_profile?: string | null
+      blend?: {
+        applied?: boolean
+        mask?: {
+          active_coverage?: number
+          region_coverage?: number
+          regions_kept?: number
+          selection_mode?: string
+        } | null
+        reason?: string | null
+      } | null
+      candidate_race?: {
+        enabled?: boolean
+        selected_label?: string | null
+        selected_profile?: string | null
+        selected_score?: number | null
+      } | null
+      skipped?: boolean
+      skip_reason?: string | null
+    } | null
+    codeformer_effective?: boolean
+    codeformer_fallback_reason?: string | null
+    finish?: {
+      adaptive_finish_profile?: string | null
+      applied?: boolean
+      settings?: Record<string, unknown> | null
+    } | null
+    delivery_export?: {
+      applied?: boolean
+      content_type?: string | null
+      output_height?: number | null
+      output_width?: number | null
+      reason?: string | null
+      resized?: boolean
+      settings?: Record<string, unknown> | null
+      summary?: string | null
+    } | null
+    pipeline_trace?: Array<{
+      model?: string | null
+      provider?: string | null
+      providerPayload?: {
+        analysis?: {
+          summary?: string
+        } | null
+        blend?: {
+          applied?: boolean
+          mask?: {
+            region_coverage?: number
+            regions_kept?: number
+          } | null
+        } | null
+        skipped?: boolean
+        skip_reason?: string | null
+        summary?: string | null
+      } | null
+      skipped?: boolean
+      stageType?: string | null
+      summary?: string | null
+    }> | null
     pipeline_id?: string | null
     pipeline_name?: string | null
     pipeline_runtime?: {
       pipelineId?: string | null
       pipelineName?: string | null
-      stages?: Array<{ id: string; type: string }>
+      stages?: Array<{
+        conditions?: Record<string, unknown>
+        id: string
+        params?: Record<string, unknown>
+        type: string
+      }>
     } | null
   } | null
   ai_draft_source?: string | null
@@ -111,11 +187,24 @@ function formatFileSize(size?: number | null) {
   return `${Math.max(1, Math.round(size / 1024))} KB`
 }
 
+function formatScore(value?: number | null) {
+  return typeof value === 'number' ? value.toFixed(2) : 'n/a'
+}
+
 function getAiDraftSummary(job: RestoreJob) {
+  const codeformerFallback =
+    job.ai_provider_payload?.codeformer_effective === false &&
+    (job.ai_provider_payload?.codeformer_fallback_reason ||
+      job.ai_provider_payload?.codeformer?.blend?.reason ||
+      job.ai_provider_payload?.codeformer?.skip_reason)
   const pipelineName =
     job.ai_provider_payload?.pipeline_name ||
     job.ai_provider_payload?.pipeline_runtime?.pipelineName ||
     ''
+
+  if (codeformerFallback) {
+    return 'fal (CodeFormer fallback)'
+  }
 
   if (pipelineName) {
     return pipelineName
@@ -495,10 +584,14 @@ export default function AdminReviewPage() {
 
     const timeoutId = window.setTimeout(async () => {
       try {
-        const body = await adminFetch('/api/admin/human-restore-process', {
-          method: 'POST',
-          body: JSON.stringify({ jobId: selectedJob.id }),
-        })
+        // Read-only refresh: fetches current job status without triggering
+        // any billable AI work. MUST NOT call /api/admin/human-restore-process
+        // here — that endpoint invokes runRestoreJob and has been the root
+        // cause of fal double-billing when auto-polling completed jobs.
+        const params = new URLSearchParams({ jobId: selectedJob.id })
+        const body = await adminFetch(
+          `/api/admin/human-restore-jobs?${params.toString()}`
+        )
 
         if (body.job) {
           setJobs(currentJobs =>
@@ -861,6 +954,142 @@ export default function AdminReviewPage() {
                   AI draft: {getAiDraftSummary(selectedJob)}
                 </p>
               )}
+              {selectedJob.ai_provider_payload?.analysis && (
+                <div className="rounded-[1.25rem] border border-[#d7b98c] bg-white px-4 py-4 text-sm leading-6 text-[#5b4a40]">
+                  <p className="font-black text-[#211915]">
+                    Pipeline diagnostics
+                  </p>
+                  <p className="mt-2">
+                    Detail{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis.detail_score
+                    )}{' '}
+                    · Damage{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis.damage_score
+                    )}{' '}
+                    · Contrast{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis.contrast_score
+                    )}{' '}
+                    · Need{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis
+                        .restore_need_score
+                    )}
+                  </p>
+                  <p className="mt-2">
+                    Portrait detail{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis
+                        .portrait_detail_score
+                    )}{' '}
+                    · Green cast{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis.green_cast_score
+                    )}{' '}
+                    · Portrait green{' '}
+                    {formatScore(
+                      selectedJob.ai_provider_payload.analysis
+                        .portrait_green_cast_score
+                    )}
+                  </p>
+                  {selectedJob.ai_provider_payload.codeformer_effective ===
+                    false &&
+                    selectedJob.ai_provider_payload
+                      .codeformer_fallback_reason && (
+                      <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[#9b6b3c]">
+                        CodeFormer fallback ·{' '}
+                        {selectedJob.ai_provider_payload.codeformer_fallback_reason.replaceAll(
+                          '_',
+                          ' '
+                        )}
+                      </p>
+                    )}
+                  {selectedJob.ai_provider_payload.codeformer?.blend?.mask && (
+                    <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[#9b6b3c]">
+                      CodeFormer blend · regions{' '}
+                      {selectedJob.ai_provider_payload.codeformer.blend.mask
+                        .regions_kept ?? 0}{' '}
+                      · coverage{' '}
+                      {formatScore(
+                        selectedJob.ai_provider_payload.codeformer.blend.mask
+                          .region_coverage
+                      )}
+                    </p>
+                  )}
+                  {selectedJob.ai_provider_payload.codeformer?.candidate_race
+                    ?.enabled && (
+                    <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[#9b6b3c]">
+                      Adaptive race ·{' '}
+                      {selectedJob.ai_provider_payload.codeformer.candidate_race
+                        .selected_label || 'balanced'}{' '}
+                      · score{' '}
+                      {formatScore(
+                        selectedJob.ai_provider_payload.codeformer
+                          .candidate_race.selected_score
+                      )}
+                    </p>
+                  )}
+                  {selectedJob.ai_provider_payload.finish
+                    ?.adaptive_finish_profile && (
+                    <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[#9b6b3c]">
+                      Finish profile ·{' '}
+                      {selectedJob.ai_provider_payload.finish.adaptive_finish_profile.replaceAll(
+                        '_',
+                        ' '
+                      )}
+                    </p>
+                  )}
+                  {selectedJob.ai_provider_payload.delivery_export && (
+                    <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[#9b6b3c]">
+                      Delivery export ·{' '}
+                      {selectedJob.ai_provider_payload.delivery_export
+                        .output_width || '?'}
+                      ×
+                      {selectedJob.ai_provider_payload.delivery_export
+                        .output_height || '?'}{' '}
+                      ·{' '}
+                      {selectedJob.ai_provider_payload.delivery_export
+                        .content_type || 'image/png'}
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedJob.ai_provider_payload?.pipeline_trace &&
+                selectedJob.ai_provider_payload.pipeline_trace.length > 0 && (
+                  <div className="rounded-[1.25rem] border border-[#d7b98c] bg-white px-4 py-4 text-sm leading-6 text-[#5b4a40]">
+                    <p className="font-black text-[#211915]">Stage trace</p>
+                    <div className="mt-3 grid gap-2">
+                      {selectedJob.ai_provider_payload.pipeline_trace.map(
+                        traceEntry => (
+                          <div
+                            key={[
+                              traceEntry.stageType || 'stage',
+                              traceEntry.model || 'model',
+                              traceEntry.summary ||
+                                traceEntry.providerPayload?.summary ||
+                                'summary',
+                            ].join('-')}
+                            className="rounded-xl border border-[#efe2d0] bg-[#fffaf3] px-3 py-3"
+                          >
+                            <p className="font-black text-[#211915]">
+                              {traceEntry.stageType || 'stage'}
+                              {traceEntry.skipped ? ' · skipped' : ''}
+                            </p>
+                            <p className="mt-1 text-[#66574d]">
+                              {traceEntry.summary ||
+                                traceEntry.providerPayload?.summary ||
+                                traceEntry.provider ||
+                                traceEntry.model ||
+                                'No trace summary.'}
+                            </p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
               {(selectedJob.final_source || selectedJob.delivery_source) && (
                 <p className="text-sm leading-6 text-[#66574d]">
                   Final source:{' '}
@@ -913,7 +1142,12 @@ export default function AdminReviewPage() {
                     key={pipeline.id}
                     type="button"
                     disabled={busyJobId === selectedJob.id}
-                    onClick={() => processJob(selectedJob, pipeline.id)}
+                    onClick={() =>
+                      processJob(
+                        selectedJob,
+                        isCurrentPipelineProcessing ? undefined : pipeline.id
+                      )
+                    }
                     className="rounded-full border border-[#211915] px-6 py-3 font-black text-[#211915] transition hover:-translate-y-1 hover:bg-white disabled:opacity-60"
                   >
                     {isCurrentPipelineProcessing
