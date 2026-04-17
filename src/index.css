@@ -1,3 +1,86 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Warm-humanist design tokens (Phase 1).
+ *
+ * All colors are HSL triplets (without the `hsl()` wrapper) so Tailwind can
+ * compose them with opacity modifiers via `hsl(var(--primary) / <alpha>)`.
+ * Do NOT hardcode hex colors inside components — use semantic classes like
+ * `bg-background`, `text-muted-foreground`, `border-border`, etc.
+ *
+ * Palette rationale (matches "Airbnb Stories / Day One" warm humanist mood):
+ *   - Background is a cream / ivory (36° hue, low saturation).
+ *   - Primary is a warm caramel / amber that reads as "aged but alive".
+ *   - Accent is terracotta for high-intent CTAs ("Buy" / "Restore now").
+ *   - Foreground is a warm near-black (never pure #000).
+ */
+@layer base {
+  :root {
+    --background: 36 44% 96%;
+    --foreground: 24 15% 14%;
+
+    --card: 36 40% 98%;
+    --card-foreground: 24 15% 14%;
+
+    --popover: 36 40% 98%;
+    --popover-foreground: 24 15% 14%;
+
+    --primary: 28 55% 48%;
+    --primary-foreground: 36 44% 98%;
+
+    --secondary: 32 30% 90%;
+    --secondary-foreground: 24 15% 20%;
+
+    --muted: 32 25% 92%;
+    --muted-foreground: 24 10% 42%;
+
+    --accent: 16 60% 42%;
+    --accent-foreground: 36 44% 98%;
+
+    --destructive: 0 70% 45%;
+    --destructive-foreground: 36 44% 98%;
+
+    --border: 30 22% 85%;
+    --input: 30 22% 85%;
+    --ring: 28 55% 48%;
+
+    /* Strict 3-tier radius scale — do not add more tiers. */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.625rem;
+    --radius-lg: 1rem;
+    /* Legacy shadcn alias; keep equal to --radius-md so shadcn components
+       that read `var(--radius)` render at our canonical mid tier. */
+    --radius: 0.625rem;
+
+    /* Strict 3-tier shadow scale with warm ink tint (never neutral gray). */
+    --shadow-card: 0 1px 2px 0 hsl(24 15% 20% / 0.05),
+      0 1px 3px 0 hsl(24 15% 20% / 0.08);
+    --shadow-float: 0 4px 12px -2px hsl(24 15% 20% / 0.08),
+      0 8px 24px -4px hsl(24 15% 20% / 0.1);
+    --shadow-modal: 0 16px 32px -8px hsl(24 15% 20% / 0.14),
+      0 32px 64px -16px hsl(24 15% 20% / 0.18);
+
+    --font-serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-serif;
+    font-feature-settings: 'ss01', 'ss02';
+  }
+}

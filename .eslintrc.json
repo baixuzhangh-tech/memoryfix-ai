@@ -50,5 +50,27 @@
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
     "no-debugger": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/components/ui/**/*.{ts,tsx}",
+        "src/sections/**/*.{ts,tsx}",
+        "src/pages/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "warn",
+          {
+            "selector": "JSXAttribute[name.name='className'] Literal[value=/#[0-9a-fA-F]{3,8}/]",
+            "message": "Do not hardcode hex colors in className. Use design tokens: bg-primary, text-foreground, border-border, etc. See tailwind.config.js and src/index.css for the full token list."
+          },
+          {
+            "selector": "JSXAttribute[name.name='className'] Literal[value=/\\[[^\\]]*(rem|px|%)[^\\]]*\\]/]",
+            "message": "Do not use arbitrary Tailwind values like [2rem] or [23px] in className. Use the canonical radius (rounded-sm/md/lg), shadow (shadow-card/float/modal), or spacing scale from tailwind.config.js."
+          }
+        ]
+      }
+    }
+  ]
 }

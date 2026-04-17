@@ -6,7 +6,10 @@ localforage.config({
   name: 'modelCache',
 })
 
-export async function saveModel(modelType: modelType, modelBlob: ArrayBuffer) {
+export async function saveModel(
+  modelType: modelType,
+  modelBlob: ArrayBuffer | Uint8Array
+) {
   await localforage.setItem(getModel(modelType).name, modelBlob)
 }
 

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import path from 'node:path'
 import react from '@vitejs/plugin-react-swc'
 import eslintPlugin from 'vite-plugin-eslint'
 
@@ -6,6 +7,11 @@ import eslintPlugin from 'vite-plugin-eslint'
 export default defineConfig({
   base: '/',
   plugins: [react(), eslintPlugin()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
