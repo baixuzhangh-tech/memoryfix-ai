@@ -16,6 +16,7 @@ import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
 import LandingPage from './pages/LandingPage'
+import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
@@ -1803,7 +1804,10 @@ function App() {
         {mainView === 'admin' && <AdminReviewPage />}
         {mainView === 'retoucher' && <RetoucherPortal />}
         {mainView === 'legal' && <LegalPage path={currentPath} />}
-        {mainView === 'secure-upload' && (
+        {mainView === 'secure-upload' && isNewLandingEnabled && (
+          <SecureUploadPage token={secureUploadToken} />
+        )}
+        {mainView === 'secure-upload' && !isNewLandingEnabled && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
         {mainView === 'success' &&
