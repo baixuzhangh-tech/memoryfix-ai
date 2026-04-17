@@ -15,6 +15,7 @@ import HumanRestoreUploadForm from './components/HumanRestoreUploadForm'
 import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
+import CheckoutForm from './components/domain/CheckoutForm'
 import LandingPage from './pages/LandingPage'
 import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
@@ -2725,12 +2726,21 @@ function App() {
       )}
       {showHumanRestoreCheckout && (
         <Modal>
-          <HumanRestoreCheckoutForm
-            onCancel={() => {
-              setShowHumanRestoreCheckout(false)
-            }}
-            onCheckoutCreated={handleHumanRestoreCheckoutCreated}
-          />
+          {isNewLandingEnabled ? (
+            <CheckoutForm
+              onCancel={() => {
+                setShowHumanRestoreCheckout(false)
+              }}
+              onCheckoutCreated={handleHumanRestoreCheckoutCreated}
+            />
+          ) : (
+            <HumanRestoreCheckoutForm
+              onCancel={() => {
+                setShowHumanRestoreCheckout(false)
+              }}
+              onCheckoutCreated={handleHumanRestoreCheckoutCreated}
+            />
+          )}
         </Modal>
       )}
       {showAbout && (
