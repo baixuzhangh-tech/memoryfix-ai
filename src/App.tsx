@@ -16,6 +16,7 @@ import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
 import LandingPage from './pages/LandingPage'
+import SuccessPage from './pages/SuccessPage'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -1806,6 +1807,16 @@ function App() {
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
         {mainView === 'success' &&
+          isNewLandingEnabled &&
+          hasLocalHumanRestoreOrder && (
+            <SuccessPage
+              errorMessage={humanRestoreOrderError}
+              order={humanRestoreOrder}
+              status={humanRestoreOrderStatus}
+            />
+          )}
+        {mainView === 'success' &&
+          !isNewLandingEnabled &&
           (hasLocalHumanRestoreOrder ? (
             <HumanRestoreSuccessStatusPage
               errorMessage={humanRestoreOrderError}
