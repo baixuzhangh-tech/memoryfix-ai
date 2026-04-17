@@ -20,8 +20,13 @@ export const landingHero = {
   primaryCtaLabel: 'Restore my photo — $19',
   secondaryCtaLabel: 'Try for free in your browser',
   trustLine: 'Private · Human-reviewed · Email delivery in 24h',
-  heroBeforeSrc: '/examples/old-photos/old-family-worthington-1910.png',
-  heroAfterSrc: '/examples/old-photos/old-family-worthington-1910.png',
+  // Real before/after pair from a customer scan of the Sofia Wallin portrait.
+  // The "before" is the original scanned JPEG (creased, desaturated); the
+  // "after" is our delivered restoration (colour balance + damage repair).
+  // If you replace these, also flip the `hasRealPair` flag on the matching
+  // gallery sample below so the CSS filter fallback is skipped.
+  heroBeforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+  heroAfterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
 }
 
 export const landingHowItWorks = [
@@ -49,10 +54,24 @@ export interface GallerySample {
   afterSrc: string
   beforeSrc: string
   caption: string
+  /**
+   * When true, beforeSrc and afterSrc are a genuine before/after pair —
+   * Gallery renders them as-is. When false (default), the two sources are
+   * the same placeholder file and Gallery applies a CSS-filter trick to
+   * simulate the "after" so the grid still reads as a before/after wall.
+   */
+  hasRealPair?: boolean
   id: string
 }
 
 export const landingGallery: GallerySample[] = [
+  {
+    id: 'sofia-wallin',
+    caption: 'Sofia Wallin, real restoration',
+    beforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+    afterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+    hasRealPair: true,
+  },
   {
     id: 'worthington-1910',
     caption: 'Worthington family, ca. 1910',
@@ -76,12 +95,6 @@ export const landingGallery: GallerySample[] = [
     caption: 'Abigail Campbell, tin-type',
     beforeSrc: '/examples/old-photos/old-family-abigail-campbell.jpg',
     afterSrc: '/examples/old-photos/old-family-abigail-campbell.jpg',
-  },
-  {
-    id: 'sofia-wallin',
-    caption: 'Sofia Wallin, scratched original',
-    beforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin.jpg',
-    afterSrc: '/examples/old-photos/old-family-scratched-sofia-wallin.jpg',
   },
   {
     id: 'gatekeeper-china',

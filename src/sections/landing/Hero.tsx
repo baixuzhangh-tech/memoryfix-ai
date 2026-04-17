@@ -70,14 +70,12 @@ export function Hero({
         </div>
 
         <div className="relative">
-          <div className="[&>div>img:nth-of-type(1)]:[filter:saturate(0.3)_sepia(0.25)_contrast(0.95)] [&>div>div>img]:[filter:saturate(1.1)_contrast(1.08)_brightness(1.03)]">
-            <BeforeAfterSlider
-              beforeSrc={landingHero.heroBeforeSrc}
-              afterSrc={landingHero.heroAfterSrc}
-              beforeLabel="Original"
-              afterLabel="Restored"
-            />
-          </div>
+          <BeforeAfterSlider
+            beforeSrc={landingHero.heroBeforeSrc}
+            afterSrc={landingHero.heroAfterSrc}
+            beforeLabel="Original"
+            afterLabel="Restored"
+          />
           <p className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
             Drag to compare
           </p>

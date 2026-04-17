@@ -30,35 +30,49 @@ export function Gallery({ className }: GalleryProps) {
         </div>
 
         <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {landingGallery.map(sample => (
-            <li
-              key={sample.id}
-              className="group relative overflow-hidden rounded-lg bg-muted shadow-card transition-shadow hover:shadow-float"
-            >
-              <div className="relative aspect-[3/4]">
-                <img
-                  src={sample.beforeSrc}
-                  alt={`${sample.caption} — before restoration`}
-                  className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700 [filter:saturate(0.3)_sepia(0.2)_contrast(0.95)] group-hover:opacity-0"
-                  loading="lazy"
-                />
-                <img
-                  src={sample.afterSrc}
-                  alt={`${sample.caption} — after restoration`}
-                  className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-700 [filter:saturate(1.12)_contrast(1.08)_brightness(1.03)] group-hover:opacity-100"
-                  loading="lazy"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3 border-t bg-card p-4">
-                <p className="font-serif text-base text-foreground">
-                  {sample.caption}
-                </p>
-                <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-                  Hover
-                </span>
-              </div>
-            </li>
-          ))}
+          {landingGallery.map(sample => {
+            const beforeFilterClass = sample.hasRealPair
+              ? ''
+              : '[filter:saturate(0.3)_sepia(0.2)_contrast(0.95)]'
+            const afterFilterClass = sample.hasRealPair
+              ? ''
+              : '[filter:saturate(1.12)_contrast(1.08)_brightness(1.03)]'
+            return (
+              <li
+                key={sample.id}
+                className="group relative overflow-hidden rounded-lg bg-muted shadow-card transition-shadow hover:shadow-float"
+              >
+                <div className="relative aspect-[3/4]">
+                  <img
+                    src={sample.beforeSrc}
+                    alt={`${sample.caption} — before restoration`}
+                    className={cn(
+                      'absolute inset-0 h-full w-full object-cover transition-opacity duration-700 group-hover:opacity-0',
+                      beforeFilterClass
+                    )}
+                    loading="lazy"
+                  />
+                  <img
+                    src={sample.afterSrc}
+                    alt={`${sample.caption} — after restoration`}
+                    className={cn(
+                      'absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-700 group-hover:opacity-100',
+                      afterFilterClass
+                    )}
+                    loading="lazy"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t bg-card p-4">
+                  <p className="font-serif text-base text-foreground">
+                    {sample.caption}
+                  </p>
+                  <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                    {sample.hasRealPair ? 'Real pair' : 'Hover'}
+                  </span>
+                </div>
+              </li>
+            )
+          })}
         </ul>
       </div>
     </section>
