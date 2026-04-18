@@ -37,7 +37,7 @@ export function Hero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden bg-background pb-12 pt-16 md:pb-16 md:pt-24',
+        'relative overflow-hidden bg-background pb-10 pt-10 md:pb-14 md:pt-16',
         className
       )}
     >
@@ -82,13 +82,15 @@ export function Hero({
           </p>
         </div>
 
-        <div className="relative mx-auto w-full max-w-[28rem] lg:max-w-[32rem]">
+        <div className="relative mx-auto w-full max-w-[22rem] md:max-w-[24rem] lg:max-w-[26rem]">
           <div
             className={cn(
-              // Cream paper frame + soft warm shadow + tiny tilt so the
-              // before/after reads as a printed photograph, not a floating
-              // widget. The rotation is removed under motion-reduce.
-              'rotate-[-1.2deg] rounded-md bg-[#f5e7cf] p-3 shadow-[0_28px_56px_-20px_rgba(72,40,14,0.45)] transition-transform duration-500 hover:rotate-0 motion-reduce:rotate-0'
+              // Cream paper frame + soft warm shadow so the before/after
+              // reads as a printed photograph on a matte mount. We keep
+              // the slider on a 4/5 aspect (instead of the default 3/4)
+              // so it stays fully inside a standard laptop viewport
+              // alongside the copy column.
+              'rounded-md bg-[#f5e7cf] p-3 shadow-[0_28px_56px_-20px_rgba(72,40,14,0.45)]'
             )}
           >
             <BeforeAfterSlider
@@ -97,10 +99,10 @@ export function Hero({
               beforeLabel="Original"
               afterLabel="Restored"
               autoDemo
-              className="rounded-sm"
+              className="aspect-[4/5] rounded-sm"
             />
           </div>
-          <p className="mt-5 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+          <p className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
             Drag to compare
           </p>
         </div>
