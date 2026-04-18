@@ -26,14 +26,19 @@ export const landingHero = {
   secondaryCtaLabel: 'Try for free in your browser',
   trustLine: 'Private · Human-reviewed · Email delivery in 24h',
   // Real before/after pair from a customer scan of the Sofia Wallin family
-  // portrait. The "-A" PNG stored under new-photos/ is the original damaged
-  // scan the customer sent us; the "-B" JPEG under old-photos/ is our
-  // delivered restoration. The folder names are historical — what matters
-  // is the actual content, which is confirmed by inspecting each file.
+  // portrait. Verified by inspecting each file:
+  //   - old-photos/-B.jpg : the original damaged black-and-white scan the
+  //     customer sent us (heavy scratches, emulsion spots, an extra cdv
+  //     portrait pasted into the upper-left corner).
+  //   - new-photos/-A.png : our delivered restoration — same composition,
+  //     damage gone, hand-colorized, the pasted-on cdv removed.
+  // Folder names match intent: old-photos = customer originals,
+  // new-photos = our restored outputs. An earlier revision of this config
+  // had the two swapped, which made the hero demo the product backwards.
   // If you replace these, also flip the `hasRealPair` flag on the matching
   // gallery sample below so the CSS filter fallback is skipped.
-  heroBeforeSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
-  heroAfterSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+  heroBeforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+  heroAfterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
 }
 
 export const landingHowItWorks = [
@@ -75,8 +80,8 @@ export const landingGallery: GallerySample[] = [
   {
     id: 'sofia-wallin',
     caption: 'Sofia Wallin, real restoration',
-    beforeSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
-    afterSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+    beforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
+    afterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
     hasRealPair: true,
   },
   {
