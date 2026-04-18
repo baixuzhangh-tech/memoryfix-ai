@@ -1,10 +1,4 @@
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  ExternalLink,
-  Loader2,
-} from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -129,16 +123,14 @@ export function SuccessPage({ errorMessage, order, status }: SuccessPageProps) {
           </CardContent>
         </Card>
 
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {order?.checkoutEmailMasked
+            ? `A full receipt has been emailed to ${order.checkoutEmailMasked} by our payment provider.`
+            : 'A full receipt has been emailed to you by our payment provider.'}
+        </p>
+
         <div className="flex flex-col gap-3 sm:flex-row">
-          {order?.receiptUrl ? (
-            <Button asChild variant="accent" size="lg" className="gap-2">
-              <a href={order.receiptUrl} target="_blank" rel="noreferrer">
-                View receipt
-                <ExternalLink className="h-4 w-4" aria-hidden />
-              </a>
-            </Button>
-          ) : null}
-          <Button asChild variant="outline" size="lg" className="gap-2">
+          <Button asChild variant="accent" size="lg" className="gap-2">
             <a href="/">
               Back to home
               <ArrowRight className="h-4 w-4" aria-hidden />

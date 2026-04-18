@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, ExternalLink, Loader2, ShieldCheck } from 'lucide-react'
+import { AlertCircle, Loader2, ShieldCheck } from 'lucide-react'
 
 import trackProductEvent from '@/analytics'
 import HumanRestoreUploadForm from '@/components/HumanRestoreUploadForm'
@@ -162,23 +162,13 @@ export function SecureUploadPage({ token }: SecureUploadPageProps) {
       </div>
 
       <Card className="w-full max-w-2xl border-none shadow-card">
-        <CardContent className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-sm bg-secondary px-2 py-1 font-mono text-xs uppercase tracking-widest text-foreground">
-              {orderNumber}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              {order.checkoutEmailMasked}
-            </span>
-          </div>
-          {order.receiptUrl ? (
-            <Button asChild variant="outline" size="sm" className="gap-2">
-              <a href={order.receiptUrl} target="_blank" rel="noreferrer">
-                View receipt
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            </Button>
-          ) : null}
+        <CardContent className="flex flex-wrap items-center gap-3 p-5">
+          <span className="rounded-sm bg-secondary px-2 py-1 font-mono text-xs uppercase tracking-widest text-foreground">
+            {orderNumber}
+          </span>
+          <span className="text-sm text-muted-foreground">
+            {order.checkoutEmailMasked}
+          </span>
         </CardContent>
       </Card>
 
