@@ -102,8 +102,10 @@ export function Hero({
               className="aspect-[4/5] rounded-sm"
             />
           </div>
-          <p className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+          <p className="mt-4 flex items-center justify-center gap-2 text-center font-mono text-xs font-medium uppercase tracking-widest text-foreground/70">
+            <span aria-hidden>←</span>
             Drag to compare
+            <span aria-hidden>→</span>
           </p>
         </div>
       </div>

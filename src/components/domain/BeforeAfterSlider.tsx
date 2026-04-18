@@ -183,9 +183,13 @@ export function BeforeAfterSlider({
             cancelDemo()
             draggingRef.current = true
           }}
-          className="pointer-events-auto absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center rounded-full bg-background text-foreground shadow-modal ring-2 ring-primary focus-visible:outline-none focus-visible:ring-4"
+          className="pointer-events-auto absolute left-1/2 top-1/2 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center rounded-full bg-background text-primary shadow-modal ring-2 ring-primary/60 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/80"
         >
-          <ChevronsLeftRight className="h-5 w-5" aria-hidden />
+          <ChevronsLeftRight
+            className="h-7 w-7"
+            strokeWidth={2.25}
+            aria-hidden
+          />
         </button>
       </div>
     </div>
