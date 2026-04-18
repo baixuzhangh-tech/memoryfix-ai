@@ -20,6 +20,7 @@ import LandingPage from './pages/LandingPage'
 import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
 import { useCurrentView } from './hooks/useCurrentView'
+import { useHumanRestoreOrder } from './hooks/useHumanRestoreOrder'
 import { usePageSeo } from './hooks/usePageSeo'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
@@ -266,32 +267,6 @@ const paymentContactEmail =
   import.meta.env.VITE_SUPPORT_EMAIL ||
   'hello@artgen.site'
 
-type DirectSecureAccessResponse = {
-  error?: string
-  ok?: boolean
-  uploadUrl?: string
-}
-
-type HumanRestoreOrderResponse = {
-  error?: string
-  ok?: boolean
-  order?: HumanRestoreLocalOrder
-}
-
-type SecureOrderResponse = {
-  error?: string
-  ok?: boolean
-  order?: {
-    checkoutEmailMasked: string
-    createdAt: string
-    orderId: string
-    orderNumber?: string
-    productName?: string
-    receiptUrl?: string
-    testMode?: boolean
-  }
-}
-
 function App() {
   const [file, setFile] = useState<File>()
   const [, setStateLanguageTag] = useState<'en' | 'zh'>('en')
@@ -320,23 +295,6 @@ function App() {
   const [checkoutLaunchStatus, setCheckoutLaunchStatus] = useState<
     'idle' | 'loading' | 'error'
   >('idle')
-  const [directUploadUrl, setDirectUploadUrl] = useState('')
-  const [directUploadStatus, setDirectUploadStatus] = useState<
-    'idle' | 'loading' | 'ready' | 'unavailable'
-  >('idle')
-  const [directUploadToken, setDirectUploadToken] = useState('')
-  const [inlineSecureOrderStatus, setInlineSecureOrderStatus] = useState<
-    'idle' | 'loading' | 'ready' | 'error'
-  >('idle')
-  const [inlineSecureOrder, setInlineSecureOrder] = useState<
-    SecureOrderResponse['order'] | null
-  >(null)
-  const [humanRestoreOrderStatus, setHumanRestoreOrderStatus] = useState<
-    'idle' | 'loading' | 'ready' | 'error'
-  >('idle')
-  const [humanRestoreOrderError, setHumanRestoreOrderError] = useState('')
-  const [humanRestoreOrder, setHumanRestoreOrder] =
-    useState<HumanRestoreLocalOrder | null>(null)
   const [browserCheckoutContext] = useState(() =>
     readHumanRestoreCheckoutContext()
   )
@@ -475,302 +433,29 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!isHumanRestoreSuccessPage || !hasLocalHumanRestoreOrder) {
-      setHumanRestoreOrderStatus('idle')
-      setHumanRestoreOrderError('')
-      setHumanRestoreOrder(null)
-      return () => undefined
-    }
-
-    let isActive = true
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
-
-    async function loadOrder() {
-      if (!isActive) {
-        return
-      }
-
-      setHumanRestoreOrderStatus(currentStatus =>
-        currentStatus === 'ready' ? 'ready' : 'loading'
-      )
-      setHumanRestoreOrderError('')
-
-      try {
-        const requestUrl = new URL(
-          '/api/human-restore-order',
-          window.location.origin
-        )
-        requestUrl.searchParams.set('orderId', localHumanRestoreOrderId)
-
-        if (localHumanRestoreCheckoutRef) {
-          requestUrl.searchParams.set(
-            'checkoutRef',
-            localHumanRestoreCheckoutRef
-          )
-        }
-
-        const response = await fetch(requestUrl.toString())
-        const responseBody = (await response
-          .json()
-          .catch(() => null)) as HumanRestoreOrderResponse | null
-
-        if (!isActive) {
-          return
-        }
-
-        if (!response.ok || !responseBody?.order) {
-          throw new Error(
-            responseBody?.error || 'The order status could not be loaded yet.'
-          )
-        }
-
-        setHumanRestoreOrder(responseBody.order)
-        setHumanRestoreOrderStatus('ready')
-
-        const shouldKeepPolling = [
-          'pending_payment',
-          'paid',
-          'uploaded',
-          'processing',
-          'ai_queued',
-        ].includes(responseBody.order.status)
-
-        if (shouldKeepPolling) {
-          retryTimer = setTimeout(loadOrder, 4000)
-        } else {
-          clearHumanRestoreStoredCheckoutContext()
-        }
-      } catch (error) {
-        if (!isActive) {
-          return
-        }
-
-        setHumanRestoreOrderStatus('error')
-        setHumanRestoreOrderError(
-          error instanceof Error
-            ? error.message
-            : 'The order status could not be loaded yet.'
-        )
-        retryTimer = setTimeout(loadOrder, 5000)
-      }
-    }
-
-    loadOrder()
-
-    return () => {
-      isActive = false
-      if (retryTimer) {
-        clearTimeout(retryTimer)
-      }
-    }
-  }, [
-    hasLocalHumanRestoreOrder,
-    isHumanRestoreSuccessPage,
-    localHumanRestoreCheckoutRef,
-    localHumanRestoreOrderId,
-  ])
-
-  useEffect(() => {
-    let isActive = true
-
-    if (!isHumanRestoreSuccessPage) {
-      setDirectUploadStatus('idle')
-      setDirectUploadUrl('')
-      setDirectUploadToken('')
-      return () => {
-        isActive = false
-      }
-    }
-
-    if (hasLocalHumanRestoreOrder) {
-      setDirectUploadStatus('idle')
-      setDirectUploadUrl('')
-      setDirectUploadToken('')
-      return () => {
-        isActive = false
-      }
-    }
-
-    if (secureUploadToken) {
-      const uploadUrl = new URL(
-        humanRestoreSecureUploadPath,
-        window.location.origin
-      )
-      uploadUrl.searchParams.set('token', secureUploadToken)
-      setDirectUploadUrl(uploadUrl.toString())
-      setDirectUploadToken(secureUploadToken)
-      setDirectUploadStatus('ready')
-      return () => {
-        isActive = false
-      }
-    }
-
-    const hasAnyOrderRef =
-      directAccessOrderId ||
-      directAccessOrderIdentifier ||
-      directAccessCheckoutRef ||
-      browserCheckoutContext.hasPendingCheckout
-
-    if (!hasAnyOrderRef) {
-      setDirectUploadStatus('unavailable')
-      setDirectUploadUrl('')
-      setDirectUploadToken('')
-      return () => {
-        isActive = false
-      }
-    }
-
-    setDirectUploadStatus('loading')
-    setDirectUploadUrl('')
-    setDirectUploadToken('')
-
-    const requestUrl = new URL(
-      '/api/human-restore-secure-access',
-      window.location.origin
-    )
-    if (directAccessOrderId) {
-      requestUrl.searchParams.set('orderId', directAccessOrderId)
-    }
-
-    if (directAccessOrderIdentifier) {
-      requestUrl.searchParams.set(
-        'orderIdentifier',
-        directAccessOrderIdentifier
-      )
-    }
-
-    if (directAccessCheckoutRef) {
-      requestUrl.searchParams.set('checkoutRef', directAccessCheckoutRef)
-    }
-
-    if (directAccessCheckoutStartedAt) {
-      requestUrl.searchParams.set(
-        'checkoutStartedAt',
-        directAccessCheckoutStartedAt
-      )
-    }
-
-    if (effectiveCheckoutEmail) {
-      requestUrl.searchParams.set('checkoutEmail', effectiveCheckoutEmail)
-    }
-
-    if (
-      browserCheckoutContext.hasPendingCheckout &&
-      !directAccessOrderId &&
-      !directAccessOrderIdentifier &&
-      !directAccessCheckoutRef
-    ) {
-      requestUrl.searchParams.set('mode', 'recent')
-    }
-
-    fetch(requestUrl.toString())
-      .then(async response => {
-        const responseBody = (await response
-          .json()
-          .catch(() => null)) as DirectSecureAccessResponse | null
-
-        if (!isActive) {
-          return
-        }
-
-        if (response.ok && responseBody?.uploadUrl) {
-          const nextUploadUrl = responseBody.uploadUrl
-          const nextUploadToken =
-            new URL(nextUploadUrl).searchParams.get('token') || ''
-
-          if (!nextUploadToken) {
-            setDirectUploadStatus('unavailable')
-            return
-          }
-
-          setDirectUploadToken(nextUploadToken)
-          setDirectUploadUrl(responseBody.uploadUrl)
-          setDirectUploadStatus('ready')
-          clearHumanRestoreStoredCheckoutContext()
-          return
-        }
-
-        setDirectUploadToken('')
-        setDirectUploadStatus('unavailable')
-      })
-      .catch(() => {
-        if (!isActive) {
-          return
-        }
-
-        setDirectUploadToken('')
-        setDirectUploadStatus('unavailable')
-      })
-
-    return () => {
-      isActive = false
-    }
-  }, [
-    effectiveCheckoutEmail,
+  const {
+    directUploadStatus,
+    directUploadToken,
+    directUploadUrl,
+    humanRestoreOrder,
+    humanRestoreOrderError,
+    humanRestoreOrderStatus,
+    inlineSecureOrder,
+    inlineSecureOrderStatus,
+  } = useHumanRestoreOrder({
+    browserCheckoutContextHasPendingCheckout:
+      browserCheckoutContext.hasPendingCheckout,
     directAccessCheckoutRef,
     directAccessCheckoutStartedAt,
     directAccessOrderId,
     directAccessOrderIdentifier,
-    browserCheckoutContext.hasPendingCheckout,
+    effectiveCheckoutEmail,
     hasLocalHumanRestoreOrder,
     isHumanRestoreSuccessPage,
+    localHumanRestoreCheckoutRef,
+    localHumanRestoreOrderId,
     secureUploadToken,
-  ])
-
-  useEffect(() => {
-    if (
-      !isHumanRestoreSuccessPage ||
-      directUploadStatus !== 'ready' ||
-      !directUploadToken
-    ) {
-      setInlineSecureOrderStatus('idle')
-      setInlineSecureOrder(null)
-      return () => undefined
-    }
-
-    let isActive = true
-    setInlineSecureOrderStatus('loading')
-    setInlineSecureOrder(null)
-
-    fetch(
-      `/api/human-restore-order?token=${encodeURIComponent(directUploadToken)}`
-    )
-      .then(async response => {
-        const responseBody = (await response
-          .json()
-          .catch(() => null)) as SecureOrderResponse | null
-
-        if (!isActive) {
-          return
-        }
-
-        if (!response.ok || !responseBody?.order) {
-          throw new Error(
-            responseBody?.error ||
-              'The secure upload context could not be verified on this page.'
-          )
-        }
-
-        setInlineSecureOrder(responseBody.order)
-        setInlineSecureOrderStatus('ready')
-        trackProductEvent('view_inline_human_restore_secure_upload', {
-          test_mode: Boolean(responseBody.order.testMode),
-        })
-      })
-      .catch(() => {
-        if (!isActive) {
-          return
-        }
-
-        setInlineSecureOrderStatus('error')
-        setInlineSecureOrder(null)
-      })
-
-    return () => {
-      isActive = false
-    }
-  }, [directUploadStatus, directUploadToken, isHumanRestoreSuccessPage])
+  })
 
   const isDirectUploadReady =
     directUploadStatus === 'ready' && Boolean(directUploadUrl)
