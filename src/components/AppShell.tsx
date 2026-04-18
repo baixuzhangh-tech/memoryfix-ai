@@ -82,27 +82,30 @@ export function AppShell({
   return (
     <div className="min-h-full bg-[#f8f1e7] text-[#211915]">
       <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
-        <Button
-          className={[
-            canGoBack ? '' : 'opacity-50 pointer-events-none',
-            'pl-1 pr-1',
-          ].join(' ')}
-          icon={<ArrowLeftIcon className="h-6 w-6" />}
-          onClick={() => {
-            if (isOffHome) {
-              window.location.assign('/')
-              return
-            }
+        {canGoBack ? (
+          <Button
+            className="pl-1 pr-1"
+            icon={<ArrowLeftIcon className="h-6 w-6" />}
+            onClick={() => {
+              if (isOffHome) {
+                window.location.assign('/')
+                return
+              }
 
-            onStartNew()
-          }}
-        >
-          <div className="md:w-[180px]">
-            <span className="hidden select-none sm:inline">
-              {isOffHome ? 'Back home' : m.start_new()}
-            </span>
-          </div>
-        </Button>
+              onStartNew()
+            }}
+          >
+            <div className="md:w-[180px]">
+              <span className="hidden select-none sm:inline">
+                {isOffHome ? 'Back home' : m.start_new()}
+              </span>
+            </div>
+          </Button>
+        ) : (
+          // Placeholder keeps the flex layout stable (logo stays centered)
+          // when the back/start-new button has nothing to navigate to.
+          <div className="md:w-[220px]" aria-hidden />
+        )}
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#211915] text-xl font-black text-[#f3c16f] shadow-lg shadow-[#211915]/20">
             M

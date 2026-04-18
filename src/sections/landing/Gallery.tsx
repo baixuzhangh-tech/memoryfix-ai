@@ -14,7 +14,10 @@ export interface GalleryProps {
  */
 export function Gallery({ className }: GalleryProps) {
   return (
-    <section className={cn('bg-background py-20 md:py-28', className)}>
+    <section
+      id="gallery"
+      className={cn('bg-background py-20 md:py-28', className)}
+    >
       <div className="container">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
