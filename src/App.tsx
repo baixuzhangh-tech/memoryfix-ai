@@ -22,6 +22,7 @@ import SuccessPage from './pages/SuccessPage'
 import { useCurrentView } from './hooks/useCurrentView'
 import { useHumanRestoreOrder } from './hooks/useHumanRestoreOrder'
 import { usePageSeo } from './hooks/usePageSeo'
+import { usePaddle } from './hooks/usePaddle'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -46,10 +47,9 @@ import {
   humanRestoreSecureUploadPath,
   humanRestoreSuccessPath,
 } from './config/routes'
-import { maskEmailAddress, normalizeCheckoutEmail } from './lib/email'
+import { maskEmailAddress } from './lib/email'
 import { looksLikeUuid } from './lib/uuid'
 import {
-  addLocalRepairPackCredits,
   clearPendingLocalRepairPackCheckout,
   consumeLocalRepairCredit,
   freeLocalRepairLimit,
@@ -59,25 +59,14 @@ import {
   localRepairPackPrice,
   localRepairUsageStorageKey,
   readLocalRepairUsage,
-  readPendingLocalRepairPackCheckout,
   rememberPendingLocalRepairPackCheckout,
   writeLocalRepairUsage,
 } from './lib/localRepair'
-import type { LocalRepairUsage } from './lib/localRepair'
 import {
-  isPaddleClientTokenConfigured,
-  isPaddlePriceIdConfigured,
-  paddleClientToken,
-  paddleEnvironment,
   paddleHumanRestorePriceId,
   paddleLocalPackPriceId,
-  paddleScriptUrl,
 } from './lib/paddle/env'
-import type {
-  CheckoutLaunchResult,
-  PaddleEvent,
-  PaddleEventData,
-} from './lib/paddle/env'
+import type { CheckoutLaunchResult } from './lib/paddle/env'
 
 const trustPoints = [
   '3 free local repairs',
@@ -282,8 +271,6 @@ function App() {
   const [paymentSetupNotice, setPaymentSetupNotice] = useState<
     'human-restore' | 'local-pack' | null
   >(null)
-  const paddleSetupRef = useRef(false)
-  const paddleScriptLoadPromiseRef = useRef<Promise<boolean> | null>(null)
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
@@ -324,11 +311,24 @@ function App() {
   const paidLocalRepairCreditsRemaining = localRepairUsage.paidCredits
   const canStartLocalRepair =
     freeLocalRepairsRemaining > 0 || paidLocalRepairCreditsRemaining > 0
-  const isPaddleClientReady = isPaddleClientTokenConfigured(paddleClientToken)
-  const isLocalPackPaymentReady =
-    isPaddleClientReady && isPaddlePriceIdConfigured(paddleLocalPackPriceId)
-  const isHumanRestorePaymentReady =
-    isPaddleClientReady && isPaddlePriceIdConfigured(paddleHumanRestorePriceId)
+  const {
+    ensurePaddleReady,
+    isHumanRestorePaymentReady,
+    isLocalPackPaymentReady,
+    isPaddleClientReady,
+  } = usePaddle({
+    onLocalPackCheckoutCompleted: ({ nextUsage }) => {
+      setLocalRepairUsage(nextUsage)
+      setLocalPackCheckoutStatus('success')
+      setLocalPackCheckoutError('')
+      setShowLocalRepairLimitModal(false)
+      window.setTimeout(() => {
+        document
+          .getElementById('local-repair-start')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 250)
+    },
+  })
 
   const maskedCheckoutEmail = maskEmailAddress(
     defaultCheckoutEmail || browserCheckoutContext.storedCheckoutEmail
@@ -488,208 +488,6 @@ function App() {
     successHeroDescription = maskedCheckoutEmail
       ? `We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure link sent to ${maskedCheckoutEmail} is also available if you leave this page.`
       : 'We could not attach direct upload automatically, so the page switched to a backup upload form. Do not pay again. The secure email link is also available if you leave this page.'
-  }
-
-  function loadPaddleScript() {
-    if (window.Paddle?.Initialize || window.Paddle?.Setup) {
-      return Promise.resolve(true)
-    }
-
-    if (paddleScriptLoadPromiseRef.current) {
-      return paddleScriptLoadPromiseRef.current
-    }
-
-    paddleScriptLoadPromiseRef.current = new Promise(resolve => {
-      const existingScript = document.querySelector<HTMLScriptElement>(
-        `script[src="${paddleScriptUrl}"]`
-      )
-      const script = existingScript || document.createElement('script')
-      let settled = false
-
-      function finish(ok: boolean) {
-        if (settled) {
-          return
-        }
-
-        const didLoad = Boolean(
-          ok && (window.Paddle?.Initialize || window.Paddle?.Setup)
-        )
-
-        settled = true
-
-        if (!didLoad) {
-          paddleScriptLoadPromiseRef.current = null
-          script.remove()
-        }
-
-        resolve(didLoad)
-      }
-
-      script.addEventListener('load', () => finish(true), { once: true })
-      script.addEventListener('error', () => finish(false), { once: true })
-
-      if (!existingScript) {
-        script.src = paddleScriptUrl
-        script.async = true
-        document.head.appendChild(script)
-      }
-
-      window.setTimeout(() => {
-        console.warn(
-          '[Paddle] Script load timeout, Paddle available:',
-          Boolean(window.Paddle)
-        )
-        finish(Boolean(window.Paddle?.Initialize || window.Paddle?.Setup))
-      }, 30000)
-    })
-
-    return paddleScriptLoadPromiseRef.current
-  }
-
-  function setupPaddle() {
-    const paddle = window.Paddle
-
-    if (!paddle?.Initialize && !paddle?.Setup) {
-      console.warn(
-        '[Paddle] setupPaddle: no Initialize/Setup.',
-        'Paddle =',
-        typeof paddle
-      )
-      return false
-    }
-
-    if (!paddleSetupRef.current) {
-      if (!isPaddleClientTokenConfigured(paddleClientToken)) {
-        console.warn('[Paddle] setupPaddle: token not configured')
-        return false
-      }
-
-      try {
-        if (paddleEnvironment === 'sandbox' && paddle?.Environment) {
-          paddle.Environment.set('sandbox')
-        }
-
-        const setupOptions: {
-          eventCallback: (event: PaddleEvent) => void
-          token: string
-        } = {
-          token: paddleClientToken,
-          eventCallback: event => {
-            if (event.name !== 'checkout.completed') {
-              return
-            }
-
-            const eventData = event.data || {}
-            const paidTransactionId =
-              eventData.transactionId || eventData.id || ''
-            const paidCheckoutEmail = normalizeCheckoutEmail(
-              eventData.customer?.email
-            )
-            const customData = (eventData.customData || {}) as Record<
-              string,
-              unknown
-            >
-            const pendingContext = readHumanRestoreCheckoutContext()
-            const pendingCheckoutRef = pendingContext.pendingCheckoutRef || ''
-            const pendingOrderId = pendingContext.pendingOrderId || ''
-            const isLocalRepairPackCheckout =
-              readPendingLocalRepairPackCheckout() ||
-              customData.memoryfix_plan === 'local_repair_pack'
-
-            if (isLocalRepairPackCheckout) {
-              clearPendingLocalRepairPackCheckout()
-              const nextUsage = addLocalRepairPackCredits()
-              setLocalRepairUsage(nextUsage)
-              setLocalPackCheckoutStatus('success')
-              setLocalPackCheckoutError('')
-              setShowLocalRepairLimitModal(false)
-              window.Paddle?.Checkout.close()
-              trackProductEvent('complete_local_repair_pack_checkout', {
-                added_credits: localRepairPackCredits,
-                has_order_id: Boolean(paidTransactionId),
-                paid_credits_remaining: nextUsage.paidCredits,
-              })
-              window.setTimeout(() => {
-                document
-                  .getElementById('local-repair-start')
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-              }, 250)
-              return
-            }
-
-            try {
-              localStorage.setItem(
-                'ls_checkout_success',
-                JSON.stringify({
-                  orderId: paidTransactionId,
-                  email: paidCheckoutEmail,
-                  identifier: paidTransactionId,
-                  timestamp: Date.now(),
-                })
-              )
-            } catch {
-              // localStorage may be unavailable
-            }
-
-            const successUrl = new URL(
-              humanRestoreSuccessPath,
-              window.location.origin
-            )
-
-            if (pendingOrderId) {
-              successUrl.searchParams.set('order_id', pendingOrderId)
-            } else if (paidTransactionId) {
-              successUrl.searchParams.set('order_id', paidTransactionId)
-            }
-
-            if (pendingOrderId && paidTransactionId) {
-              successUrl.searchParams.set(
-                'provider_order_id',
-                paidTransactionId
-              )
-            }
-
-            if (paidCheckoutEmail) {
-              successUrl.searchParams.set('email', paidCheckoutEmail)
-            }
-
-            if (pendingCheckoutRef) {
-              successUrl.searchParams.set('checkout_ref', pendingCheckoutRef)
-            }
-
-            trackProductEvent('complete_human_restore_checkout', {
-              has_checkout_email: Boolean(paidCheckoutEmail),
-              has_checkout_ref: Boolean(pendingCheckoutRef),
-              has_order_id: Boolean(paidTransactionId),
-            })
-
-            window.location.href = successUrl.toString()
-          },
-        }
-
-        if (paddle.Initialize) {
-          paddle.Initialize(setupOptions)
-        } else {
-          paddle.Setup?.(setupOptions)
-        }
-        paddleSetupRef.current = true
-      } catch (err) {
-        console.error('[Paddle] setupPaddle error:', err)
-        return false
-      }
-    }
-
-    return true
-  }
-
-  async function ensurePaddleReady() {
-    const isLoaded = await loadPaddleScript()
-
-    if (!isLoaded) {
-      return false
-    }
-
-    return setupPaddle()
   }
 
   function scrollToLocalRepairStart() {
@@ -905,16 +703,6 @@ function App() {
       }
     }
   }
-
-  useEffect(() => {
-    loadPaddleScript()
-      .then(isLoaded => {
-        if (isLoaded) {
-          setupPaddle()
-        }
-      })
-      .catch(() => null)
-  }, [])
 
   useEffect(() => {
     let isActive = true
