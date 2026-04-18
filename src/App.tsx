@@ -20,6 +20,7 @@ import LandingPage from './pages/LandingPage'
 import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
 import { useCurrentView } from './hooks/useCurrentView'
+import { usePageSeo } from './hooks/usePageSeo'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -41,26 +42,10 @@ import {
   setLanguageTag,
 } from './paraglide/runtime'
 import {
-  adminReviewPath,
   humanRestoreSecureUploadPath,
   humanRestoreSuccessPath,
-  retoucherPortalPath,
 } from './config/routes'
-import {
-  adminReviewDescription,
-  adminReviewTitle,
-  homePageDescription,
-  homePageTitle,
-  humanRestoreSecureUploadDescription,
-  humanRestoreSecureUploadTitle,
-  humanRestoreSuccessDescription,
-  humanRestoreSuccessTitle,
-  retoucherPortalDescription,
-  retoucherPortalTitle,
-  siteUrl,
-} from './config/seoMeta'
 import { maskEmailAddress, normalizeCheckoutEmail } from './lib/email'
-import { upsertCanonicalLink, upsertMetaTag } from './lib/seo'
 import { looksLikeUuid } from './lib/uuid'
 import {
   addLocalRepairPackCredits,
@@ -439,54 +424,12 @@ function App() {
     mainView = 'legal'
   }
 
-  useEffect(() => {
-    const isHumanRestoreOrderPage =
-      isHumanRestoreSuccessPage || isHumanRestoreSecureUploadPage
-    const isPrivatePage =
-      isHumanRestoreOrderPage || isAdminReviewPage || isRetoucherPortalPage
-    let pageTitle = homePageTitle
-    let pageDescription = homePageDescription
-    let pagePath = '/'
-
-    if (isRetoucherPortalPage) {
-      pageTitle = retoucherPortalTitle
-      pageDescription = retoucherPortalDescription
-      pagePath = retoucherPortalPath
-    } else if (isAdminReviewPage) {
-      pageTitle = adminReviewTitle
-      pageDescription = adminReviewDescription
-      pagePath = adminReviewPath
-    } else if (isHumanRestoreSecureUploadPage) {
-      pageTitle = humanRestoreSecureUploadTitle
-      pageDescription = humanRestoreSecureUploadDescription
-      pagePath = humanRestoreSecureUploadPath
-    } else if (isHumanRestoreSuccessPage) {
-      pageTitle = humanRestoreSuccessTitle
-      pageDescription = humanRestoreSuccessDescription
-      pagePath = humanRestoreSuccessPath
-    }
-
-    const pageRobots = isPrivatePage ? 'noindex, nofollow' : 'index, follow'
-    const pageUrl = new URL(pagePath, siteUrl).toString()
-
-    document.title = pageTitle
-    upsertCanonicalLink(pageUrl)
-    upsertMetaTag('name', 'description', pageDescription)
-    upsertMetaTag('name', 'robots', pageRobots)
-    upsertMetaTag('property', 'og:title', pageTitle)
-    upsertMetaTag('property', 'og:description', pageDescription)
-    upsertMetaTag('property', 'og:type', 'website')
-    upsertMetaTag('property', 'og:url', pageUrl)
-    upsertMetaTag('name', 'twitter:card', 'summary_large_image')
-    upsertMetaTag('name', 'twitter:title', pageTitle)
-    upsertMetaTag('name', 'twitter:description', pageDescription)
-    upsertMetaTag('name', 'twitter:url', pageUrl)
-  }, [
+  usePageSeo({
     isAdminReviewPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
     isRetoucherPortalPage,
-  ])
+  })
 
   useEffect(() => {
     const unsubscribe = onSetLanguageTag(() =>
