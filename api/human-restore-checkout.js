@@ -159,7 +159,25 @@ export default async function handler(req, res) {
       orderId: localOrder.id,
       submissionReference,
     })
-  } catch {
+  } catch (error) {
+    // Surface the real failure in Vercel Logs so we can diagnose future
+    // issues. Prior silent catch swallowed 7+ MB Vercel body-limit failures
+    // as a generic 500 with no signal.
+    try {
+      console.error(
+        JSON.stringify({
+          event: 'human_restore_checkout_failed',
+          error_message:
+            error instanceof Error ? error.message : 'Unknown error',
+          error_name: error instanceof Error ? error.name : null,
+          local_order_id: localOrder?.id || null,
+          timestamp: new Date().toISOString(),
+        })
+      )
+    } catch {
+      // Logging must never mask the real failure.
+    }
+
     if (localOrder?.id) {
       await updateOrder(localOrder.id, { status: 'failed' }).catch(() => null)
     }

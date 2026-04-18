@@ -10,6 +10,7 @@ import {
   humanRestorePolicyLinkText,
   humanRestorePolicySummary,
 } from '@/contentPolicy'
+import { resizeImageFile } from '@/utils'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
@@ -43,6 +44,12 @@ type SubmissionStatus =
   | 'error'
 
 const maxUploadSizeBytes = 15 * 1024 * 1024
+// Vercel serverless functions reject request bodies larger than ~4.5 MB
+// before the handler runs, which made earlier 7+ MB uploads fail with a
+// silent generic 500. We downscale in the browser to a 2400 px long edge
+// which keeps JPEGs well under that limit while still giving the human
+// reviewer plenty of pixels to work with.
+const clientSideMaxPixelEdge = 2400
 const allowedImageTypes = new Set([
   'image/jpeg',
   'image/png',
@@ -90,7 +97,7 @@ export function CheckoutForm({
   const isBusy = status === 'submitting' || status === 'opening'
   const hasSavedCheckout = Boolean(checkoutPayload)
 
-  function onSelectFile(file: File | null) {
+  async function onSelectFile(file: File | null) {
     if (hasSavedCheckout) return
     setStatus('idle')
     setErrorMessage('')
@@ -114,7 +121,22 @@ export function CheckoutForm({
       return
     }
 
-    setSelectedFile(file)
+    // Resize in the browser before selecting so we always submit something
+    // comfortably under Vercel's 4.5 MB request-body limit. resizeImageFile
+    // short-circuits and returns the original File untouched when the image
+    // is already within the maxSize.
+    try {
+      const { file: resizedFile } = await resizeImageFile(
+        file,
+        clientSideMaxPixelEdge
+      )
+      setSelectedFile(resizedFile)
+    } catch {
+      // If resize fails (non-image / decode error), fall back to the
+      // original file and let the server validate. Better than blocking
+      // the buyer at the door.
+      setSelectedFile(file)
+    }
   }
 
   async function openSavedCheckout(
@@ -293,7 +315,9 @@ export function CheckoutForm({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
             onChange={event => {
-              onSelectFile(event.currentTarget.files?.[0] ?? null)
+              onSelectFile(event.currentTarget.files?.[0] ?? null).catch(
+                () => null
+              )
             }}
             className={cn(
               'rounded-md border border-dashed border-border bg-background px-4 py-4 text-sm text-foreground',
