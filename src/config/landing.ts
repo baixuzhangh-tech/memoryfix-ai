@@ -20,13 +20,15 @@ export const landingHero = {
   primaryCtaLabel: 'Restore my photo — $19',
   secondaryCtaLabel: 'Try for free in your browser',
   trustLine: 'Private · Human-reviewed · Email delivery in 24h',
-  // Real before/after pair from a customer scan of the Sofia Wallin portrait.
-  // The "before" is the original scanned JPEG (creased, desaturated); the
-  // "after" is our delivered restoration (colour balance + damage repair).
+  // Real before/after pair from a customer scan of the Sofia Wallin family
+  // portrait. The "-A" PNG stored under new-photos/ is the original damaged
+  // scan the customer sent us; the "-B" JPEG under old-photos/ is our
+  // delivered restoration. The folder names are historical — what matters
+  // is the actual content, which is confirmed by inspecting each file.
   // If you replace these, also flip the `hasRealPair` flag on the matching
   // gallery sample below so the CSS filter fallback is skipped.
-  heroBeforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
-  heroAfterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+  heroBeforeSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+  heroAfterSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
 }
 
 export const landingHowItWorks = [
@@ -68,8 +70,8 @@ export const landingGallery: GallerySample[] = [
   {
     id: 'sofia-wallin',
     caption: 'Sofia Wallin, real restoration',
-    beforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
-    afterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+    beforeSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+    afterSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
     hasRealPair: true,
   },
   {
