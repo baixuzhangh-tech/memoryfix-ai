@@ -1,6 +1,7 @@
 import * as React from 'react'
 
 import FileSelect from '@/components/FileSelect'
+import SiteFooter from '@/components/SiteFooter'
 import { Gallery } from '@/sections/landing/Gallery'
 import { Hero } from '@/sections/landing/Hero'
 import { HowItWorks } from '@/sections/landing/HowItWorks'
@@ -67,6 +68,7 @@ export function LandingPage({
         primaryCtaDisabled={!isHumanRestorePaymentReady}
       />
       <Trust />
+      <SiteFooter />
 
       <input
         ref={hiddenInputRef}
