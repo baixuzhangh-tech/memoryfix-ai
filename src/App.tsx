@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
 import AdminReviewPage from './components/AdminReviewPage'
 import RetoucherPortal from './components/RetoucherPortal'
-import LegalPage, { isLegalPage } from './components/LegalPage'
+import LegalPage from './components/LegalPage'
 import Button from './components/Button'
 import FileSelect from './components/FileSelect'
 import HumanRestoreCheckoutForm from './components/HumanRestoreCheckoutForm'
@@ -19,7 +19,7 @@ import CheckoutForm from './components/domain/CheckoutForm'
 import LandingPage from './pages/LandingPage'
 import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
-import { resolveNewLandingFlag } from './lib/featureFlag'
+import { useCurrentView } from './hooks/useCurrentView'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -356,29 +356,20 @@ function App() {
     readHumanRestoreCheckoutContext()
   )
 
-  const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
-  const currentSearchParams = new URLSearchParams(window.location.search)
-  const isHumanRestoreSuccessPage = currentPath === humanRestoreSuccessPath
-  const isHumanRestoreSecureUploadPage =
-    currentPath === humanRestoreSecureUploadPath
-  const isAdminReviewPage = currentPath === adminReviewPath
-  const isRetoucherPortalPage = currentPath === retoucherPortalPath
-  const isLegalRoute = isLegalPage(currentPath)
-  // Feature flag for the Phase 2 warm-humanist redesign. Opt-in via
-  // `?v=2` which is then latched into localStorage so Paddle's
-  // successUrl (which strips custom query params) still lands the
-  // buyer on the new Success page. `?v=1` clears the latch.
-  // Remove this flag and the legacy blocks below once the new UI is
-  // validated and cut over.
-  const isNewLandingEnabled = resolveNewLandingFlag(currentSearchParams)
-  const secureUploadToken = currentSearchParams.get('token') || ''
-  const defaultCheckoutEmail =
-    currentSearchParams.get('checkout_email') ||
-    currentSearchParams.get('customer_email') ||
-    currentSearchParams.get('email') ||
-    ''
-  const queryOrderId = currentSearchParams.get('order_id') || ''
-  const queryCheckoutRef = currentSearchParams.get('checkout_ref') || ''
+  const {
+    currentPath,
+    currentSearchParams,
+    defaultCheckoutEmail,
+    isAdminReviewPage,
+    isHumanRestoreSecureUploadPage,
+    isHumanRestoreSuccessPage,
+    isLegalRoute,
+    isNewLandingEnabled,
+    isRetoucherPortalPage,
+    queryCheckoutRef,
+    queryOrderId,
+    secureUploadToken,
+  } = useCurrentView()
   const localHumanRestoreOrderId = looksLikeUuid(queryOrderId)
     ? queryOrderId
     : browserCheckoutContext.pendingOrderId || ''
