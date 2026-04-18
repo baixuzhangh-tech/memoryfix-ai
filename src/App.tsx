@@ -19,6 +19,7 @@ import CheckoutForm from './components/domain/CheckoutForm'
 import LandingPage from './pages/LandingPage'
 import SecureUploadPage from './pages/SecureUploadPage'
 import SuccessPage from './pages/SuccessPage'
+import { resolveNewLandingFlag } from './lib/featureFlag'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -645,11 +646,13 @@ function App() {
   const isAdminReviewPage = currentPath === adminReviewPath
   const isRetoucherPortalPage = currentPath === retoucherPortalPath
   const isLegalRoute = isLegalPage(currentPath)
-  // Feature flag for the Phase 2-A warm-humanist Landing redesign. Opt-in
-  // via `?v=2` so the legacy home keeps serving all production traffic
-  // until we explicitly cut over. Remove this flag and the legacy home
-  // block once the new landing is validated.
-  const isNewLandingEnabled = currentSearchParams.get('v') === '2'
+  // Feature flag for the Phase 2 warm-humanist redesign. Opt-in via
+  // `?v=2` which is then latched into localStorage so Paddle's
+  // successUrl (which strips custom query params) still lands the
+  // buyer on the new Success page. `?v=1` clears the latch.
+  // Remove this flag and the legacy blocks below once the new UI is
+  // validated and cut over.
+  const isNewLandingEnabled = resolveNewLandingFlag(currentSearchParams)
   const secureUploadToken = currentSearchParams.get('token') || ''
   const defaultCheckoutEmail =
     currentSearchParams.get('checkout_email') ||
