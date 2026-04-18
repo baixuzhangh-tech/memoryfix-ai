@@ -627,6 +627,9 @@ function App() {
       isLegalRoute={isLegalRoute}
       isRetoucherPortalPage={isRetoucherPortalPage}
       onStartNew={() => setFile(undefined)}
+      variant={
+        isNewLandingEnabled && mainView === 'home' ? 'landing' : 'legacy'
+      }
     >
       <main
         style={file ? { height: 'calc(100vh - 72px)' } : undefined}

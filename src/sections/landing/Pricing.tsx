@@ -19,6 +19,7 @@ export function Pricing({
 }: PricingProps) {
   return (
     <section
+      id="pricing"
       className={cn('relative bg-secondary/40 py-20 md:py-28', className)}
     >
       <div className="container">

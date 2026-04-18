@@ -67,7 +67,7 @@ export function Trust({ className }: TrustProps) {
           </CardContent>
         </Card>
 
-        <div className="mx-auto w-full max-w-3xl">
+        <div id="faq" className="mx-auto w-full max-w-3xl scroll-mt-24">
           <div className="mb-8 text-center">
             <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
               Frequently asked

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { useClickAway } from 'react-use'
 
 import Button from './Button'
+import LandingHeader from './LandingHeader'
 import Modal from './Modal'
 import * as m from '../paraglide/messages'
 import { languageTag, setLanguageTag } from '../paraglide/runtime'
@@ -35,6 +36,16 @@ export interface AppShellProps {
    * legal) the shell handles navigation to `/` on its own.
    */
   onStartNew: () => void
+  /**
+   * 'landing' swaps the cream AppShell header for the Phase 2
+   * warm-humanist LandingHeader (serif wordmark + section anchors)
+   * and flips the outer canvas to `bg-background` so the hero,
+   * gallery, pricing, and trust sections stop clashing with the
+   * legacy cream backdrop. Used only on ?v=2 home when no file is
+   * active. Every other route keeps the legacy header so the
+   * Editor / Success / Secure-upload / Admin flows look unchanged.
+   */
+  variant?: 'legacy' | 'landing'
 }
 
 /**
@@ -62,6 +73,7 @@ export function AppShell({
   isLegalRoute,
   isRetoucherPortalPage,
   onStartNew,
+  variant = 'legacy',
 }: AppShellProps) {
   const [showAbout, setShowAbout] = useState(false)
   const modalRef = useRef(null)
@@ -79,73 +91,85 @@ export function AppShell({
   const canGoBack = hasActiveFile || isOffHome
   const showHomeUtilityLinks = !hasActiveFile && !isOffHome
 
-  return (
-    <div className="min-h-full bg-[#f8f1e7] text-[#211915]">
-      <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
-        {canGoBack ? (
-          <Button
-            className="pl-1 pr-1"
-            icon={<ArrowLeftIcon className="h-6 w-6" />}
-            onClick={() => {
-              if (isOffHome) {
-                window.location.assign('/')
-                return
-              }
+  const isLandingVariant = variant === 'landing'
 
-              onStartNew()
-            }}
-          >
-            <div className="md:w-[180px]">
-              <span className="hidden select-none sm:inline">
-                {isOffHome ? 'Back home' : m.start_new()}
-              </span>
-            </div>
-          </Button>
-        ) : (
-          // Placeholder keeps the flex layout stable (logo stays centered)
-          // when the back/start-new button has nothing to navigate to.
-          <div className="md:w-[220px]" aria-hidden />
-        )}
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#211915] text-xl font-black text-[#f3c16f] shadow-lg shadow-[#211915]/20">
-            M
-          </div>
-          <div className="text-2xl font-black tracking-tight text-[#211915]">
-            MemoryFix AI
-          </div>
-        </div>
-        <div className="hidden items-center justify-end gap-3 md:flex">
-          {showHomeUtilityLinks && (
-            <a
-              href="#pricing"
-              className="rounded-md px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+  return (
+    <div
+      className={
+        isLandingVariant
+          ? 'min-h-full bg-background text-foreground'
+          : 'min-h-full bg-[#f8f1e7] text-[#211915]'
+      }
+    >
+      {isLandingVariant ? (
+        <LandingHeader onOpenAbout={() => setShowAbout(true)} />
+      ) : (
+        <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
+          {canGoBack ? (
+            <Button
+              className="pl-1 pr-1"
+              icon={<ArrowLeftIcon className="h-6 w-6" />}
+              onClick={() => {
+                if (isOffHome) {
+                  window.location.assign('/')
+                  return
+                }
+
+                onStartNew()
+              }}
             >
-              Pricing
-            </a>
+              <div className="md:w-[180px]">
+                <span className="hidden select-none sm:inline">
+                  {isOffHome ? 'Back home' : m.start_new()}
+                </span>
+              </div>
+            </Button>
+          ) : (
+            // Placeholder keeps the flex layout stable (logo stays centered)
+            // when the back/start-new button has nothing to navigate to.
+            <div className="md:w-[220px]" aria-hidden />
           )}
-          <Button
-            className="flex"
-            onClick={() => {
-              if (languageTag() === 'zh') {
-                setLanguageTag('en')
-              } else {
-                setLanguageTag('zh')
-              }
-            }}
-          >
-            <p>{languageTag() === 'en' ? '中文' : 'English'}</p>
-          </Button>
-          <Button
-            className="flex"
-            icon={<InformationCircleIcon className="h-6 w-6" />}
-            onClick={() => {
-              setShowAbout(true)
-            }}
-          >
-            <p>{m.feedback()}</p>
-          </Button>
-        </div>
-      </header>
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#211915] text-xl font-black text-[#f3c16f] shadow-lg shadow-[#211915]/20">
+              M
+            </div>
+            <div className="text-2xl font-black tracking-tight text-[#211915]">
+              MemoryFix AI
+            </div>
+          </div>
+          <div className="hidden items-center justify-end gap-3 md:flex">
+            {showHomeUtilityLinks && (
+              <a
+                href="#pricing"
+                className="rounded-md px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+              >
+                Pricing
+              </a>
+            )}
+            <Button
+              className="flex"
+              onClick={() => {
+                if (languageTag() === 'zh') {
+                  setLanguageTag('en')
+                } else {
+                  setLanguageTag('zh')
+                }
+              }}
+            >
+              <p>{languageTag() === 'en' ? '中文' : 'English'}</p>
+            </Button>
+            <Button
+              className="flex"
+              icon={<InformationCircleIcon className="h-6 w-6" />}
+              onClick={() => {
+                setShowAbout(true)
+              }}
+            >
+              <p>{m.feedback()}</p>
+            </Button>
+          </div>
+        </header>
+      )}
 
       {children}
 

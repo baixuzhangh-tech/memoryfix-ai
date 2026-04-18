@@ -14,6 +14,7 @@ export interface HowItWorksProps {
 export function HowItWorks({ className }: HowItWorksProps) {
   return (
     <section
+      id="how-it-works"
       className={cn('relative bg-secondary/40 py-20 md:py-28', className)}
     >
       <div className="container">
