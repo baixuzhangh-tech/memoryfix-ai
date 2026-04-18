@@ -1,9 +1,8 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable jsx-a11y/control-has-associated-label */
-import { ArrowLeftIcon, InformationCircleIcon } from '@heroicons/react/outline'
-import { useEffect, useRef, useState } from 'react'
-import { useClickAway } from 'react-use'
+import { useEffect, useState } from 'react'
 import AdminReviewPage from './components/AdminReviewPage'
+import AppShell from './components/AppShell'
 import RetoucherPortal from './components/RetoucherPortal'
 import LegalPage from './components/LegalPage'
 import Button from './components/Button'
@@ -23,6 +22,7 @@ import { useCurrentView } from './hooks/useCurrentView'
 import { useHumanRestoreOrder } from './hooks/useHumanRestoreOrder'
 import { usePageSeo } from './hooks/usePageSeo'
 import { usePaddle } from './hooks/usePaddle'
+import * as m from './paraglide/messages'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
 import { downloadModel, modelExists } from './adapters/cache'
@@ -37,12 +37,7 @@ import {
   humanRestoreServiceHighlights,
   humanRestoreTrustNotes,
 } from './humanRestoreContent'
-import * as m from './paraglide/messages'
-import {
-  languageTag,
-  onSetLanguageTag,
-  setLanguageTag,
-} from './paraglide/runtime'
+import { languageTag, onSetLanguageTag } from './paraglide/runtime'
 import {
   humanRestoreSecureUploadPath,
   humanRestoreSuccessPath,
@@ -263,7 +258,6 @@ function App() {
     readLocalRepairUsage()
   )
 
-  const [showAbout, setShowAbout] = useState(false)
   const [showHumanRestoreCheckout, setShowHumanRestoreCheckout] =
     useState(false)
   const [showLocalRepairLimitModal, setShowLocalRepairLimitModal] =
@@ -271,7 +265,6 @@ function App() {
   const [paymentSetupNotice, setPaymentSetupNotice] = useState<
     'human-restore' | 'local-pack' | null
   >(null)
-  const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
   const [localPackCheckoutError, setLocalPackCheckoutError] = useState('')
@@ -753,10 +746,6 @@ function App() {
     }
   }, [file])
 
-  useClickAway(modalRef, () => {
-    setShowAbout(false)
-  })
-
   async function startWithDemoImage(path: string) {
     const imgBlob = await fetch(path).then(r => r.blob())
     const filename = path.split('/').pop() ?? 'old-photo-sample.jpg'
@@ -809,94 +798,15 @@ function App() {
   }
 
   return (
-    <div className="min-h-full bg-[#f8f1e7] text-[#211915]">
-      <header className="z-10 flex min-h-[72px] flex-row items-center justify-between border-b border-[#e6d2b7] bg-[#f8f1e7]/95 px-4 shadow-sm backdrop-blur md:px-8">
-        <Button
-          className={[
-            file ||
-            isHumanRestoreSuccessPage ||
-            isHumanRestoreSecureUploadPage ||
-            isAdminReviewPage ||
-            isRetoucherPortalPage ||
-            isLegalRoute
-              ? ''
-              : 'opacity-50 pointer-events-none',
-            'pl-1 pr-1',
-          ].join(' ')}
-          icon={<ArrowLeftIcon className="h-6 w-6" />}
-          onClick={() => {
-            if (
-              isHumanRestoreSuccessPage ||
-              isHumanRestoreSecureUploadPage ||
-              isAdminReviewPage ||
-              isRetoucherPortalPage ||
-              isLegalRoute
-            ) {
-              window.location.assign('/')
-              return
-            }
-
-            setFile(undefined)
-          }}
-        >
-          <div className="md:w-[180px]">
-            <span className="hidden select-none sm:inline">
-              {isHumanRestoreSuccessPage ||
-              isHumanRestoreSecureUploadPage ||
-              isAdminReviewPage ||
-              isRetoucherPortalPage ||
-              isLegalRoute
-                ? 'Back home'
-                : m.start_new()}
-            </span>
-          </div>
-        </Button>
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#211915] text-xl font-black text-[#f3c16f] shadow-lg shadow-[#211915]/20">
-            M
-          </div>
-          <div className="text-2xl font-black tracking-tight text-[#211915]">
-            MemoryFix AI
-          </div>
-        </div>
-        <div className="hidden items-center justify-end gap-3 md:flex">
-          {!file &&
-            !isHumanRestoreSuccessPage &&
-            !isHumanRestoreSecureUploadPage &&
-            !isAdminReviewPage &&
-            !isRetoucherPortalPage &&
-            !isLegalRoute && (
-              <a
-                href="#pricing"
-                className="rounded-md px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-              >
-                Pricing
-              </a>
-            )}
-          <Button
-            className="flex"
-            onClick={() => {
-              if (languageTag() === 'zh') {
-                setLanguageTag('en')
-              } else {
-                setLanguageTag('zh')
-              }
-            }}
-          >
-            <p>{languageTag() === 'en' ? '中文' : 'English'}</p>
-          </Button>
-          <Button
-            className="flex"
-            icon={<InformationCircleIcon className="h-6 w-6" />}
-            onClick={() => {
-              setShowAbout(true)
-            }}
-          >
-            <p>{m.feedback()}</p>
-          </Button>
-        </div>
-      </header>
-
+    <AppShell
+      hasActiveFile={Boolean(file)}
+      isAdminReviewPage={isAdminReviewPage}
+      isHumanRestoreSecureUploadPage={isHumanRestoreSecureUploadPage}
+      isHumanRestoreSuccessPage={isHumanRestoreSuccessPage}
+      isLegalRoute={isLegalRoute}
+      isRetoucherPortalPage={isRetoucherPortalPage}
+      onStartNew={() => setFile(undefined)}
+    >
       <main
         style={file ? { height: 'calc(100vh - 72px)' } : undefined}
         className={file ? 'relative' : 'relative'}
@@ -1843,33 +1753,6 @@ function App() {
           )}
         </Modal>
       )}
-      {showAbout && (
-        <Modal>
-          <div ref={modalRef} className="max-w-3xl space-y-5 text-lg">
-            <h2 className="text-3xl font-black">About MemoryFix AI</h2>
-            <p>
-              MemoryFix AI is a privacy-first old photo repair experiment built
-              on the open-source inpaint-web project.
-            </p>
-            <p>
-              The current core is browser-based: model files download from
-              public hosts, then your photos are processed locally on your
-              device.
-            </p>
-            <p>
-              Source foundation:{' '}
-              <a
-                href="https://github.com/lxfater/inpaint-web"
-                className="font-black text-[#211915] underline"
-                rel="noreferrer"
-                target="_blank"
-              >
-                inpaint-web
-              </a>
-            </p>
-          </div>
-        </Modal>
-      )}
       {!(downloadProgress === 100) && (
         <Modal>
           <div className="space-y-5 text-xl">
@@ -1878,7 +1761,7 @@ function App() {
           </div>
         </Modal>
       )}
-    </div>
+    </AppShell>
   )
 }
 
