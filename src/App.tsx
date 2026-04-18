@@ -1727,13 +1727,8 @@ function App() {
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#211915] text-xl font-black text-[#f3c16f] shadow-lg shadow-[#211915]/20">
             M
           </div>
-          <div>
-            <div className="text-2xl font-black tracking-tight text-[#211915]">
-              MemoryFix AI
-            </div>
-            <div className="hidden text-xs font-semibold uppercase tracking-[0.22em] text-[#9b6b3c] sm:block">
-              Private old photo repair
-            </div>
+          <div className="text-2xl font-black tracking-tight text-[#211915]">
+            MemoryFix AI
           </div>
         </div>
         <div className="hidden items-center justify-end gap-3 md:flex">
@@ -1743,38 +1738,12 @@ function App() {
             !isAdminReviewPage &&
             !isRetoucherPortalPage &&
             !isLegalRoute && (
-              <>
-                <a
-                  href="/privacy"
-                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-                >
-                  Privacy
-                </a>
-                <a
-                  href="#pricing"
-                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-                >
-                  Pricing
-                </a>
-                <a
-                  href="/terms"
-                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-                >
-                  Terms
-                </a>
-                <a
-                  href="/refund"
-                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-                >
-                  Refund
-                </a>
-                <a
-                  href="#open-source"
-                  className="rounded-full px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
-                >
-                  Open Source
-                </a>
-              </>
+              <a
+                href="#pricing"
+                className="rounded-md px-4 py-3 text-sm font-bold text-[#5b4a40] transition hover:bg-white"
+              >
+                Pricing
+              </a>
             )}
           <Button
             className="flex"

@@ -41,7 +41,11 @@ const buttonVariants = cva(
       size: {
         default: 'h-10 px-4 py-2',
         sm: 'h-9 rounded-sm px-3 text-sm',
-        lg: 'h-12 rounded-lg px-8 text-base',
+        // Hero and other high-weight CTAs use size "lg". We keep the radius
+        // on the tighter rounded-md step (6px) rather than rounded-lg (8px)
+        // so the button silhouette stays closer to the angular craft feel
+        // of the serif headline instead of reading as a generic SaaS pill.
+        lg: 'h-12 rounded-md px-8 text-base',
         icon: 'h-10 w-10',
       },
     },

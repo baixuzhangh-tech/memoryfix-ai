@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowRight, ShieldCheck } from 'lucide-react'
+import { ArrowRight, ChevronDown, ShieldCheck } from 'lucide-react'
 
 import { BeforeAfterSlider } from '@/components/domain/BeforeAfterSlider'
 import { Button } from '@/components/ui/button'
@@ -15,12 +15,18 @@ export interface HeroProps {
 
 /**
  * Emotional-narrative hero. Two-column on desktop (copy | visual), stacked
- * on mobile. Uses the mid-tier radius on the slider (via BeforeAfterSlider)
- * and the largest serif weight for the headline.
+ * on mobile.
  *
- * The "after" image is temporarily the same file as the "before" with a
- * CSS filter simulating warmth + light correction. Swap both sources in
- * src/config/landing.ts once a real restored pair is available.
+ * Visual intent:
+ *   - Copy column is vertically centred against the visual to avoid the
+ *     "tall image + short column = dead whitespace" imbalance.
+ *   - The final headline word carries a warm-gold hand-drawn underline so
+ *     the eye lands on the emotional payoff (".. back into FOCUS.").
+ *   - The slider sits inside a cream paper frame with a soft warm shadow
+ *     and a <=1° tilt so it reads as a printed photograph pinned to the
+ *     page, not a floating SaaS screenshot.
+ *   - A subtle scroll cue (animated chevron) peeks below the fold so
+ *     visitors know the story continues (gallery / how it works / pricing).
  */
 export function Hero({
   className,
@@ -31,7 +37,7 @@ export function Hero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden bg-background py-16 md:py-24',
+        'relative overflow-hidden bg-background pb-12 pt-16 md:pb-16 md:pt-24',
         className
       )}
     >
@@ -41,7 +47,14 @@ export function Hero({
             Heirloom photo restoration
           </p>
           <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-tight text-foreground md:text-5xl lg:text-6xl">
-            {landingHero.headline}
+            {landingHero.headlinePrefix}
+            <span className="relative whitespace-nowrap">
+              {landingHero.headlineAccent}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 -bottom-1 h-[0.18em] rounded-full bg-gradient-to-r from-transparent via-[#c79a4a] to-transparent opacity-80"
+              />
+            </span>
           </h1>
           <p className="mt-6 text-lg leading-relaxed text-muted-foreground md:text-xl">
             {landingHero.subhead}
@@ -69,18 +82,37 @@ export function Hero({
           </p>
         </div>
 
-        <div className="relative">
-          <BeforeAfterSlider
-            beforeSrc={landingHero.heroBeforeSrc}
-            afterSrc={landingHero.heroAfterSrc}
-            beforeLabel="Original"
-            afterLabel="Restored"
-          />
-          <p className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+        <div className="relative mx-auto w-full max-w-[28rem] lg:max-w-[32rem]">
+          <div
+            className={cn(
+              // Cream paper frame + soft warm shadow + tiny tilt so the
+              // before/after reads as a printed photograph, not a floating
+              // widget. The rotation is removed under motion-reduce.
+              'rotate-[-1.2deg] rounded-md bg-[#f5e7cf] p-3 shadow-[0_28px_56px_-20px_rgba(72,40,14,0.45)] transition-transform duration-500 hover:rotate-0 motion-reduce:rotate-0'
+            )}
+          >
+            <BeforeAfterSlider
+              beforeSrc={landingHero.heroBeforeSrc}
+              afterSrc={landingHero.heroAfterSrc}
+              beforeLabel="Original"
+              afterLabel="Restored"
+              autoDemo
+              className="rounded-sm"
+            />
+          </div>
+          <p className="mt-5 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
             Drag to compare
           </p>
         </div>
       </div>
+
+      <a
+        href="#gallery"
+        aria-label="Scroll to see more"
+        className="mx-auto mt-10 flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground motion-safe:animate-bounce"
+      >
+        <ChevronDown className="h-6 w-6" aria-hidden />
+      </a>
     </section>
   )
 }

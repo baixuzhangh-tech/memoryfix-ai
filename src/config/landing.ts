@@ -14,7 +14,12 @@
  */
 
 export const landingHero = {
-  headline: 'Bring the faces you miss back into focus.',
+  // Headline is split so the final word can carry a warm-gold underline
+  // accent in the Hero component. Keep the prefix ending with a trailing
+  // space and put the emphasised word (plus its terminal punctuation) in
+  // headlineAccent so the visual rhythm does not break on mobile wraps.
+  headlinePrefix: 'Bring the faces you miss back into ',
+  headlineAccent: 'focus.',
   subhead:
     'We restore your family’s oldest photos with AI precision and human craftsmanship — faithfully, within 24 hours.',
   primaryCtaLabel: 'Restore my photo — $19',

@@ -7,6 +7,13 @@ export interface BeforeAfterSliderProps {
   afterAlt?: string
   afterLabel?: string
   afterSrc: string
+  /**
+   * When true, the slider plays a short one-time sweep on mount (50 → 80
+   * → 20 → 50 over ~2.4s) so first-time visitors realise the handle is
+   * draggable. Any user interaction (mousedown / touchstart / keyboard)
+   * cancels the sweep immediately. Respects prefers-reduced-motion.
+   */
+  autoDemo?: boolean
   beforeAlt?: string
   beforeLabel?: string
   beforeSrc: string
@@ -30,6 +37,7 @@ export function BeforeAfterSlider({
   afterAlt = 'After restoration',
   afterLabel = 'After',
   afterSrc,
+  autoDemo = false,
   beforeAlt = 'Before restoration',
   beforeLabel = 'Before',
   beforeSrc,
@@ -39,6 +47,7 @@ export function BeforeAfterSlider({
   const [position, setPosition] = React.useState(initialPosition)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const draggingRef = React.useRef(false)
+  const demoCancelledRef = React.useRef(false)
 
   const updateFromClientX = React.useCallback((clientX: number) => {
     const container = containerRef.current
@@ -48,6 +57,39 @@ export function BeforeAfterSlider({
     const pct = ((clientX - rect.left) / rect.width) * 100
     setPosition(Math.max(0, Math.min(100, pct)))
   }, [])
+
+  // One-time affordance sweep. Ends on a neutral 50/50 split so the
+  // composition is balanced for anyone who does not interact. We animate
+  // via a tight setTimeout chain instead of CSS transitions so that the
+  // user's mouse/touch input on the handle instantly wins without fighting
+  // any in-flight easing.
+  React.useEffect(() => {
+    if (!autoDemo) return
+    if (typeof window === 'undefined') return
+    const prefersReduced = window.matchMedia?.(
+      '(prefers-reduced-motion: reduce)'
+    ).matches
+    if (prefersReduced) return
+
+    const frames = [
+      { at: 350, value: 80 },
+      { at: 1100, value: 20 },
+      { at: 1900, value: 50 },
+    ]
+    const timers = frames.map(frame =>
+      window.setTimeout(() => {
+        if (demoCancelledRef.current) return
+        setPosition(frame.value)
+      }, frame.at)
+    )
+    return () => {
+      timers.forEach(id => window.clearTimeout(id))
+    }
+  }, [autoDemo])
+
+  function cancelDemo() {
+    demoCancelledRef.current = true
+  }
 
   React.useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
@@ -110,10 +152,10 @@ export function BeforeAfterSlider({
         />
       </div>
 
-      <span className="absolute left-4 top-4 rounded-sm bg-background/80 px-2 py-1 font-mono text-xs uppercase tracking-widest text-foreground backdrop-blur">
+      <span className="absolute left-4 top-4 rounded-sm bg-foreground/85 px-2.5 py-1 font-mono text-sm font-semibold uppercase tracking-widest text-background backdrop-blur">
         {beforeLabel}
       </span>
-      <span className="absolute right-4 top-4 rounded-sm bg-background/80 px-2 py-1 font-mono text-xs uppercase tracking-widest text-foreground backdrop-blur">
+      <span className="absolute right-4 top-4 rounded-sm bg-foreground/85 px-2.5 py-1 font-mono text-sm font-semibold uppercase tracking-widest text-background backdrop-blur">
         {afterLabel}
       </span>
 
@@ -128,12 +170,17 @@ export function BeforeAfterSlider({
           aria-valuemax={100}
           aria-valuenow={Math.round(position)}
           role="slider"
-          onKeyDown={handleKeyDown}
+          onKeyDown={event => {
+            cancelDemo()
+            handleKeyDown(event)
+          }}
           onMouseDown={event => {
             event.preventDefault()
+            cancelDemo()
             draggingRef.current = true
           }}
           onTouchStart={() => {
+            cancelDemo()
             draggingRef.current = true
           }}
           className="pointer-events-auto absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center rounded-full bg-background text-foreground shadow-modal ring-2 ring-primary focus-visible:outline-none focus-visible:ring-4"
