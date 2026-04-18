@@ -40,6 +40,58 @@ import {
   onSetLanguageTag,
   setLanguageTag,
 } from './paraglide/runtime'
+import {
+  adminReviewPath,
+  humanRestoreSecureUploadPath,
+  humanRestoreSuccessPath,
+  retoucherPortalPath,
+} from './config/routes'
+import {
+  adminReviewDescription,
+  adminReviewTitle,
+  homePageDescription,
+  homePageTitle,
+  humanRestoreSecureUploadDescription,
+  humanRestoreSecureUploadTitle,
+  humanRestoreSuccessDescription,
+  humanRestoreSuccessTitle,
+  retoucherPortalDescription,
+  retoucherPortalTitle,
+  siteUrl,
+} from './config/seoMeta'
+import { maskEmailAddress, normalizeCheckoutEmail } from './lib/email'
+import { upsertCanonicalLink, upsertMetaTag } from './lib/seo'
+import { looksLikeUuid } from './lib/uuid'
+import {
+  addLocalRepairPackCredits,
+  clearPendingLocalRepairPackCheckout,
+  consumeLocalRepairCredit,
+  freeLocalRepairLimit,
+  getFreeLocalRepairsRemaining,
+  humanRestorePrice,
+  localRepairPackCredits,
+  localRepairPackPrice,
+  localRepairUsageStorageKey,
+  readLocalRepairUsage,
+  readPendingLocalRepairPackCheckout,
+  rememberPendingLocalRepairPackCheckout,
+  writeLocalRepairUsage,
+} from './lib/localRepair'
+import type { LocalRepairUsage } from './lib/localRepair'
+import {
+  isPaddleClientTokenConfigured,
+  isPaddlePriceIdConfigured,
+  paddleClientToken,
+  paddleEnvironment,
+  paddleHumanRestorePriceId,
+  paddleLocalPackPriceId,
+  paddleScriptUrl,
+} from './lib/paddle/env'
+import type {
+  CheckoutLaunchResult,
+  PaddleEvent,
+  PaddleEventData,
+} from './lib/paddle/env'
 
 const trustPoints = [
   '3 free local repairs',
@@ -69,22 +121,7 @@ const featureCards = [
   },
 ]
 
-const freeLocalRepairLimit = 3
-const localRepairPackCredits = 10
-const localRepairPackPrice = '$9.90'
-const humanRestorePrice = '$19.90'
-const localRepairUsageStorageKey = 'memoryfix_local_repair_usage_v1'
-const pendingLocalRepairPackCheckoutKey =
-  'memoryfix_pending_local_repair_pack_checkout_v1'
-
 type PricingPlanKind = 'free-local' | 'local-pack' | 'human-restore'
-
-type LocalRepairUsage = {
-  freeUsed: number
-  paidCredits: number
-  totalStarted: number
-  updatedAt: number
-}
 
 const pricingCards = [
   {
@@ -243,46 +280,6 @@ const paymentContactEmail =
   import.meta.env.VITE_HUMAN_RESTORE_CONTACT_EMAIL ||
   import.meta.env.VITE_SUPPORT_EMAIL ||
   'hello@artgen.site'
-const paddleClientToken = import.meta.env.VITE_PADDLE_CLIENT_TOKEN || ''
-const paddleEnvironment =
-  import.meta.env.VITE_PADDLE_ENVIRONMENT || 'production'
-const paddleHumanRestorePriceId =
-  import.meta.env.VITE_PADDLE_HUMAN_RESTORE_PRICE_ID || ''
-const paddleLocalPackPriceId =
-  import.meta.env.VITE_PADDLE_LOCAL_PACK_PRICE_ID || ''
-const paddleScriptUrl = 'https://cdn.paddle.com/paddle/v2/paddle.js'
-
-function isPaddleClientTokenConfigured(value: string) {
-  return value.startsWith('test_') || value.startsWith('live_')
-}
-
-function isPaddlePriceIdConfigured(value: string) {
-  return /^pri_[a-zA-Z0-9]+/.test(value)
-}
-
-const humanRestoreSecureUploadPath = '/human-restore/upload'
-const humanRestoreSuccessPath = '/human-restore/success'
-const adminReviewPath = '/admin/review'
-const retoucherPortalPath = '/retoucher'
-
-const siteUrl = 'https://artgen.site'
-const homePageTitle = 'MemoryFix AI - Private Old Photo Repair'
-const homePageDescription =
-  'Repair old family photos privately in your browser. Try 3 local repairs free, buy local credits, or choose AI plus human review for one important photo.'
-const humanRestoreSuccessTitle =
-  'Thank You - MemoryFix AI Human-assisted Restore'
-const humanRestoreSuccessDescription =
-  'Thank you for booking MemoryFix AI Human-assisted Restore. Track payment confirmation, AI draft, human review, and private email delivery.'
-const humanRestoreSecureUploadTitle =
-  'Secure Upload - MemoryFix AI Human-assisted Restore'
-const humanRestoreSecureUploadDescription =
-  'Use your secure upload link to send the photo and notes for your paid MemoryFix AI Human-assisted Restore order.'
-const adminReviewTitle = 'Admin Review - MemoryFix AI'
-const adminReviewDescription =
-  'Private MemoryFix AI review queue for paid Human-assisted Restore orders.'
-const retoucherPortalTitle = 'Retoucher Portal - MemoryFix AI'
-const retoucherPortalDescription =
-  'MemoryFix AI retoucher workspace for assigned photo restoration tasks.'
 
 type DirectSecureAccessResponse = {
   error?: string
@@ -296,56 +293,6 @@ type HumanRestoreOrderResponse = {
   order?: HumanRestoreLocalOrder
 }
 
-type PaddleEventData = {
-  customer?: { email?: string; id?: string }
-  customData?: Record<string, unknown>
-  id?: string
-  items?: Array<{ price?: { id?: string } }>
-  status?: string
-  transactionId?: string
-}
-
-type PaddleEvent = {
-  data?: PaddleEventData
-  name?: string
-}
-
-type CheckoutLaunchResult = {
-  error?: string
-  ok: boolean
-}
-
-declare global {
-  interface Window {
-    Paddle?: {
-      Checkout: {
-        close: () => void
-        open: (options: {
-          customData?: Record<string, string>
-          items: Array<{ priceId: string; quantity: number }>
-          settings?: {
-            displayMode?: string
-            successUrl?: string
-            theme?: string
-          }
-        }) => void
-      }
-      Environment: {
-        set: (env: string) => void
-      }
-      Initialized: boolean
-      Initialize?: (options: {
-        eventCallback?: (event: PaddleEvent) => void
-        token: string
-      }) => void
-      Setup?: (options: {
-        eventCallback?: (event: PaddleEvent) => void
-        token: string
-      }) => void
-    }
-  }
-}
-
 type SecureOrderResponse = {
   error?: string
   ok?: boolean
@@ -357,235 +304,6 @@ type SecureOrderResponse = {
     productName?: string
     receiptUrl?: string
     testMode?: boolean
-  }
-}
-
-function maskEmailAddress(email: string) {
-  const normalizedEmail = email.trim()
-
-  if (!normalizedEmail.includes('@')) {
-    return ''
-  }
-
-  const [localPart, domainPart] = normalizedEmail.split('@')
-
-  if (!localPart || !domainPart) {
-    return ''
-  }
-
-  const visibleLocalStart = localPart.slice(0, 2)
-  const visibleLocalEnd = localPart.length > 4 ? localPart.slice(-1) : ''
-  const hiddenLocalLength = Math.max(
-    1,
-    localPart.length - visibleLocalStart.length - visibleLocalEnd.length
-  )
-  const maskedLocalPart = `${visibleLocalStart}${'*'.repeat(
-    hiddenLocalLength
-  )}${visibleLocalEnd}`
-
-  const domainSegments = domainPart.split('.')
-  const domainName = domainSegments[0] || ''
-  const domainSuffix = domainSegments.slice(1).join('.')
-  const visibleDomainStart = domainName.slice(0, 1)
-  const visibleDomainEnd = domainName.length > 2 ? domainName.slice(-1) : ''
-  const hiddenDomainLength = Math.max(
-    1,
-    domainName.length - visibleDomainStart.length - visibleDomainEnd.length
-  )
-  const maskedDomainName = `${visibleDomainStart}${'*'.repeat(
-    hiddenDomainLength
-  )}${visibleDomainEnd}`
-
-  return domainSuffix
-    ? `${maskedLocalPart}@${maskedDomainName}.${domainSuffix}`
-    : `${maskedLocalPart}@${maskedDomainName}`
-}
-
-function upsertMetaTag(
-  attribute: 'name' | 'property',
-  key: string,
-  content: string
-) {
-  let metaTag = document.head.querySelector<HTMLMetaElement>(
-    `meta[${attribute}="${key}"]`
-  )
-
-  if (!metaTag) {
-    metaTag = document.createElement('meta')
-    metaTag.setAttribute(attribute, key)
-    document.head.appendChild(metaTag)
-  }
-
-  metaTag.setAttribute('content', content)
-}
-
-function upsertCanonicalLink(href: string) {
-  let canonicalLink = document.head.querySelector<HTMLLinkElement>(
-    'link[rel="canonical"]'
-  )
-
-  if (!canonicalLink) {
-    canonicalLink = document.createElement('link')
-    canonicalLink.setAttribute('rel', 'canonical')
-    document.head.appendChild(canonicalLink)
-  }
-
-  canonicalLink.setAttribute('href', href)
-}
-
-function normalizeCheckoutEmail(value: unknown) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-}
-
-function looksLikeUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value
-  )
-}
-
-function normalizeLocalRepairUsage(
-  value?: Partial<LocalRepairUsage> | null
-): LocalRepairUsage {
-  return {
-    freeUsed: Math.max(0, Number(value?.freeUsed || 0)),
-    paidCredits: Math.max(0, Number(value?.paidCredits || 0)),
-    totalStarted: Math.max(0, Number(value?.totalStarted || 0)),
-    updatedAt: Math.max(0, Number(value?.updatedAt || 0)),
-  }
-}
-
-function readLocalRepairUsage(): LocalRepairUsage {
-  if (typeof window === 'undefined') {
-    return normalizeLocalRepairUsage()
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(localRepairUsageStorageKey)
-    return normalizeLocalRepairUsage(rawValue ? JSON.parse(rawValue) : null)
-  } catch {
-    return normalizeLocalRepairUsage()
-  }
-}
-
-function writeLocalRepairUsage(usage: LocalRepairUsage) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.localStorage.setItem(
-      localRepairUsageStorageKey,
-      JSON.stringify(usage)
-    )
-  } catch {
-    // Local repair still works in private browsing, but quotas cannot persist.
-  }
-}
-
-function getFreeLocalRepairsRemaining(usage: LocalRepairUsage) {
-  return Math.max(0, freeLocalRepairLimit - usage.freeUsed)
-}
-
-function consumeLocalRepairCredit() {
-  const currentUsage = readLocalRepairUsage()
-  const freeRemaining = getFreeLocalRepairsRemaining(currentUsage)
-
-  if (freeRemaining > 0) {
-    const nextUsage = normalizeLocalRepairUsage({
-      ...currentUsage,
-      freeUsed: currentUsage.freeUsed + 1,
-      totalStarted: currentUsage.totalStarted + 1,
-      updatedAt: Date.now(),
-    })
-    writeLocalRepairUsage(nextUsage)
-    return {
-      allowed: true,
-      source: 'free_local',
-      usage: nextUsage,
-    }
-  }
-
-  if (currentUsage.paidCredits > 0) {
-    const nextUsage = normalizeLocalRepairUsage({
-      ...currentUsage,
-      paidCredits: currentUsage.paidCredits - 1,
-      totalStarted: currentUsage.totalStarted + 1,
-      updatedAt: Date.now(),
-    })
-    writeLocalRepairUsage(nextUsage)
-    return {
-      allowed: true,
-      source: 'paid_local_credit',
-      usage: nextUsage,
-    }
-  }
-
-  return {
-    allowed: false,
-    source: 'limit_reached',
-    usage: currentUsage,
-  }
-}
-
-function addLocalRepairPackCredits() {
-  const currentUsage = readLocalRepairUsage()
-  const nextUsage = normalizeLocalRepairUsage({
-    ...currentUsage,
-    paidCredits: currentUsage.paidCredits + localRepairPackCredits,
-    updatedAt: Date.now(),
-  })
-  writeLocalRepairUsage(nextUsage)
-  return nextUsage
-}
-
-function readPendingLocalRepairPackCheckout() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  try {
-    const rawValue = window.sessionStorage.getItem(
-      pendingLocalRepairPackCheckoutKey
-    )
-    const pendingCheckout = rawValue ? JSON.parse(rawValue) : null
-    const startedAt = Number(pendingCheckout?.startedAt || 0)
-    const isFresh = startedAt > Date.now() - 1000 * 60 * 60 * 2
-    return Boolean(pendingCheckout?.plan === 'local_repair_pack' && isFresh)
-  } catch {
-    return false
-  }
-}
-
-function rememberPendingLocalRepairPackCheckout() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.sessionStorage.setItem(
-      pendingLocalRepairPackCheckoutKey,
-      JSON.stringify({
-        credits: localRepairPackCredits,
-        plan: 'local_repair_pack',
-        startedAt: Date.now(),
-      })
-    )
-  } catch {
-    // Session storage is optional; the UI will show an error if checkout fails.
-  }
-}
-
-function clearPendingLocalRepairPackCheckout() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.sessionStorage.removeItem(pendingLocalRepairPackCheckoutKey)
-  } catch {
-    // Ignore storage failures.
   }
 }
 
@@ -809,6 +527,9 @@ function App() {
 
   useEffect(() => {
     function handleStorageChange(event: StorageEvent) {
+      // Cross-tab sync: when another tab spends or grants a credit it
+      // writes to the same localStorage key, firing `storage` here so
+      // this tab's UI stays consistent without a reload.
       if (event.key === localRepairUsageStorageKey) {
         setLocalRepairUsage(readLocalRepairUsage())
       }
