@@ -865,12 +865,29 @@ async function callReplicate({
     'Content-Type': 'application/json',
   }
 
-  const createResponse = await fetch(createUrl, {
+  let createResponse = await fetch(createUrl, {
     method: 'POST',
     headers: createHeaders,
     body: JSON.stringify(createBody),
   })
-  const payload = await createResponse.json().catch(() => null)
+  let payload = await createResponse.json().catch(() => null)
+
+  // Retry once on 429 throttle. When the Replicate account balance is
+  // below $5, burst drops to 1 and a preceding stage (e.g. old_photo)
+  // can exhaust it. The rate limit typically resets within 7-10s.
+  if (createResponse.status === 429) {
+    const retryAfterHeader = createResponse.headers?.get('retry-after')
+    const retryMs = retryAfterHeader
+      ? Math.min(Number(retryAfterHeader) * 1000 || 8000, 12000)
+      : 8000
+    await wait(retryMs)
+    createResponse = await fetch(createUrl, {
+      method: 'POST',
+      headers: createHeaders,
+      body: JSON.stringify(createBody),
+    })
+    payload = await createResponse.json().catch(() => null)
+  }
 
   if (!createResponse.ok) {
     throw new Error(
