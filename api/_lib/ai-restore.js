@@ -2223,7 +2223,11 @@ async function markPipelinePending({
   })
 }
 
+const pipelineBudgetMs = 50000
+const pipelineDeadlineMarginMs = 10000
+
 async function runConfiguredPipeline({ job, pipeline, prompt, triggeredBy }) {
+  const pipelineStartMs = Date.now()
   const storedRuntime = getStoredPipelineRuntime(job)
   const isResuming = Boolean(
     job.status === 'processing' && job.ai_request_id && pipeline?.stages?.length
@@ -2268,6 +2272,21 @@ async function runConfiguredPipeline({ job, pipeline, prompt, triggeredBy }) {
     const stage = pipeline.stages[stageIndex]
     const isResumeStage =
       isResuming && stageIndex === startingStageIndex && stage?.type === 'fal'
+
+    const elapsedMs = Date.now() - pipelineStartMs
+    if (
+      elapsedMs > pipelineBudgetMs - pipelineDeadlineMarginMs &&
+      lastSuccessfulResult
+    ) {
+      return finalizePipelineResult({
+        completedStage: lastSuccessfulStage,
+        job,
+        pipeline,
+        prompt,
+        result: lastSuccessfulResult,
+        runtime,
+      })
+    }
 
     try {
       const stageResult = await runPipelineStage({

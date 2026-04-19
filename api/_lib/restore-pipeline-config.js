@@ -94,7 +94,7 @@ const tunedCodeformerParamsV4 = {
   blend_alpha: 0.6,
   blend_mode: 'difference_mask',
   candidate_race_enabled: true,
-  candidate_race_max_variants: 3,
+  candidate_race_max_variants: 1,
   codeformer_fidelity: 0.74,
   diff_mask_blur: 11,
   diff_mask_max_coverage: 0.26,
