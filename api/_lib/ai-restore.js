@@ -742,8 +742,8 @@ function getReplicatePollingStrategy({ modelPreset, stageParams }) {
   // maxDuration budget, we can only afford ~10s of polling. If the model is
   // hot and the input is simple it will finish in time; otherwise we throw
   // and the pipeline falls through to the next restoration stage (CodeFormer).
-  const defaultMaxPolls = preset === 'old_photo_restoration' ? 4 : 15
-  const defaultPollIntervalMs = preset === 'old_photo_restoration' ? 2500 : 2000
+  const defaultMaxPolls = preset === 'old_photo_restoration' ? 1 : 12
+  const defaultPollIntervalMs = 2000
 
   return {
     maxPolls: Math.max(
@@ -855,20 +855,14 @@ async function callReplicate({
   const createBody = { version: resolvedModel.version, input }
   const createUrl = 'https://api.replicate.com/v1/predictions'
 
-  // `Prefer: wait` tells Replicate to hold the connection until the
-  // prediction completes (up to ~60s). This is fine for fast models like
-  // CodeFormer (~20s) but fatal for slow models like old_photo_restoration
-  // (cold start 20–120s, total 1–5 min with HR) because it alone can
-  // consume the entire Vercel maxDuration budget and leave the function
-  // with no time for subsequent pipeline stages. For slow presets we skip
-  // the header and rely on short polling instead.
-  const usePreferWait = request.preset !== 'old_photo_restoration'
+  // Never use `Prefer: wait`. It blocks the HTTP connection until the
+  // prediction completes (up to ~60s), which on Vercel Hobby's 60s
+  // maxDuration leaves zero margin for the rest of the pipeline. Instead
+  // we fire-and-forget the creation request (returns instantly) and poll
+  // with tight budgets defined in getReplicatePollingStrategy.
   const createHeaders = {
     Authorization: `Bearer ${apiToken}`,
     'Content-Type': 'application/json',
-  }
-  if (usePreferWait) {
-    createHeaders.Prefer = 'wait'
   }
 
   const createResponse = await fetch(createUrl, {
