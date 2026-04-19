@@ -79,6 +79,20 @@ const previewPollIntervalMs = 3000
 const previewProcessingTimeoutMs = 2 * 60 * 1000
 const previewSessionStorageKey = 'memoryfix_ai_hd_preview_session'
 
+function getProgressStageLabel(progress: number): string {
+  if (progress < 15) return 'Analyzing your photo\u2026'
+  if (progress < 40) return 'Restoring details\u2026'
+  if (progress < 70) return 'Enhancing faces\u2026'
+  return 'Applying final polish\u2026'
+}
+
+function getProgressStageShort(progress: number): string {
+  if (progress < 15) return 'Analyzing\u2026'
+  if (progress < 40) return 'Restoring\u2026'
+  if (progress < 70) return 'Enhancing\u2026'
+  return 'Polish\u2026'
+}
+
 function formatBytes(size: number) {
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`
@@ -220,6 +234,35 @@ export function AiHdPreviewPage({
   const [isUnlocking, setIsUnlocking] = React.useState(false)
   const [unlockError, setUnlockError] = React.useState('')
   const processingState = state.kind === 'processing' ? state : null
+  const [thumbnailUrl, setThumbnailUrl] = React.useState<string | null>(null)
+  const [simulatedProgress, setSimulatedProgress] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!selectedFile) {
+      setThumbnailUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(selectedFile)
+    setThumbnailUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [selectedFile])
+
+  React.useEffect(() => {
+    if (!processingState) {
+      setSimulatedProgress(0)
+      return undefined
+    }
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - processingState.startedAt
+      const expectedMs = 40000
+      const t = Math.min(elapsed / expectedMs, 1)
+      const eased = 1 - (1 - t) * (1 - t)
+      setSimulatedProgress(Math.min(90, Math.round(eased * 90)))
+    }, 300)
+
+    return () => clearInterval(interval)
+  }, [processingState])
 
   React.useEffect(() => {
     const savedSession = readPreviewSession()
@@ -634,10 +677,17 @@ export function AiHdPreviewPage({
               >
                 {state.kind === 'submitting' || state.kind === 'processing' ? (
                   <span className="inline-flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    <div className="h-1.5 w-12 overflow-hidden rounded-full bg-primary/15">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                        style={{ width: `${simulatedProgress}%` }}
+                      />
+                    </div>
                     {state.kind === 'processing'
-                      ? 'Rendering preview…'
-                      : 'Generating preview…'}
+                      ? `${getProgressStageShort(
+                          simulatedProgress
+                        )} ${simulatedProgress}%`
+                      : 'Generating preview\u2026'}
                   </span>
                 ) : (
                   'Generate AI preview (free)'
@@ -696,19 +746,30 @@ export function AiHdPreviewPage({
               )}
 
               {state.kind === 'processing' && (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-primary/20 bg-secondary/40 p-8 text-center">
-                  <Loader2
-                    className="h-8 w-8 animate-spin text-primary"
-                    aria-hidden
-                  />
-                  <p className="font-serif text-base text-foreground">
-                    We&apos;re restoring your photo now.
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    This can take around 20–60 seconds depending on AI provider
-                    load. Please keep this tab open while we prepare the
-                    watermarked preview.
-                  </p>
+                <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed border-primary/20 bg-secondary/40">
+                  {thumbnailUrl && (
+                    <img
+                      src={thumbnailUrl}
+                      alt=""
+                      aria-hidden
+                      className="absolute inset-0 h-full w-full object-cover opacity-25 blur-lg"
+                    />
+                  )}
+                  <div className="relative z-10 flex w-full flex-col items-center gap-4 p-8 text-center">
+                    <div className="h-1.5 w-48 overflow-hidden rounded-full bg-primary/15">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                        style={{ width: `${simulatedProgress}%` }}
+                      />
+                    </div>
+                    <p className="font-serif text-base text-foreground">
+                      {getProgressStageLabel(simulatedProgress)}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {simulatedProgress}% complete &mdash; please keep this tab
+                      open.
+                    </p>
+                  </div>
                 </div>
               )}
 
