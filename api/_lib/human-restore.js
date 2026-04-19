@@ -153,14 +153,32 @@ export function json(res, statusCode, body) {
   res.end(JSON.stringify(body))
 }
 
+function sanitizeEmailHeaderValue(value) {
+  if (value == null) return value
+  if (Array.isArray(value)) {
+    return value.map(sanitizeEmailHeaderValue).filter(Boolean)
+  }
+  return String(value)
+    .replace(/\\[rn]/g, '')
+    .replace(/[\r\n\t\u0000-\u001f]+/g, '')
+    .trim()
+}
+
 export async function sendEmail({ resendApiKey, payload }) {
+  const sanitized = { ...payload }
+  for (const field of ['from', 'to', 'reply_to', 'cc', 'bcc']) {
+    if (sanitized[field] != null) {
+      sanitized[field] = sanitizeEmailHeaderValue(sanitized[field])
+    }
+  }
+
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${resendApiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(sanitized),
   })
 
   if (!response.ok) {
@@ -177,6 +195,7 @@ export function createOrderUploadToken({ tokenSecret, order }) {
       checkoutEmail: order.checkoutEmail,
       createdAt: order.createdAt,
       customerName: order.customerName || '',
+      localOrderId: order.localOrderId ? String(order.localOrderId) : '',
       orderId: String(order.orderId),
       orderNumber: String(order.orderNumber || ''),
       productName: order.productName || 'Human-assisted Restore',
@@ -302,7 +321,11 @@ export function verifyWebhookSignature({ rawBody, secret, signature }) {
   )
 }
 
-export function verifyPaddleWebhookSignature({ rawBody, secret, signatureHeader }) {
+export function verifyPaddleWebhookSignature({
+  rawBody,
+  secret,
+  signatureHeader,
+}) {
   if (!secret || !signatureHeader) {
     return false
   }

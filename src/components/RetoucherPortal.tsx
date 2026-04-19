@@ -255,7 +255,7 @@ export default function RetoucherPortal() {
     return (
       <div style={styles.container}>
         <div style={styles.loginCard}>
-          <h1 style={styles.title}>MemoryFix 修图师工作台</h1>
+          <h1 style={styles.title}>修图师工作台</h1>
           <p style={styles.subtitle}>请输入您的访问令牌</p>
           <form onSubmit={handleLogin} style={styles.loginForm}>
             <input

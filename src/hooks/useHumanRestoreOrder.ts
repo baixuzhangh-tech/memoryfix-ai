@@ -175,13 +175,25 @@ export function useHumanRestoreOrder({
         setHumanRestoreOrder(responseBody.order)
         setHumanRestoreOrderStatus('ready')
 
-        const shouldKeepPolling = [
+        const isAiHdTier = responseBody.order.productTier === 'ai_hd'
+        const liveStatuses = [
           'pending_payment',
           'paid',
           'uploaded',
           'processing',
           'ai_queued',
-        ].includes(responseBody.order.status)
+        ]
+
+        // For AI HD orders, `needs_review` is a transient state — the
+        // backend auto-deliver flips it to `delivered` on the next call.
+        // Keep polling so the UI updates automatically without a refresh.
+        if (isAiHdTier) {
+          liveStatuses.push('needs_review')
+        }
+
+        const shouldKeepPolling = liveStatuses.includes(
+          responseBody.order.status
+        )
 
         if (shouldKeepPolling) {
           retryTimer = setTimeout(loadOrder, 4000)

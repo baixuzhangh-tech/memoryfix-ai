@@ -23,6 +23,7 @@ export interface AppShellProps {
    */
   hasActiveFile: boolean
   isAdminReviewPage: boolean
+  isCaseStudyRoute: boolean
   isHumanRestoreSecureUploadPage: boolean
   isHumanRestoreSuccessPage: boolean
   isLegalRoute: boolean
@@ -68,6 +69,7 @@ export function AppShell({
   children,
   hasActiveFile,
   isAdminReviewPage,
+  isCaseStudyRoute,
   isHumanRestoreSecureUploadPage,
   isHumanRestoreSuccessPage,
   isLegalRoute,
@@ -86,6 +88,7 @@ export function AppShell({
     isHumanRestoreSuccessPage ||
     isHumanRestoreSecureUploadPage ||
     isAdminReviewPage ||
+    isCaseStudyRoute ||
     isRetoucherPortalPage ||
     isLegalRoute
   const canGoBack = hasActiveFile || isOffHome

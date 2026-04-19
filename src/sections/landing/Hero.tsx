@@ -9,6 +9,7 @@ import { landingHero } from '@/config/landing'
 export interface HeroProps {
   onPrimaryCta: () => void
   onSecondaryCta: () => void
+  onTertiaryCta: () => void
   primaryCtaDisabled?: boolean
   className?: string
 }
@@ -32,6 +33,7 @@ export function Hero({
   className,
   onPrimaryCta,
   onSecondaryCta,
+  onTertiaryCta,
   primaryCtaDisabled = false,
 }: HeroProps) {
   return (
@@ -71,10 +73,23 @@ export function Hero({
               {landingHero.primaryCtaLabel}
               <ArrowRight className="h-4 w-4" aria-hidden />
             </Button>
-            <Button variant="outline" size="lg" onClick={onSecondaryCta}>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={onSecondaryCta}
+              disabled={primaryCtaDisabled}
+            >
               {landingHero.secondaryCtaLabel}
             </Button>
           </div>
+
+          <button
+            type="button"
+            onClick={onTertiaryCta}
+            className="mt-4 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            {landingHero.tertiaryCtaLabel}
+          </button>
 
           <p className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
             <ShieldCheck className="h-4 w-4 text-primary" aria-hidden />

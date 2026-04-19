@@ -203,7 +203,9 @@ function getAiDraftSummary(job: RestoreJob) {
     ''
 
   if (codeformerFallback) {
-    return 'fal (CodeFormer fallback)'
+    return pipelineName
+      ? `${pipelineName} (CodeFormer fallback)`
+      : 'CodeFormer fallback'
   }
 
   if (pipelineName) {
@@ -493,7 +495,7 @@ export default function AdminReviewPage() {
   async function loadRetouchers() {
     if (!adminToken) return
     try {
-      const body = await adminFetch('/api/admin/human-restore-job', {
+      const body = await adminFetch('/api/admin/human-restore-jobs', {
         method: 'POST',
         body: JSON.stringify({ action: 'list_retouchers' }),
       })
@@ -509,7 +511,7 @@ export default function AdminReviewPage() {
     runAction(
       job.id,
       () =>
-        adminFetch('/api/admin/human-restore-job', {
+        adminFetch('/api/admin/human-restore-jobs', {
           method: 'POST',
           body: JSON.stringify({
             action: 'assign_retoucher',
@@ -528,7 +530,7 @@ export default function AdminReviewPage() {
     runAction(
       job.id,
       () =>
-        adminFetch('/api/admin/human-restore-job', {
+        adminFetch('/api/admin/human-restore-jobs', {
           method: 'PATCH',
           body: JSON.stringify({
             jobId: job.id,
@@ -544,7 +546,7 @@ export default function AdminReviewPage() {
     runAction(
       job.id,
       () =>
-        adminFetch('/api/admin/human-restore-job', {
+        adminFetch('/api/admin/human-restore-jobs', {
           method: 'PATCH',
           body: JSON.stringify({
             jobId: job.id,

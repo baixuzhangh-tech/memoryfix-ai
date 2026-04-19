@@ -3,7 +3,6 @@ import crypto from 'node:crypto'
 import { Readable } from 'node:stream'
 import sharp from 'sharp'
 import adminDeliverHandler from '../api/admin/human-restore-deliver.js'
-import adminJobHandler from '../api/admin/human-restore-job.js'
 import adminJobsHandler from '../api/admin/human-restore-jobs.js'
 import adminProcessHandler from '../api/admin/human-restore-process.js'
 import cleanupHandler from '../api/cron/human-restore-cleanup.js'
@@ -27,6 +26,8 @@ import {
   readHumanRestoreCheckoutContext,
   rememberHumanRestorePendingCheckout,
 } from '../src/humanRestoreCheckoutContext.js'
+
+const adminJobHandler = adminJobsHandler
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
@@ -526,6 +527,17 @@ function installMockFetch(state) {
         })
       }
 
+      if (
+        method === 'GET' &&
+        url.pathname === '/v1/models/microsoft/bringing-old-photos-back-to-life'
+      ) {
+        return makeJsonResponse({
+          latest_version: {
+            id: 'c75db81db6cbd809d93cc3b7e7a088a351a3349c9fa02b6d393e35e0d51ba799',
+          },
+        })
+      }
+
       if (method === 'POST' && url.pathname.includes('/predictions')) {
         if (state.replicateShouldFail) {
           return makeJsonResponse(
@@ -534,13 +546,20 @@ function installMockFetch(state) {
           )
         }
         const body = JSON.parse(getBodyText(options))
-        const preset = body.input?.codeformer_fidelity ? 'codeformer' : 'gfpgan'
+        const preset = body.input?.codeformer_fidelity
+          ? 'codeformer'
+          : body.input?.HR !== undefined ||
+            body.input?.with_scratch !== undefined
+          ? 'old_photo_restoration'
+          : 'gfpgan'
         state.replicatePredictionInputs.push(body.input || {})
         const outputPath =
           preset === 'codeformer'
             ? `/codeformer-${Number(
                 body.input?.codeformer_fidelity || 0
               ).toFixed(2)}.jpg`
+            : preset === 'old_photo_restoration'
+            ? '/old-photo.jpg'
             : '/gfpgan.jpg'
 
         return makeJsonResponse({
@@ -562,6 +581,7 @@ function installMockFetch(state) {
     if (url.hostname === 'replicate.test') {
       const configuredOutput =
         state.replicateOutputs.get(url.pathname) ||
+        state.replicateOutputs.get('/old-photo.jpg') ||
         state.replicateOutputs.get('/codeformer.jpg') ||
         state.replicateOutputs.get('/gfpgan.jpg')
 
@@ -1177,7 +1197,7 @@ function assertPipelineConfigMigration() {
   const migratedFinishStage = legacyConfig.pipelines[0].stages[3]
   const migratedFalStage = legacyConfig.pipelines[0].stages[1]
 
-  assert.equal(legacyConfig.version, 6)
+  assert.equal(legacyConfig.version, 7)
   assert.equal(migratedFalStage.params.output_format, 'png')
   assert.equal(migratedStage.conditions.run_if_restore_need_above, 0.24)
   assert.equal(migratedStage.conditions.skip_if_detail_above, 0.88)
@@ -1201,6 +1221,14 @@ function assertPipelineConfigMigration() {
   assert.equal(migratedFinishStage.params.preserve_original_dimensions, true)
   assert.equal(migratedFinishStage.params.portrait_detail_alpha, 0.18)
   assert.equal(migratedFinishStage.params.portrait_detail_sharpen_sigma, 1.08)
+  assert.ok(
+    legacyConfig.pipelines.some(pipeline => pipeline.id === 'cheap-first')
+  )
+  assert.ok(
+    legacyConfig.pipelines.some(
+      pipeline => pipeline.id === 'cheap-first-codeformer'
+    )
+  )
 
   const customConfig = normalizePipelineConfig({
     defaultPipelineId: 'legacy-fal-codeformer',
@@ -1258,6 +1286,11 @@ function assertPipelineConfigMigration() {
   assert.equal(customFinishStage.params.preserve_original_dimensions, true)
   assert.equal(customFinishStage.params.portrait_detail_alpha, 0.18)
   assert.equal(customFinishStage.params.sharpen_sigma, 0.7)
+  assert.ok(
+    customConfig.pipelines.some(
+      pipeline => pipeline.id === 'cheap-first-codeformer'
+    )
+  )
 }
 
 function createSignedPaddleWebhookBody(payload) {
@@ -1548,6 +1581,16 @@ async function main() {
       stage => stage.type === 'postprocess_preserve'
     )
   )
+  assert.ok(
+    pipelineResourceResponse.body.stageDefinitions.some(
+      stage => stage.type === 'replicate_old_photo_restoration'
+    )
+  )
+  assert.ok(
+    pipelineResourceResponse.body.config.pipelines.some(
+      pipeline => pipeline.id === 'cheap-first-codeformer'
+    )
+  )
 
   const savedPipelineResponse = await invoke(adminJobsHandler, {
     body: Buffer.from(
@@ -1692,6 +1735,63 @@ async function main() {
     defaultFalResponse.body.job.ai_provider_payload?.codeformer?.candidate_race
       ?.enabled,
     true
+  )
+
+  const cheapOriginalPath = 'manual/cheap-first.jpg'
+  state.storage.set(storageKey('human-restore-originals', cheapOriginalPath), {
+    buffer: Buffer.from('cheap-first-original'),
+    contentType: 'image/jpeg',
+  })
+  state.replicateOutputs.set('/old-photo.jpg', {
+    buffer: await createSyntheticImage({ width: 320 }),
+    contentType: 'image/jpeg',
+  })
+  state.jobs.push({
+    ai_provider_payload: {},
+    checkout_email: 'cheap-first@example.com',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    id: 'job-cheap-first',
+    notes: 'Run the cheaper replicate-first experiment pipeline.',
+    order_bound: true,
+    order_number: 'txn_cheap_first',
+    original_file_name: 'cheap-first.jpg',
+    original_file_size: Buffer.byteLength('cheap-first-original'),
+    original_file_type: 'image/jpeg',
+    original_storage_bucket: 'human-restore-originals',
+    original_storage_path: cheapOriginalPath,
+    status: 'uploaded',
+    submission_reference: 'MF-CHEAP-FIRST',
+    updated_at: new Date().toISOString(),
+  })
+  const falPostCallsBeforeCheapRun = state.falPostCalls
+  const replicateCallsBeforeCheapRun = state.replicatePredictionInputs.length
+  const cheapFirstResponse = await invoke(adminProcessHandler, {
+    body: Buffer.from(
+      JSON.stringify({
+        jobId: 'job-cheap-first',
+        pipelineId: 'cheap-first-codeformer',
+      })
+    ),
+    headers: { 'x-admin-token': process.env.HUMAN_RESTORE_ADMIN_TOKEN },
+    method: 'POST',
+  })
+
+  assert.equal(cheapFirstResponse.statusCode, 200)
+  assert.equal(cheapFirstResponse.body.job.status, 'needs_review')
+  assert.equal(cheapFirstResponse.body.job.ai_draft_provider, 'replicate')
+  assert.equal(
+    cheapFirstResponse.body.job.ai_provider_payload?.pipeline_id,
+    'cheap-first-codeformer'
+  )
+  assert.equal(state.falPostCalls, falPostCallsBeforeCheapRun)
+  assert.ok(
+    state.replicatePredictionInputs.length >= replicateCallsBeforeCheapRun + 3
+  )
+  assert.ok(
+    state.replicatePredictionInputs.some(
+      input => input.HR !== undefined && input.with_scratch !== undefined
+    )
   )
 
   const noEffectFalBuffer = await createSyntheticImage({ width: 320 })
@@ -2676,6 +2776,9 @@ async function main() {
   const falCodeformerNoEffectJob = state.jobs.find(
     candidate => candidate.id === 'job-fal-codeformer-no-effect'
   )
+  const cheapFirstJob = state.jobs.find(
+    candidate => candidate.id === 'job-cheap-first'
+  )
   const falCodeformerFallbackJob = state.jobs.find(
     candidate => candidate.id === 'job-fal-codeformer-fallback'
   )
@@ -2718,6 +2821,10 @@ async function main() {
     falCodeformerNoEffectJob.expires_at = new Date(
       Date.now() - 1000
     ).toISOString()
+  }
+
+  if (cheapFirstJob) {
+    cheapFirstJob.expires_at = new Date(Date.now() - 1000).toISOString()
   }
 
   if (falCodeformerFallbackJob) {
@@ -2782,6 +2889,7 @@ async function main() {
       job.id,
       retoucherJob.id,
       'job-default-fal',
+      'job-cheap-first',
       'job-fal-codeformer-no-effect',
       'job-fal-codeformer-fallback',
       'job-legacy-malformed-fal',
@@ -2799,6 +2907,7 @@ async function main() {
   assert.equal(state.jobs[0].status, 'deleted')
   assert.equal(retoucherJob.status, 'deleted')
   assert.equal(defaultFalJob?.status, 'deleted')
+  assert.equal(cheapFirstJob?.status, 'deleted')
   assert.equal(falCodeformerNoEffectJob?.status, 'deleted')
   assert.equal(falCodeformerFallbackJob?.status, 'deleted')
   assert.equal(legacyMalformedFalJob?.status, 'deleted')

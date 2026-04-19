@@ -45,9 +45,23 @@ export function BeforeAfterSlider({
   initialPosition = 50,
 }: BeforeAfterSliderProps) {
   const [position, setPosition] = React.useState(initialPosition)
+  // Natural aspect ratio of the before image. Falls back to 3/4 while
+  // the image is still loading so the layout doesn't jump. As soon as
+  // the browser decodes the image we switch to its real w/h ratio so
+  // both halves of the slider line up pixel-for-pixel.
+  const [aspectRatio, setAspectRatio] = React.useState<number | null>(null)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const draggingRef = React.useRef(false)
   const demoCancelledRef = React.useRef(false)
+
+  function handleBeforeImageLoad(
+    event: React.SyntheticEvent<HTMLImageElement>
+  ) {
+    const img = event.currentTarget
+    if (img.naturalWidth && img.naturalHeight) {
+      setAspectRatio(img.naturalWidth / img.naturalHeight)
+    }
+  }
 
   const updateFromClientX = React.useCallback((clientX: number) => {
     const container = containerRef.current
@@ -130,24 +144,27 @@ export function BeforeAfterSlider({
     <div
       ref={containerRef}
       className={cn(
-        'relative aspect-[3/4] w-full select-none overflow-hidden rounded-lg bg-muted shadow-modal',
+        'relative w-full select-none overflow-hidden rounded-lg bg-muted shadow-modal',
+        !aspectRatio && 'aspect-[3/4]',
         className
       )}
+      style={aspectRatio ? { aspectRatio: `${aspectRatio}` } : undefined}
     >
       <img
         src={beforeSrc}
         alt={beforeAlt}
-        className="absolute inset-0 h-full w-full object-cover"
+        onLoad={handleBeforeImageLoad}
+        className="absolute inset-0 h-full w-full object-contain"
         draggable={false}
       />
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}
+        style={{ clipPath: `inset(0 0 0 ${position}%)` }}
       >
         <img
           src={afterSrc}
           alt={afterAlt}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-contain"
           draggable={false}
         />
       </div>

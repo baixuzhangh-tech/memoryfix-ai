@@ -6,7 +6,7 @@ import {
   insertSystemEvent,
 } from './supabase.js'
 
-const configVersion = 6
+const configVersion = 7
 const defaultReplicatePreset = 'codeformer'
 const pipelineConfigEventType = 'restore_pipeline_config_saved'
 const configPath =
@@ -26,6 +26,10 @@ const tunedCodeformerConditionsV3 = {
 const tunedCodeformerConditionsV4 = {
   run_if_restore_need_above: 0.24,
   skip_if_detail_above: 0.88,
+}
+
+const tunedOldPhotoConditionsV7 = {
+  run_if_restore_need_above: 0.18,
 }
 
 const legacyCodeformerParamsV2 = {
@@ -167,6 +171,14 @@ const tunedFinishParamsV6 = {
   portrait_detail_sharpen_sigma: 1.08,
 }
 
+const tunedOldPhotoReplicateParamsV7 = {
+  auto_hr: true,
+  auto_scratch_detection: true,
+  hr_min_width: 1100,
+  scratch_damage_threshold: 0.07,
+  scratch_restore_need_threshold: 0.36,
+}
+
 const stageCatalog = {
   analyze_photo: {
     defaultConditions: {},
@@ -200,6 +212,16 @@ const stageCatalog = {
     label: 'OpenAI restoration',
     provider: 'openai',
     type: 'openai',
+  },
+  replicate_old_photo_restoration: {
+    defaultConditions: tunedOldPhotoConditionsV7,
+    defaultParams: tunedOldPhotoReplicateParamsV7,
+    description:
+      'Run the cheaper Replicate old-photo restoration baseline before optional face enhancement.',
+    label: 'Replicate Old Photo Restore',
+    modelPreset: 'old_photo_restoration',
+    provider: 'replicate',
+    type: 'replicate_old_photo_restoration',
   },
   replicate_codeformer: {
     defaultConditions: tunedCodeformerConditionsV4,
@@ -291,7 +313,7 @@ function normalizeReplicatePreset(value) {
     .trim()
     .toLowerCase()
 
-  return ['codeformer', 'gfpgan'].includes(normalized)
+  return ['codeformer', 'gfpgan', 'old_photo_restoration'].includes(normalized)
     ? normalized
     : defaultReplicatePreset
 }
@@ -604,6 +626,33 @@ function buildDefaultPipelines() {
   if (canUseReplicate) {
     pipelines.push({
       enabled: true,
+      id: 'cheap-first',
+      name: 'cheap-first old photo restore',
+      stages: [
+        createStageConfig('analyze_photo', 'analyze-photo-1'),
+        createStageConfig(
+          'replicate_old_photo_restoration',
+          'replicate-old-photo-2'
+        ),
+        createStageConfig('postprocess_preserve', 'postprocess-preserve-3'),
+      ],
+    })
+    pipelines.push({
+      enabled: true,
+      id: 'cheap-first-codeformer',
+      name: 'cheap-first + CodeFormer',
+      stages: [
+        createStageConfig('analyze_photo', 'analyze-photo-1'),
+        createStageConfig(
+          'replicate_old_photo_restoration',
+          'replicate-old-photo-2'
+        ),
+        createStageConfig('replicate_codeformer', 'replicate-codeformer-3'),
+        createStageConfig('postprocess_preserve', 'postprocess-preserve-4'),
+      ],
+    })
+    pipelines.push({
+      enabled: true,
       id: 'codeformer',
       name: 'CodeFormer only',
       stages: [
@@ -659,6 +708,18 @@ function buildDefaultPipelines() {
     )
   }
 
+  if (requestedDefaultType === 'replicate_old_photo_restoration') {
+    defaultPipeline = pipelines.find(
+      pipeline => pipeline.id === 'cheap-first-codeformer'
+    )
+  }
+
+  if (requestedDefaultType === 'replicate_codeformer') {
+    defaultPipeline =
+      pipelines.find(pipeline => pipeline.id === 'cheap-first-codeformer') ||
+      pipelines.find(pipeline => pipeline.id === 'codeformer')
+  }
+
   if (!defaultPipeline) {
     defaultPipeline =
       pipelines.find(
@@ -676,6 +737,60 @@ function buildDefaultPipelines() {
   }
 }
 
+function appendMissingPipelineDefaults(pipelines, version) {
+  const normalizedVersion = Number(version) || 0
+
+  if (normalizedVersion >= configVersion) {
+    return pipelines
+  }
+
+  const canUseReplicate = Boolean(process.env.REPLICATE_API_TOKEN)
+
+  if (!canUseReplicate) {
+    return pipelines
+  }
+
+  const nextPipelines = [...pipelines]
+  const existingIds = new Set(nextPipelines.map(pipeline => pipeline.id))
+  const candidateDefaults = [
+    {
+      enabled: true,
+      id: 'cheap-first',
+      name: 'cheap-first old photo restore',
+      stages: [
+        createStageConfig('analyze_photo', 'analyze-photo-1'),
+        createStageConfig(
+          'replicate_old_photo_restoration',
+          'replicate-old-photo-2'
+        ),
+        createStageConfig('postprocess_preserve', 'postprocess-preserve-3'),
+      ],
+    },
+    {
+      enabled: true,
+      id: 'cheap-first-codeformer',
+      name: 'cheap-first + CodeFormer',
+      stages: [
+        createStageConfig('analyze_photo', 'analyze-photo-1'),
+        createStageConfig(
+          'replicate_old_photo_restoration',
+          'replicate-old-photo-2'
+        ),
+        createStageConfig('replicate_codeformer', 'replicate-codeformer-3'),
+        createStageConfig('postprocess_preserve', 'postprocess-preserve-4'),
+      ],
+    },
+  ]
+
+  for (const pipeline of candidateDefaults) {
+    if (!existingIds.has(pipeline.id)) {
+      nextPipelines.push(pipeline)
+    }
+  }
+
+  return nextPipelines
+}
+
 export function normalizePipelineConfig(input) {
   const inputVersion = Number(input?.version) || 0
   const normalizedPipelines = Array.isArray(input?.pipelines)
@@ -689,17 +804,25 @@ export function normalizePipelineConfig(input) {
   const pipelines = normalizedPipelines.length
     ? normalizedPipelines
     : buildDefaultPipelines().pipelines
-  const enabledPipelines = pipelines.filter(pipeline => pipeline.enabled)
+  const pipelinesWithSupplements = appendMissingPipelineDefaults(
+    pipelines,
+    inputVersion
+  )
+  const enabledPipelines = pipelinesWithSupplements.filter(
+    pipeline => pipeline.enabled
+  )
   const requestedDefault = String(input?.defaultPipelineId || '').trim()
   const defaultPipeline =
     enabledPipelines.find(pipeline => pipeline.id === requestedDefault) ||
-    pipelines.find(pipeline => pipeline.id === requestedDefault) ||
+    pipelinesWithSupplements.find(
+      pipeline => pipeline.id === requestedDefault
+    ) ||
     enabledPipelines[0] ||
-    pipelines[0]
+    pipelinesWithSupplements[0]
 
   return {
     defaultPipelineId: defaultPipeline?.id || '',
-    pipelines,
+    pipelines: pipelinesWithSupplements,
     updatedAt: new Date().toISOString(),
     version: configVersion,
   }
@@ -822,7 +945,9 @@ export function buildLegacyRequestedPipeline({ modelPreset, provider }) {
 
   if (provider === 'replicate' || modelPreset) {
     const stageType =
-      normalizeReplicatePreset(modelPreset) === 'gfpgan'
+      normalizeReplicatePreset(modelPreset) === 'old_photo_restoration'
+        ? 'replicate_old_photo_restoration'
+        : normalizeReplicatePreset(modelPreset) === 'gfpgan'
         ? 'replicate_gfpgan'
         : 'replicate_codeformer'
 
@@ -830,7 +955,11 @@ export function buildLegacyRequestedPipeline({ modelPreset, provider }) {
       enabled: true,
       id: `legacy-${stageType}`,
       name:
-        stageType === 'replicate_gfpgan' ? 'GFPGAN only' : 'CodeFormer only',
+        stageType === 'replicate_gfpgan'
+          ? 'GFPGAN only'
+          : stageType === 'replicate_old_photo_restoration'
+          ? 'cheap-first old photo restore'
+          : 'CodeFormer only',
       stages: [
         createStageConfig('analyze_photo', 'analyze-photo-1'),
         createStageConfig(stageType, `${stageType}-2`),

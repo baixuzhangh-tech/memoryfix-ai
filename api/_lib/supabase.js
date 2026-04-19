@@ -169,7 +169,9 @@ export async function getLatestSystemEventByType(eventType) {
     order: 'created_at.desc',
     select: '*',
   })
-  const payload = await supabaseRest(`/human_restore_events?${params.toString()}`)
+  const payload = await supabaseRest(
+    `/human_restore_events?${params.toString()}`
+  )
 
   return Array.isArray(payload) ? payload[0] || null : null
 }
@@ -253,6 +255,38 @@ export async function getRecentPaidOrderByEmail(email, hoursBack = 48) {
   const payload = await supabaseRest(
     `/human_restore_orders?${params.toString()}`
   )
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
+export async function getLatestJobByHumanRestoreOrderId(localOrderId) {
+  if (!localOrderId) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    human_restore_order_id: `eq.${localOrderId}`,
+    limit: '1',
+    order: 'created_at.desc',
+    select: '*',
+  })
+  const payload = await supabaseRest(`/human_restore_jobs?${params.toString()}`)
+
+  return Array.isArray(payload) ? payload[0] || null : null
+}
+
+export async function getLatestJobByOrderId(orderId) {
+  if (!orderId) {
+    return null
+  }
+
+  const params = new URLSearchParams({
+    order_id: `eq.${orderId}`,
+    limit: '1',
+    order: 'created_at.desc',
+    select: '*',
+  })
+  const payload = await supabaseRest(`/human_restore_jobs?${params.toString()}`)
 
   return Array.isArray(payload) ? payload[0] || null : null
 }

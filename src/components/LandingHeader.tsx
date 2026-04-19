@@ -10,10 +10,11 @@ interface NavLink {
 }
 
 const navLinks: NavLink[] = [
-  { href: '#how-it-works', label: 'How it works' },
-  { href: '#gallery', label: 'Gallery' },
-  { href: '#pricing', label: 'Pricing' },
-  { href: '#faq', label: 'FAQ' },
+  { href: '/#how-it-works', label: 'How it works' },
+  { href: '/#gallery', label: 'Gallery' },
+  { href: '/case-studies', label: 'Case studies' },
+  { href: '/#pricing', label: 'Pricing' },
+  { href: '/#faq', label: 'FAQ' },
 ]
 
 export interface LandingHeaderProps {

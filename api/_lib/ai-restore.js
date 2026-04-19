@@ -33,6 +33,8 @@ const defaultOpenAIImageModel = 'gpt-image-1.5'
 const defaultReplicateCodeformerModel = 'lucataco/codeformer'
 const defaultReplicateGfpganModel =
   'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
+const defaultReplicateOldPhotoRestorationModel =
+  'microsoft/bringing-old-photos-back-to-life'
 const defaultReplicatePreset = 'codeformer'
 const defaultDeliveryExportParams = {
   export_format: 'png',
@@ -110,7 +112,9 @@ function normalizeModelPreset(value) {
     .trim()
     .toLowerCase()
 
-  return ['codeformer', 'gfpgan'].includes(normalized) ? normalized : ''
+  return ['codeformer', 'gfpgan', 'old_photo_restoration'].includes(normalized)
+    ? normalized
+    : ''
 }
 
 function getDefaultReplicatePreset() {
@@ -604,7 +608,12 @@ async function pollFalRequest({ model, requestId, responseUrl, statusUrl }) {
   }
 }
 
-function buildReplicateRequest({ imageUrl, modelPreset, stageParams }) {
+function buildReplicateRequest({
+  analysis,
+  imageUrl,
+  modelPreset,
+  stageParams,
+}) {
   const params =
     stageParams && typeof stageParams === 'object' ? stageParams : {}
   const preset =
@@ -628,6 +637,63 @@ function buildReplicateRequest({ imageUrl, modelPreset, stageParams }) {
         process.env.REPLICATE_GFPGAN_MODEL ||
         process.env.REPLICATE_RESTORE_MODEL ||
         defaultReplicateGfpganModel,
+      preset,
+    }
+  }
+
+  if (preset === 'old_photo_restoration') {
+    const autoHrEnabled =
+      params.auto_hr !== false &&
+      String(params.auto_hr || '').toLowerCase() !== 'false'
+    const autoScratchEnabled =
+      params.auto_scratch_detection !== false &&
+      String(params.auto_scratch_detection || '').toLowerCase() !== 'false'
+    const hrThresholdWidth = clampNumber(
+      params.hr_min_width ?? process.env.REPLICATE_OLD_PHOTO_HR_MIN_WIDTH,
+      640,
+      6000,
+      1100
+    )
+    const scratchDamageThreshold = clampNumber(
+      params.scratch_damage_threshold ??
+        process.env.REPLICATE_OLD_PHOTO_SCRATCH_DAMAGE_THRESHOLD,
+      0,
+      1,
+      0.07
+    )
+    const scratchNeedThreshold = clampNumber(
+      params.scratch_restore_need_threshold ??
+        process.env.REPLICATE_OLD_PHOTO_SCRATCH_NEED_THRESHOLD,
+      0,
+      1,
+      0.36
+    )
+    const resolvedHr =
+      typeof params.HR === 'boolean'
+        ? params.HR
+        : typeof params.hr === 'boolean'
+        ? params.hr
+        : autoHrEnabled
+        ? Number(analysis?.width || 0) >= hrThresholdWidth
+        : false
+    const resolvedScratch =
+      typeof params.with_scratch === 'boolean'
+        ? params.with_scratch
+        : autoScratchEnabled
+        ? Number(analysis?.damage_score || 0) >= scratchDamageThreshold ||
+          Number(analysis?.restore_need_score || 0) >= scratchNeedThreshold
+        : false
+
+    return {
+      input: {
+        HR: resolvedHr,
+        image: imageUrl,
+        with_scratch: resolvedScratch,
+      },
+      model:
+        params.model ||
+        process.env.REPLICATE_OLD_PHOTO_MODEL ||
+        defaultReplicateOldPhotoRestorationModel,
       preset,
     }
   }
@@ -663,6 +729,40 @@ function buildReplicateRequest({ imageUrl, modelPreset, stageParams }) {
       process.env.REPLICATE_CODEFORMER_MODEL ||
       defaultReplicateCodeformerModel,
     preset: 'codeformer',
+  }
+}
+
+function getReplicatePollingStrategy({ modelPreset, stageParams }) {
+  const params =
+    stageParams && typeof stageParams === 'object' ? stageParams : {}
+  const preset =
+    normalizeModelPreset(modelPreset) || getDefaultReplicatePreset()
+  const defaultMaxPolls = preset === 'old_photo_restoration' ? 48 : 15
+  const defaultPollIntervalMs = preset === 'old_photo_restoration' ? 2500 : 2000
+
+  return {
+    maxPolls: Math.max(
+      1,
+      Math.round(
+        clampNumber(
+          params.max_polls ?? params.replicate_max_polls,
+          1,
+          120,
+          defaultMaxPolls
+        )
+      )
+    ),
+    pollIntervalMs: Math.max(
+      250,
+      Math.round(
+        clampNumber(
+          params.poll_interval_ms ?? params.replicate_poll_interval_ms,
+          250,
+          10000,
+          defaultPollIntervalMs
+        )
+      )
+    ),
   }
 }
 
@@ -716,6 +816,7 @@ async function resolveReplicateModelVersion({ apiToken, model }) {
 }
 
 async function callReplicate({
+  analysis,
   imageUrlOverride,
   job,
   modelPreset,
@@ -735,6 +836,7 @@ async function callReplicate({
       path: job.original_storage_path,
     }))
   const request = buildReplicateRequest({
+    analysis,
     imageUrl,
     modelPreset,
     stageParams,
@@ -774,17 +876,18 @@ async function callReplicate({
   let output = payload?.output
 
   if (payload?.status === 'processing' || payload?.status === 'starting') {
+    const { maxPolls, pollIntervalMs } = getReplicatePollingStrategy({
+      modelPreset: request.preset,
+      stageParams,
+    })
     const pollUrl =
       payload?.urls?.get || payload?.id
         ? `https://api.replicate.com/v1/predictions/${payload.id}`
         : null
 
     if (pollUrl) {
-      const maxPolls = 15
-      const pollInterval = 2000
-
       for (let i = 0; i < maxPolls; i += 1) {
-        await wait(pollInterval)
+        await wait(pollIntervalMs)
         const pollRes = await fetch(pollUrl, {
           headers: { Authorization: `Bearer ${apiToken}` },
         })
@@ -806,8 +909,10 @@ async function callReplicate({
     typeof output === 'string'
       ? output
       : Array.isArray(output)
-      ? output[0]
-      : output?.image || output?.url || ''
+      ? typeof output[0] === 'string'
+        ? output[0]
+        : output[0]?.image || output[0]?.url || output[0]?.output || ''
+      : output?.image || output?.url || output?.output || ''
 
   if (!resultImageUrl) {
     throw new Error('Replicate did not return a restored image.')
@@ -957,6 +1062,10 @@ function getStageProvider(stage) {
 }
 
 function getStageModelPreset(stage) {
+  if (stage?.type === 'replicate_old_photo_restoration') {
+    return 'old_photo_restoration'
+  }
+
   if (stage?.type === 'replicate_gfpgan') {
     return 'gfpgan'
   }
@@ -969,6 +1078,10 @@ function getStageModelPreset(stage) {
 }
 
 function getStageSource(stageType) {
+  if (stageType === 'replicate_old_photo_restoration') {
+    return 'replicate_old_photo_restoration'
+  }
+
   if (stageType === 'replicate_codeformer') {
     return 'replicate_codeformer'
   }
@@ -1000,6 +1113,22 @@ function getPipelineStageTypes(pipeline) {
   return Array.isArray(pipeline?.stages)
     ? pipeline.stages.map(stage => String(stage?.type || ''))
     : []
+}
+
+// A stage type that is capable of producing a usable restored image on its
+// own. `analyze_photo` is excluded because it never writes pixels. We use
+// this to decide whether to fall through to the next stage when a given
+// stage throws: if at least one restoration-capable stage remains, a
+// failure is recoverable; otherwise we surface the error.
+function isRestorationCapableStageType(stageType) {
+  return (
+    stageType === 'fal' ||
+    stageType === 'openai' ||
+    stageType === 'replicate_codeformer' ||
+    stageType === 'replicate_gfpgan' ||
+    stageType === 'replicate_old_photo_restoration' ||
+    stageType === 'postprocess_preserve'
+  )
 }
 
 function getSignificantPipelineStageTypes(pipeline) {
@@ -1392,6 +1521,14 @@ async function cleanupPipelineTempInputs(tempInputs) {
 }
 
 function getExpectedStageModel(stage) {
+  if (stage?.type === 'replicate_old_photo_restoration') {
+    return (
+      stage?.params?.model ||
+      process.env.REPLICATE_OLD_PHOTO_MODEL ||
+      defaultReplicateOldPhotoRestorationModel
+    )
+  }
+
   if (stage?.type === 'replicate_codeformer') {
     return (
       stage?.params?.model ||
@@ -1470,6 +1607,7 @@ async function resolveStageConditionEvaluation({ input, stage }) {
   const stageParams = getPlainObject(stage?.params)
   const requiresAnalysis =
     Object.keys(conditions).length > 0 ||
+    stage?.type === 'replicate_old_photo_restoration' ||
     stage?.type === 'replicate_codeformer' ||
     stage?.type === 'replicate_gfpgan' ||
     (stage?.type === 'postprocess_preserve' &&
@@ -1602,6 +1740,7 @@ async function runPipelineStage({
   }
 
   if (
+    stage?.type === 'replicate_old_photo_restoration' ||
     stage?.type === 'replicate_codeformer' ||
     stage?.type === 'replicate_gfpgan'
   ) {
@@ -1634,6 +1773,7 @@ async function runPipelineStage({
           const variant = adaptiveVariants.variants[variantIndex]
           try {
             const replicateResult = await callReplicate({
+              analysis: conditionEvaluation.analysis,
               imageUrlOverride: signedUrl,
               job,
               modelPreset: getStageModelPreset(stage),
@@ -1735,6 +1875,7 @@ async function runPipelineStage({
       }
 
       const replicateResult = await callReplicate({
+        analysis: conditionEvaluation.analysis,
         imageUrlOverride: signedUrl,
         job,
         modelPreset: getStageModelPreset(stage),
@@ -1748,8 +1889,11 @@ async function runPipelineStage({
           input_analysis: conditionEvaluation.analysis,
         },
         summary:
-          conditionEvaluation.analysis?.summary ||
-          'Applied the configured Replicate enhancement.',
+          stage?.type === 'replicate_old_photo_restoration'
+            ? conditionEvaluation.analysis?.summary ||
+              'Applied the configured Replicate old-photo restoration.'
+            : conditionEvaluation.analysis?.summary ||
+              'Applied the configured Replicate enhancement.',
       }
     } finally {
       if (tempStorage) {
@@ -2187,6 +2331,54 @@ async function runConfiguredPipeline({ job, pipeline, prompt, triggeredBy }) {
         contentType: stageResult.contentType,
       }
     } catch (error) {
+      // If the pipeline still has a restoration-capable stage queued up,
+      // log this failure and fall through — don't drop the whole job
+      // because one upstream model (e.g. Replicate old-photo-restoration)
+      // crashed on this specific input. The next stage will run with the
+      // same `input` we fed to the failed one, which is either the
+      // original bytes (if nothing has succeeded yet) or the last
+      // successful restoration output.
+      const hasRemainingRestorationStage = pipeline.stages
+        .slice(stageIndex + 1)
+        .some(nextStage =>
+          isRestorationCapableStageType(String(nextStage?.type || ''))
+        )
+
+      if (hasRemainingRestorationStage) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error || '')
+        const skippedTrace = [
+          ...runtime.trace,
+          buildTraceEntry({
+            result: {
+              model: getExpectedStageModel(stage) || '',
+              provider: getStageSource(String(stage?.type || '')) || '',
+              providerPayload: {
+                error: errorMessage,
+                skipped_reason: 'stage_error_with_fallback_available',
+              },
+              skipped: true,
+              summary: `Stage ${String(
+                stage?.id || stage?.type || ''
+              )} failed (${
+                errorMessage || 'unknown error'
+              }); falling through to the next restoration stage.`,
+            },
+            stage,
+          }),
+        ]
+
+        runtime = buildPipelineRuntime({
+          currentStageIndex: stageIndex + 1,
+          existingRuntime: runtime,
+          pipeline,
+          trace: skippedTrace,
+        })
+        // Leave `input` unchanged so the next stage runs on whatever we
+        // last had — original bytes, or the last successful stage's output.
+        continue
+      }
+
       if (lastSuccessfulResult) {
         return finalizePipelineResult({
           completedStage: lastSuccessfulStage,

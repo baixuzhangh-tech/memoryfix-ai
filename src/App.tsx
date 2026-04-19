@@ -15,6 +15,9 @@ import Modal from './components/Modal'
 import SecureHumanRestoreUploadPage from './components/SecureHumanRestoreUploadPage'
 import Editor from './Editor'
 import CheckoutForm from './components/domain/CheckoutForm'
+import AiHdPreviewPage from './pages/AiHdPreviewPage'
+import CaseStudiesPage from './pages/CaseStudiesPage'
+import CaseStudyPage from './pages/CaseStudyPage'
 import LandingPage from './pages/LandingPage'
 import LegacyHomePage from './pages/LegacyHomePage'
 import type { PricingPlanKind } from './pages/LegacyHomePage'
@@ -41,6 +44,7 @@ import {
 } from './humanRestoreContent'
 import { languageTag, onSetLanguageTag } from './paraglide/runtime'
 import {
+  aiHdPreviewPath,
   humanRestoreSecureUploadPath,
   humanRestoreSuccessPath,
 } from './config/routes'
@@ -62,8 +66,9 @@ import {
 import {
   paddleHumanRestorePriceId,
   paddleLocalPackPriceId,
+  resolvePaddlePriceIdForTier,
 } from './lib/paddle/env'
-import type { CheckoutLaunchResult } from './lib/paddle/env'
+import type { CheckoutLaunchResult, HumanRestoreTier } from './lib/paddle/env'
 
 // Still referenced from the `paymentSetupNotice` modal below. The
 // legacy home page no longer needs it (it owns its own copy).
@@ -71,6 +76,20 @@ const paymentContactEmail =
   import.meta.env.VITE_HUMAN_RESTORE_CONTACT_EMAIL ||
   import.meta.env.VITE_SUPPORT_EMAIL ||
   'hello@artgen.site'
+
+function shouldPreferHostedCheckoutRedirect() {
+  if (typeof window === 'undefined') return false
+
+  const userAgent = window.navigator.userAgent || ''
+  const isMobileBrowser =
+    /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini|Windows Phone/i.test(
+      userAgent
+    )
+  const isInAppBrowser =
+    /MicroMessenger|FBAN|FBAV|Instagram|Line|wv\)|WebView/i.test(userAgent)
+
+  return isMobileBrowser || isInAppBrowser
+}
 
 function App() {
   const [file, setFile] = useState<File>()
@@ -81,6 +100,8 @@ function App() {
 
   const [showHumanRestoreCheckout, setShowHumanRestoreCheckout] =
     useState(false)
+  const [pendingCheckoutTier, setPendingCheckoutTier] =
+    useState<HumanRestoreTier>('ai_hd')
   const [showLocalRepairLimitModal, setShowLocalRepairLimitModal] =
     useState(false)
   const [paymentSetupNotice, setPaymentSetupNotice] = useState<
@@ -101,10 +122,14 @@ function App() {
   )
 
   const {
+    caseStudySlug,
     currentPath,
     currentSearchParams,
     defaultCheckoutEmail,
     isAdminReviewPage,
+    isAiHdPreviewPage,
+    isCaseStudiesIndexPage,
+    isCaseStudyPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
     isLegalRoute,
@@ -175,10 +200,13 @@ function App() {
 
   let mainView:
     | 'admin'
+    | 'ai-hd-preview'
     | 'editor'
     | 'retoucher'
     | 'success'
     | 'secure-upload'
+    | 'case-studies'
+    | 'case-study'
     | 'legal'
     | 'home' = 'home'
 
@@ -192,11 +220,20 @@ function App() {
     mainView = 'secure-upload'
   } else if (isHumanRestoreSuccessPage) {
     mainView = 'success'
+  } else if (isAiHdPreviewPage) {
+    mainView = 'ai-hd-preview'
+  } else if (isCaseStudyPage) {
+    mainView = 'case-study'
+  } else if (isCaseStudiesIndexPage) {
+    mainView = 'case-studies'
   } else if (isLegalRoute) {
     mainView = 'legal'
   }
 
   usePageSeo({
+    caseStudySlug,
+    isCaseStudiesIndexPage,
+    isCaseStudyPage,
     isAdminReviewPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
@@ -217,6 +254,10 @@ function App() {
       pageViewEvent = 'view_admin_review'
     } else if (isRetoucherPortalPage) {
       pageViewEvent = 'view_retoucher_portal'
+    } else if (isCaseStudyPage) {
+      pageViewEvent = 'view_case_study'
+    } else if (isCaseStudiesIndexPage) {
+      pageViewEvent = 'view_case_studies_index'
     }
 
     trackProductEvent(pageViewEvent)
@@ -226,6 +267,8 @@ function App() {
     }
   }, [
     isAdminReviewPage,
+    isCaseStudiesIndexPage,
+    isCaseStudyPage,
     isHumanRestoreSecureUploadPage,
     isHumanRestoreSuccessPage,
     isRetoucherPortalPage,
@@ -368,7 +411,7 @@ function App() {
       return
     }
 
-    handleLaunchHumanRestoreCheckout()
+    handleLaunchHumanRestoreCheckout('human')
   }
 
   function getPricingPlanActionLabel(planKind: PricingPlanKind) {
@@ -387,35 +430,91 @@ function App() {
       : 'Request Human Restore'
   }
 
-  function handleLaunchHumanRestoreCheckout() {
+  function handleLaunchHumanRestoreCheckout(tier: HumanRestoreTier = 'ai_hd') {
     clearPendingLocalRepairPackCheckout()
     setCheckoutLaunchError('')
     setCheckoutLaunchStatus('idle')
+    setPendingCheckoutTier(tier)
 
     if (!isHumanRestorePaymentReady) {
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError(
-        'Human Restore checkout is being activated. Free local repair is ready now; paid restore will open after payment approval.'
+        'Restoration checkout is being activated. Free local repair is ready now; paid restore will open after payment approval.'
       )
       setShowLocalRepairLimitModal(false)
       setPaymentSetupNotice('human-restore')
       trackProductEvent('click_human_restore', {
         destination: 'paddle_onboarding_pending',
+        tier,
       })
+      return
+    }
+
+    // AI HD tier follows the preview-first flow: route the buyer to
+    // /ai-hd where they upload a photo, see a watermarked preview,
+    // and only then unlock with Paddle. Bypass the pre-payment
+    // CheckoutForm modal entirely so the two tiers feel distinct.
+    if (tier === 'ai_hd') {
+      trackProductEvent('click_human_restore', {
+        destination: 'ai_hd_preview_page',
+        tier,
+      })
+      window.location.assign(aiHdPreviewPath)
       return
     }
 
     setShowHumanRestoreCheckout(true)
   }
 
+  /**
+   * Launcher used by /ai-hd after the watermarked preview is ready.
+   * Reuses the existing handleHumanRestoreCheckoutCreated path so
+   * Paddle overlay / hosted-checkout fallback / analytics all stay
+   * identical across tiers — the only difference is that the order
+   * already exists (created by /api/ai-hd-preview), so we skip the
+   * pre-payment upload step entirely.
+   */
+  async function handleAiHdPreviewUnlock(payload: {
+    checkoutRef: string
+    orderId: string
+  }): Promise<{ ok: boolean; error?: string }> {
+    setPendingCheckoutTier('ai_hd')
+
+    if (!isHumanRestorePaymentReady) {
+      return {
+        ok: false,
+        error: 'Secure checkout is being activated. Please retry in a moment.',
+      }
+    }
+
+    const result = await handleHumanRestoreCheckoutCreated({
+      checkoutRef: payload.checkoutRef,
+      orderId: payload.orderId,
+      tier: 'ai_hd',
+    })
+
+    if (!result.ok) {
+      return { ok: false, error: result.error }
+    }
+
+    return { ok: true }
+  }
+
   async function handleHumanRestoreCheckoutCreated(payload: {
     checkoutRef: string
     orderId: string
+    tier?: HumanRestoreTier
   }): Promise<CheckoutLaunchResult> {
     const { checkoutRef, orderId } = payload
+    const tier: HumanRestoreTier = payload.tier || pendingCheckoutTier
+    const tierPriceId = resolvePaddlePriceIdForTier(tier)
+    const shouldUseHostedRedirect = shouldPreferHostedCheckoutRedirect()
 
-    if (!paddleHumanRestorePriceId) {
-      const errorMessage = 'Secure checkout is not configured.'
+    if (!tierPriceId) {
+      const errorMessage =
+        tier === 'ai_hd'
+          ? 'AI HD checkout is not configured yet.'
+          : 'Human Retouch checkout is not configured yet.'
       setCheckoutLaunchStatus('error')
       setCheckoutLaunchError(errorMessage)
       return { error: errorMessage, ok: false }
@@ -430,7 +529,11 @@ function App() {
 
     const paddleReady = await ensurePaddleReady()
 
-    if (paddleReady && window.Paddle?.Checkout?.open) {
+    if (
+      !shouldUseHostedRedirect &&
+      paddleReady &&
+      window.Paddle?.Checkout?.open
+    ) {
       trackProductEvent('click_human_restore', {
         checkout_ref_created: Boolean(checkoutRef),
         destination: 'paddle_overlay',
@@ -439,11 +542,12 @@ function App() {
 
       try {
         window.Paddle.Checkout.open({
-          items: [{ priceId: paddleHumanRestorePriceId, quantity: 1 }],
+          items: [{ priceId: tierPriceId, quantity: 1 }],
           customData: {
             checkout_ref: checkoutRef,
             flow: 'human_restore_preupload',
             human_restore_order_id: orderId,
+            human_restore_tier: tier,
           },
           settings: {
             displayMode: 'overlay',
@@ -471,8 +575,9 @@ function App() {
         body: JSON.stringify({
           checkoutRef,
           orderId,
-          priceId: paddleHumanRestorePriceId,
+          priceId: tierPriceId,
           successUrl: successUrl.toString(),
+          tier,
         }),
       })
       const fallbackBody = (await fallbackResponse
@@ -483,6 +588,13 @@ function App() {
       } | null
 
       if (fallbackResponse.ok && fallbackBody?.checkoutUrl) {
+        if (shouldUseHostedRedirect) {
+          setCheckoutLaunchStatus('idle')
+          setCheckoutLaunchError('')
+          window.location.assign(fallbackBody.checkoutUrl)
+          return { ok: true }
+        }
+
         const checkoutWindow = window.open(fallbackBody.checkoutUrl, '_blank')
 
         if (checkoutWindow) {
@@ -492,10 +604,9 @@ function App() {
         }
 
         setCheckoutLaunchStatus('idle')
-        setCheckoutLaunchError(
-          'Popup was blocked. Please allow popups for this site, then click Pay securely again.'
-        )
-        return { ok: false }
+        setCheckoutLaunchError('')
+        window.location.assign(fallbackBody.checkoutUrl)
+        return { ok: true }
       }
 
       throw new Error(
@@ -618,17 +729,36 @@ function App() {
     setFile(resizedFile)
   }
 
+  if (mainView === 'retoucher') {
+    // Render the retoucher workspace WITHOUT the public AppShell so
+    // external retouchers never see the customer-facing MemoryFix AI
+    // / artgen.site wordmark, the Pricing nav, or the About modal.
+    // The portal is a self-contained dashboard intentionally kept
+    // brand-neutral so we can hand access to contractors without
+    // disclosing how we acquire customers.
+    return (
+      <div className="min-h-full bg-[#f4f5f7] text-[#1f1f1f]">
+        <RetoucherPortal />
+      </div>
+    )
+  }
+
   return (
     <AppShell
       hasActiveFile={Boolean(file)}
       isAdminReviewPage={isAdminReviewPage}
+      isCaseStudyRoute={isCaseStudyPage || isCaseStudiesIndexPage}
       isHumanRestoreSecureUploadPage={isHumanRestoreSecureUploadPage}
       isHumanRestoreSuccessPage={isHumanRestoreSuccessPage}
       isLegalRoute={isLegalRoute}
       isRetoucherPortalPage={isRetoucherPortalPage}
       onStartNew={() => setFile(undefined)}
       variant={
-        isNewLandingEnabled && mainView === 'home' ? 'landing' : 'legacy'
+        (isNewLandingEnabled && mainView === 'home') ||
+        mainView === 'case-studies' ||
+        mainView === 'case-study'
+          ? 'landing'
+          : 'legacy'
       }
     >
       <main
@@ -637,32 +767,44 @@ function App() {
       >
         {mainView === 'editor' && file && <Editor file={file} />}
         {mainView === 'admin' && <AdminReviewPage />}
-        {mainView === 'retoucher' && <RetoucherPortal />}
         {mainView === 'legal' && <LegalPage path={currentPath} />}
+        {mainView === 'ai-hd-preview' && (
+          <AiHdPreviewPage
+            isCheckoutReady={isHumanRestorePaymentReady}
+            onUnlockHd={handleAiHdPreviewUnlock}
+            onUpgradeToHuman={() => handleLaunchHumanRestoreCheckout('human')}
+          />
+        )}
+        {mainView === 'case-studies' && (
+          <CaseStudiesPage
+            isHumanRestorePaymentReady={isHumanRestorePaymentReady}
+            onPrimaryCta={handleLaunchHumanRestoreCheckout}
+          />
+        )}
+        {mainView === 'case-study' && (
+          <CaseStudyPage
+            slug={caseStudySlug}
+            isHumanRestorePaymentReady={isHumanRestorePaymentReady}
+            onPrimaryCta={handleLaunchHumanRestoreCheckout}
+          />
+        )}
         {mainView === 'secure-upload' && isNewLandingEnabled && (
           <SecureUploadPage token={secureUploadToken} />
         )}
         {mainView === 'secure-upload' && !isNewLandingEnabled && (
           <SecureHumanRestoreUploadPage token={secureUploadToken} />
         )}
-        {mainView === 'success' &&
-          isNewLandingEnabled &&
-          hasLocalHumanRestoreOrder && (
-            <SuccessPage
-              errorMessage={humanRestoreOrderError}
-              order={humanRestoreOrder}
-              status={humanRestoreOrderStatus}
-            />
-          )}
+        {mainView === 'success' && hasLocalHumanRestoreOrder && (
+          <SuccessPage
+            errorMessage={humanRestoreOrderError}
+            order={humanRestoreOrder}
+            status={humanRestoreOrderStatus}
+          />
+        )}
         {mainView === 'success' &&
           !isNewLandingEnabled &&
-          (hasLocalHumanRestoreOrder ? (
-            <HumanRestoreSuccessStatusPage
-              errorMessage={humanRestoreOrderError}
-              order={humanRestoreOrder}
-              status={humanRestoreOrderStatus}
-            />
-          ) : (
+          !hasLocalHumanRestoreOrder &&
+          (false ? null : (
             <div className="mx-auto flex max-w-7xl flex-col px-4 py-8 md:px-8 md:py-10">
               <section className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
                 <div className="relative overflow-hidden rounded-[2rem] bg-[#211915] p-8 text-white shadow-2xl shadow-[#211915]/20 md:p-10">
@@ -931,17 +1073,17 @@ function App() {
               </button>
               <button
                 type="button"
-                onClick={handleLaunchHumanRestoreCheckout}
+                onClick={() => handleLaunchHumanRestoreCheckout('human')}
                 className="rounded-[1.5rem] border border-[#d7b98c] bg-white px-6 py-5 text-left text-[#211915] shadow-lg transition hover:-translate-y-1 hover:bg-[#fffaf3]"
               >
                 <span className="block text-sm font-black uppercase tracking-[0.18em] text-[#9b6b3c]">
                   Best result
                 </span>
                 <span className="mt-2 block text-2xl font-black">
-                  Human Restore
+                  Human Retouch
                 </span>
                 <span className="mt-2 block text-sm leading-6 text-[#66574d]">
-                  {humanRestorePrice}/photo. Cloud AI draft plus human review.
+                  {humanRestorePrice}/photo. Face-accurate human retouching.
                 </span>
               </button>
             </div>
@@ -965,13 +1107,17 @@ function App() {
         <Modal>
           {isNewLandingEnabled ? (
             <CheckoutForm
+              defaultTier={pendingCheckoutTier}
               onCancel={() => {
                 setShowHumanRestoreCheckout(false)
               }}
               onCheckoutCreated={handleHumanRestoreCheckoutCreated}
+              onTierChange={setPendingCheckoutTier}
             />
           ) : (
             <HumanRestoreCheckoutForm
+              defaultTier={pendingCheckoutTier}
+              onTierChange={setPendingCheckoutTier}
               onCancel={() => {
                 setShowHumanRestoreCheckout(false)
               }}

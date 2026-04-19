@@ -47,3 +47,18 @@ export function upsertCanonicalLink(href: string) {
 
   canonicalLink.setAttribute('href', href)
 }
+
+export function upsertJsonLdScript(id: string, payload: unknown) {
+  let scriptTag = document.head.querySelector<HTMLScriptElement>(
+    `script[data-jsonld-id="${id}"]`
+  )
+
+  if (!scriptTag) {
+    scriptTag = document.createElement('script')
+    scriptTag.setAttribute('type', 'application/ld+json')
+    scriptTag.setAttribute('data-jsonld-id', id)
+    document.head.appendChild(scriptTag)
+  }
+
+  scriptTag.textContent = JSON.stringify(payload)
+}

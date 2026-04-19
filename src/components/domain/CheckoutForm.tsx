@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertCircle, Loader2, ShieldCheck, X } from 'lucide-react'
 
 import trackProductEvent from '@/analytics'
@@ -11,6 +11,8 @@ import {
   humanRestorePolicySummary,
 } from '@/contentPolicy'
 import { resizeImageFile } from '@/utils'
+import { humanRestoreAiHdPrice, humanRestorePrice } from '@/lib/localRepair'
+import type { HumanRestoreTier } from '@/lib/paddle/env'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
@@ -22,6 +24,7 @@ type HumanRestoreCheckoutResponse = {
 type HumanRestoreCheckoutPayload = {
   checkoutRef: string
   orderId: string
+  tier: HumanRestoreTier
 }
 
 type CheckoutLaunchResult = {
@@ -30,10 +33,12 @@ type CheckoutLaunchResult = {
 }
 
 export interface CheckoutFormProps {
+  defaultTier?: HumanRestoreTier
   onCancel: () => void
   onCheckoutCreated: (
     payload: HumanRestoreCheckoutPayload
   ) => CheckoutLaunchResult | Promise<CheckoutLaunchResult>
+  onTierChange?: (tier: HumanRestoreTier) => void
 }
 
 type SubmissionStatus =
@@ -80,9 +85,12 @@ function formatFileSize(size: number) {
  * quick commitment, not a second marketing page.
  */
 export function CheckoutForm({
+  defaultTier = 'ai_hd',
   onCancel,
   onCheckoutCreated,
+  onTierChange,
 }: CheckoutFormProps) {
+  const [tier, setTier] = useState<HumanRestoreTier>(defaultTier)
   const [notes, setNotes] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [policyAccepted, setPolicyAccepted] = useState(false)
@@ -90,6 +98,22 @@ export function CheckoutForm({
     useState<HumanRestoreCheckoutPayload | null>(null)
   const [status, setStatus] = useState<SubmissionStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    setTier(defaultTier)
+  }, [defaultTier])
+
+  function handleTierChange(next: HumanRestoreTier) {
+    if (checkoutPayload) {
+      return
+    }
+
+    setTier(next)
+
+    if (onTierChange) {
+      onTierChange(next)
+    }
+  }
 
   const notesFieldId = 'checkout-v2-notes'
   const policyFieldId = 'checkout-v2-policy'
@@ -203,6 +227,7 @@ export function CheckoutForm({
     formData.append('notes', notes.trim())
     formData.append('contentPolicyAccepted', 'true')
     formData.append('photo', selectedFile)
+    formData.append('productTier', tier)
 
     setStatus('submitting')
     setErrorMessage('')
@@ -236,6 +261,7 @@ export function CheckoutForm({
       const nextCheckoutPayload = {
         checkoutRef: responseBody.checkoutRef || '',
         orderId: responseBody.orderId,
+        tier,
       }
 
       setCheckoutPayload(nextCheckoutPayload)
@@ -257,10 +283,13 @@ export function CheckoutForm({
     }
   }
 
-  let submitButtonText = 'Continue to secure checkout — $19'
+  const tierPriceLabel =
+    tier === 'ai_hd' ? humanRestoreAiHdPrice : humanRestorePrice
+  let submitButtonText = `Continue to secure checkout — ${tierPriceLabel}`
   if (status === 'submitting') submitButtonText = 'Saving photo…'
   else if (status === 'opening') submitButtonText = 'Opening checkout…'
-  else if (checkoutPayload) submitButtonText = 'Pay securely — $19'
+  else if (checkoutPayload)
+    submitButtonText = `Pay securely — ${tierPriceLabel}`
 
   return (
     <section className="flex w-full max-w-lg flex-col gap-6">

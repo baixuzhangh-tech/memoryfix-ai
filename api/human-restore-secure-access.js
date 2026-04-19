@@ -43,8 +43,12 @@ function localOrderToOrderDetails(localOrder) {
     checkoutEmail: localOrder.checkout_email || '',
     createdAt: localOrder.created_at || new Date().toISOString(),
     customerName: localOrder.customer_name || '',
+    localOrderId: localOrder.id,
     orderId: localOrder.payment_provider_order_id || localOrder.id,
-    orderNumber: localOrder.order_number || localOrder.payment_provider_order_id || localOrder.id,
+    orderNumber:
+      localOrder.order_number ||
+      localOrder.payment_provider_order_id ||
+      localOrder.id,
     productName: localOrder.product_name || 'Human-assisted Restore',
     receiptUrl: localOrder.receipt_url || '',
     status: isPaidStatus(localOrder.status) ? 'paid' : localOrder.status,

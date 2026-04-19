@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 import { landingGallery } from '@/config/landing'
+import trackProductEvent from '@/analytics'
 
 export interface GalleryProps {
   className?: string
@@ -27,8 +28,9 @@ export function Gallery({ className }: GalleryProps) {
             Quiet, careful work.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-            A selection of real photographs we have restored. Every face here
-            was treated as if it were our own grandparent.
+            Product cases from our workflow appear first. Public-domain archive
+            restoration references are clearly labeled so visitors never have to
+            guess what is ours and what is historical reference material.
           </p>
         </div>
 
@@ -40,6 +42,16 @@ export function Gallery({ className }: GalleryProps) {
             const afterFilterClass = sample.hasRealPair
               ? ''
               : '[filter:saturate(1.12)_contrast(1.08)_brightness(1.03)]'
+            let pairLabel = 'Hover'
+
+            if (sample.sourceKind === 'product_case') {
+              pairLabel = 'Product case'
+            } else if (sample.sourceKind === 'archive_reference') {
+              pairLabel = 'Archive ref'
+            } else if (sample.hasRealPair) {
+              pairLabel = 'Real pair'
+            }
+
             return (
               <li
                 key={sample.id}
@@ -66,11 +78,27 @@ export function Gallery({ className }: GalleryProps) {
                   />
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t bg-card p-4">
-                  <p className="font-serif text-base text-foreground">
-                    {sample.caption}
-                  </p>
+                  <div>
+                    <p className="font-serif text-base text-foreground">
+                      {sample.caption}
+                    </p>
+                    {sample.caseStudyHref && (
+                      <a
+                        href={sample.caseStudyHref}
+                        className="mt-1 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+                        onClick={() => {
+                          trackProductEvent('click_case_study_from_gallery', {
+                            case_study_href: sample.caseStudyHref || '',
+                            case_study_id: sample.id,
+                          })
+                        }}
+                      >
+                        Read case study
+                      </a>
+                    )}
+                  </div>
                   <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-                    {sample.hasRealPair ? 'Real pair' : 'Hover'}
+                    {pairLabel}
                   </span>
                 </div>
               </li>

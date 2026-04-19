@@ -1,0 +1,121 @@
+[
+  {
+    "id": "carver-1910",
+    "caption": "George Washington Carver, c. 1910",
+    "license": "Public domain (US Gov / pre-1928)",
+    "before": {
+      "commons_title": "File:George Washington Carver c1910.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AGeorge%20Washington%20Carver%20c1910.jpg",
+      "local_path": "/examples/old-photos/pair-carver-1910-before.jpg",
+      "bytes": 1886557
+    },
+    "after": {
+      "commons_title": "File:George Washington Carver c1910 - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AGeorge%20Washington%20Carver%20c1910%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-carver-1910-after.jpg",
+      "bytes": 5658279
+    }
+  },
+  {
+    "id": "woolf-1902",
+    "caption": "Virginia Woolf, photographed 1902",
+    "license": "Public domain (pre-1928)",
+    "before": {
+      "commons_title": "File:George Charles Beresford - Virginia Woolf in 1902.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AGeorge%20Charles%20Beresford%20-%20Virginia%20Woolf%20in%201902.jpg",
+      "local_path": "/examples/old-photos/pair-woolf-1902-before.jpg",
+      "bytes": 1634746
+    },
+    "after": {
+      "commons_title": "File:George Charles Beresford - Virginia Woolf in 1902 - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AGeorge%20Charles%20Beresford%20-%20Virginia%20Woolf%20in%201902%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-woolf-1902-after.jpg",
+      "bytes": 2952959
+    }
+  },
+  {
+    "id": "cameron-met",
+    "caption": "Portrait by Julia Margaret Cameron, 19th c.",
+    "license": "Public domain (MET Open Access)",
+    "before": {
+      "commons_title": "File:Julia Margaret Cameron MET DP114480.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AJulia%20Margaret%20Cameron%20MET%20DP114480.jpg",
+      "local_path": "/examples/old-photos/pair-cameron-met-before.jpg",
+      "bytes": 1907329
+    },
+    "after": {
+      "commons_title": "File:Julia Margaret Cameron MET DP114480 - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AJulia%20Margaret%20Cameron%20MET%20DP114480%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-cameron-met-after.jpg",
+      "bytes": 7143662
+    }
+  },
+  {
+    "id": "nielsen-1908",
+    "caption": "Composer Carl Nielsen, c. 1908",
+    "license": "Public domain (pre-1928)",
+    "before": {
+      "commons_title": "File:Carl Nielsen c. 1908.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ACarl%20Nielsen%20c.%201908.jpg",
+      "local_path": "/examples/old-photos/pair-nielsen-1908-before.jpg",
+      "bytes": 1337004
+    },
+    "after": {
+      "commons_title": "File:Carl Nielsen c. 1908 - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ACarl%20Nielsen%20c.%201908%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-nielsen-1908-after.jpg",
+      "bytes": 3911901
+    }
+  },
+  {
+    "id": "fleetwood",
+    "caption": "Sgt. Major Christian Fleetwood, Civil War",
+    "license": "Public domain (pre-1928)",
+    "before": {
+      "commons_title": "File:Sgt Major Christian Fleetwood - American Civil War Medal of Honor recipient.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ASgt%20Major%20Christian%20Fleetwood%20-%20American%20Civil%20War%20Medal%20of%20Honor%20recipient.jpg",
+      "local_path": "/examples/old-photos/pair-fleetwood-before.jpg",
+      "bytes": 245259
+    },
+    "after": {
+      "commons_title": "File:Sgt Major Christian Fleetwood - American Civil War Medal of Honor recipient - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ASgt%20Major%20Christian%20Fleetwood%20-%20American%20Civil%20War%20Medal%20of%20Honor%20recipient%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-fleetwood-after.jpg",
+      "bytes": 1040573
+    }
+  },
+  {
+    "id": "li-fu-lee",
+    "caption": "Li Fu Lee at MIT radio lab, 1925",
+    "license": "Public domain (MIT Museum)",
+    "before": {
+      "commons_title": "File:Li Fu Lee at the Massachusetts Institute of Technology's radio experiment station, 1925 (MIT Museum).jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ALi%20Fu%20Lee%20at%20the%20Massachusetts%20Institute%20of%20Technology%27s%20radio%20experiment%20station%2C%201925%20%28MIT%20Museum%29.jpg",
+      "local_path": "/examples/old-photos/pair-li-fu-lee-before.jpg",
+      "bytes": 2074417
+    },
+    "after": {
+      "commons_title": "File:Li Fu Lee at the Massachusetts Institute of Technology's radio experiment station, 1925 (MIT Museum) - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3ALi%20Fu%20Lee%20at%20the%20Massachusetts%20Institute%20of%20Technology%27s%20radio%20experiment%20station%2C%201925%20%28MIT%20Museum%29%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-li-fu-lee-after.jpg",
+      "bytes": 4556622
+    }
+  },
+  {
+    "id": "earle-coates",
+    "caption": "Florence Earle Coates, platinum print",
+    "license": "Public domain (pre-1928)",
+    "before": {
+      "commons_title": "File:Florence Earle Coates Platinum Print 3.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AFlorence%20Earle%20Coates%20Platinum%20Print%203.jpg",
+      "local_path": "/examples/old-photos/pair-earle-coates-before.jpg",
+      "bytes": 2025063
+    },
+    "after": {
+      "commons_title": "File:Florence Earle Coates Platinum Print 3 - Restoration.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File%3AFlorence%20Earle%20Coates%20Platinum%20Print%203%20-%20Restoration.jpg",
+      "local_path": "/examples/new-photos/pair-earle-coates-after.jpg",
+      "bytes": 3156635
+    }
+  }
+]

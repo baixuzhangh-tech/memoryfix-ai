@@ -13,7 +13,8 @@
 export const freeLocalRepairLimit = 3
 export const localRepairPackCredits = 10
 export const localRepairPackPrice = '$9.90'
-export const humanRestorePrice = '$19.90'
+export const humanRestoreAiHdPrice = '$6.90'
+export const humanRestorePrice = '$29.90'
 export const localRepairUsageStorageKey = 'memoryfix_local_repair_usage_v1'
 export const pendingLocalRepairPackCheckoutKey =
   'memoryfix_pending_local_repair_pack_checkout_v1'

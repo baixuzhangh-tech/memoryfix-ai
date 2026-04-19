@@ -11,7 +11,7 @@ import { Trust } from '@/sections/landing/Trust'
 export interface LandingPageProps {
   isHumanRestorePaymentReady: boolean
   onFileSelection: (file: File) => void
-  onLaunchPaidCheckout: () => void
+  onLaunchPaidCheckout: (tier?: 'ai_hd' | 'human') => void
 }
 
 /**
@@ -57,14 +57,21 @@ export function LandingPage({
   return (
     <div className="bg-background">
       <Hero
-        onPrimaryCta={onLaunchPaidCheckout}
-        onSecondaryCta={openFilePicker}
+        onPrimaryCta={() => onLaunchPaidCheckout('ai_hd')}
+        onSecondaryCta={() => onLaunchPaidCheckout('human')}
+        onTertiaryCta={openFilePicker}
         primaryCtaDisabled={!isHumanRestorePaymentReady}
       />
       <HowItWorks />
       <Gallery />
       <Pricing
-        onPrimaryCta={onLaunchPaidCheckout}
+        onSelectTier={tier => {
+          if (tier === 'free_local') {
+            openFilePicker()
+            return
+          }
+          onLaunchPaidCheckout(tier)
+        }}
         primaryCtaDisabled={!isHumanRestorePaymentReady}
       />
       <Trust />

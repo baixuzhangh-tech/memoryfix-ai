@@ -27,9 +27,12 @@ import {
   insertEvent,
   insertJob,
   isSupabaseConfigured,
+  updateOrder,
   uploadObject,
 } from './_lib/supabase.js'
 import { runRestoreJob } from './_lib/ai-restore.js'
+import { autoDeliverAiHdJob } from './_lib/auto-deliver.js'
+import { resolveTierFromRecord } from './_lib/product-tier.js'
 import {
   validateContentPolicyAcceptance,
   validateHumanRestoreImageSafety,
@@ -81,6 +84,44 @@ function looksLikeUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value || '')
   )
+}
+
+async function resolveLinkedLocalOrder({
+  isSecureUpload,
+  tokenPayload,
+  verifiedLocalOrder,
+}) {
+  if (verifiedLocalOrder?.id) {
+    return verifiedLocalOrder
+  }
+
+  if (!isSecureUpload || !tokenPayload) {
+    return null
+  }
+
+  if (tokenPayload.localOrderId) {
+    const localOrder = await getOrder(String(tokenPayload.localOrderId))
+
+    if (localOrder) {
+      return localOrder
+    }
+  }
+
+  const tokenOrderId = String(tokenPayload.orderId || '').trim()
+
+  if (!tokenOrderId) {
+    return null
+  }
+
+  if (looksLikeUuid(tokenOrderId)) {
+    const localOrder = await getOrder(tokenOrderId)
+
+    if (localOrder) {
+      return localOrder
+    }
+  }
+
+  return getOrderByProviderOrderId(tokenOrderId)
 }
 
 function localOrderToUploadOrder(localOrder) {
@@ -379,6 +420,7 @@ export default async function handler(req, res) {
     }
 
     let verifiedOrder = null
+    let verifiedLocalOrder = null
 
     if (isSecureUpload && tokenVerification?.payload?.orderId) {
       const existingCount = await countJobsByOrderId(
@@ -417,6 +459,7 @@ export default async function handler(req, res) {
       }
 
       verifiedOrder = verification.order
+      verifiedLocalOrder = verification.localOrder
 
       const existingCount = await countJobsByOrderId(verifiedOrder.orderId)
 
@@ -495,6 +538,11 @@ export default async function handler(req, res) {
     const orderPayload = isSecureUpload
       ? tokenVerification.payload
       : verifiedOrder || null
+    const linkedLocalOrder = await resolveLinkedLocalOrder({
+      isSecureUpload,
+      tokenPayload: tokenVerification?.payload || null,
+      verifiedLocalOrder,
+    })
 
     await uploadObject({
       bucket: buckets.originals,
@@ -510,6 +558,8 @@ export default async function handler(req, res) {
       checkout_email: checkoutEmail,
       customer_name: orderPayload?.customerName || '',
       expires_at: expiresAt.toISOString(),
+      human_restore_order_id:
+        linkedLocalOrder?.id || orderPayload?.localOrderId || null,
       notes,
       order_bound: isSecureUpload || Boolean(verifiedOrder),
       order_id: orderPayload?.orderId || null,
@@ -561,8 +611,53 @@ export default async function handler(req, res) {
       })
     }
 
+    const paidTier = resolveTierFromRecord(linkedLocalOrder)
+
+    if (paidTier === 'ai_hd' && currentJob.status === 'needs_review') {
+      const autoDeliveryResult = await autoDeliverAiHdJob({
+        job: currentJob,
+        resendApiKey,
+        fromEmail,
+        supportEmail,
+      }).catch(async error => {
+        await insertEvent(currentJob.id, 'ai_hd_auto_delivery_failed', {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'AI HD auto-delivery failed.',
+        })
+        return null
+      })
+
+      if (autoDeliveryResult?.delivered && autoDeliveryResult.job) {
+        currentJob = autoDeliveryResult.job
+      }
+    }
+
+    if (linkedLocalOrder?.id) {
+      await updateOrder(linkedLocalOrder.id, {
+        job_id: currentJob.id,
+        status: currentJob.status,
+      }).catch(() => null)
+    }
+
     const adminUrl = new URL('/admin/review', siteUrl)
     adminUrl.searchParams.set('job', currentJob.id)
+    const redirectTo = linkedLocalOrder?.id
+      ? (() => {
+          const successUrl = new URL('/human-restore/success', siteUrl)
+          successUrl.searchParams.set('order_id', linkedLocalOrder.id)
+
+          if (linkedLocalOrder.checkout_ref) {
+            successUrl.searchParams.set(
+              'checkout_ref',
+              linkedLocalOrder.checkout_ref
+            )
+          }
+
+          return successUrl.toString()
+        })()
+      : ''
 
     let merchantEmailSent = true
 
@@ -612,6 +707,7 @@ export default async function handler(req, res) {
       submissionReference,
       confirmationEmailSent,
       merchantEmailSent,
+      redirectTo,
       supportEmail,
     })
   } catch {

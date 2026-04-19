@@ -21,10 +21,15 @@ export const humanRestoreSecureUploadTitle =
 export const humanRestoreSecureUploadDescription =
   'Use your secure upload link to send the photo and notes for your paid MemoryFix AI Human-assisted Restore order.'
 
+export const caseStudiesIndexTitle =
+  'Old Photo Restoration Case Studies | MemoryFix AI'
+export const caseStudiesIndexDescription =
+  'Explore before-and-after old photo restoration case studies, including scratched family portraits and faded heirloom photographs restored for sharing and print.'
+
 export const adminReviewTitle = 'Admin Review - MemoryFix AI'
 export const adminReviewDescription =
   'Private MemoryFix AI review queue for paid Human-assisted Restore orders.'
 
-export const retoucherPortalTitle = 'Retoucher Portal - MemoryFix AI'
+export const retoucherPortalTitle = 'Retoucher Workspace'
 export const retoucherPortalDescription =
-  'MemoryFix AI retoucher workspace for assigned photo restoration tasks.'
+  'Assigned photo restoration tasks workspace.'

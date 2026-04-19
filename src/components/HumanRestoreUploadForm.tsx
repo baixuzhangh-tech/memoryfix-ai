@@ -24,6 +24,7 @@ type SubmitResponse = {
   confirmationEmailSent?: boolean
   error?: string
   orderBound?: boolean
+  redirectTo?: string
   submissionReference?: string
   supportEmail?: string
 }
@@ -183,6 +184,11 @@ export default function HumanRestoreUploadForm(
         confirmation_email_sent: responseBody?.confirmationEmailSent !== false,
         secure_upload: isSecureUpload,
       })
+
+      if (responseBody?.redirectTo) {
+        window.location.assign(responseBody.redirectTo)
+        return
+      }
     } catch (error) {
       const nextErrorMessage =
         error instanceof Error

@@ -1,9 +1,11 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import trackProductEvent from '../analytics'
 import {
   humanRestorePolicyLinkText,
   humanRestorePolicySummary,
 } from '../contentPolicy'
+import { humanRestoreAiHdPrice, humanRestorePrice } from '../lib/localRepair'
+import type { HumanRestoreTier } from '../lib/paddle/env'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
@@ -15,6 +17,7 @@ type HumanRestoreCheckoutResponse = {
 type HumanRestoreCheckoutPayload = {
   checkoutRef: string
   orderId: string
+  tier: HumanRestoreTier
 }
 
 type CheckoutLaunchResult = {
@@ -23,10 +26,12 @@ type CheckoutLaunchResult = {
 }
 
 type HumanRestoreCheckoutFormProps = {
+  defaultTier?: HumanRestoreTier
   onCancel: () => void
   onCheckoutCreated: (
     payload: HumanRestoreCheckoutPayload
   ) => CheckoutLaunchResult | Promise<CheckoutLaunchResult>
+  onTierChange?: (tier: HumanRestoreTier) => void
 }
 
 type SubmissionStatus =
@@ -56,7 +61,13 @@ function formatFileSize(size: number) {
 export default function HumanRestoreCheckoutForm(
   props: HumanRestoreCheckoutFormProps
 ) {
-  const { onCancel, onCheckoutCreated } = props
+  const {
+    defaultTier = 'ai_hd',
+    onCancel,
+    onCheckoutCreated,
+    onTierChange,
+  } = props
+  const [tier, setTier] = useState<HumanRestoreTier>(defaultTier)
   const [notes, setNotes] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [policyAccepted, setPolicyAccepted] = useState(false)
@@ -64,6 +75,22 @@ export default function HumanRestoreCheckoutForm(
     useState<HumanRestoreCheckoutPayload | null>(null)
   const [status, setStatus] = useState<SubmissionStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    setTier(defaultTier)
+  }, [defaultTier])
+
+  function handleTierChange(next: HumanRestoreTier) {
+    if (checkoutPayload) {
+      return
+    }
+
+    setTier(next)
+
+    if (onTierChange) {
+      onTierChange(next)
+    }
+  }
   const notesFieldId = 'human-restore-precheckout-notes'
   const policyFieldId = 'human-restore-precheckout-policy'
   const photoFieldId = 'human-restore-precheckout-photo'
@@ -165,6 +192,7 @@ export default function HumanRestoreCheckoutForm(
     formData.append('notes', notes.trim())
     formData.append('contentPolicyAccepted', 'true')
     formData.append('photo', selectedFile)
+    formData.append('productTier', tier)
 
     setStatus('submitting')
     setErrorMessage('')
@@ -198,6 +226,7 @@ export default function HumanRestoreCheckoutForm(
       const nextCheckoutPayload = {
         checkoutRef: responseBody.checkoutRef || '',
         orderId: responseBody.orderId,
+        tier,
       }
 
       setCheckoutPayload(nextCheckoutPayload)
@@ -265,7 +294,7 @@ export default function HumanRestoreCheckoutForm(
 
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         {[
-          '1 photo per $19 order',
+          '1 photo per order',
           'Payment email is delivery email',
           'Unpaid uploads auto-expire',
         ].map(item => (
@@ -277,6 +306,84 @@ export default function HumanRestoreCheckoutForm(
           </div>
         ))}
       </div>
+
+      <fieldset
+        className="mt-6 rounded-[1.5rem] border border-[#e6d2b7] bg-white/80 p-4 md:p-5"
+        disabled={hasSavedCheckout}
+      >
+        <legend className="px-2 text-sm font-black uppercase tracking-[0.14em] text-[#9b6b3c]">
+          Choose your restoration tier
+        </legend>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {[
+            {
+              id: 'ai_hd' as HumanRestoreTier,
+              name: 'AI HD Restore',
+              price: humanRestoreAiHdPrice,
+              cadence: 'per photo',
+              description:
+                'Cloud AI fixes color, clarity, scratches and stains. Delivered in minutes.',
+              caveat:
+                'Human faces may vary slightly. Pick Human Retouch for face-accurate results.',
+            },
+            {
+              id: 'human' as HumanRestoreTier,
+              name: 'Human Retouch',
+              price: humanRestorePrice,
+              cadence: 'per photo',
+              description:
+                'A human retoucher finishes the photo. Face-accurate, delivered within 24 hours.',
+              caveat: 'Includes one free revision if the first pass misses.',
+            },
+          ].map(option => {
+            const isSelected = tier === option.id
+
+            return (
+              <label
+                key={option.id}
+                htmlFor={`human-restore-tier-${option.id}`}
+                className={[
+                  'flex cursor-pointer flex-col gap-2 rounded-[1.25rem] border p-4 transition',
+                  isSelected
+                    ? 'border-[#211915] bg-[#fffaf3] shadow-md'
+                    : 'border-[#e6d2b7] bg-white/80 hover:border-[#d7b98c]',
+                  hasSavedCheckout ? 'cursor-not-allowed opacity-70' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <input
+                  id={`human-restore-tier-${option.id}`}
+                  type="radio"
+                  name="human-restore-tier"
+                  value={option.id}
+                  checked={isSelected}
+                  onChange={() => handleTierChange(option.id)}
+                  className="sr-only"
+                  disabled={hasSavedCheckout}
+                />
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-base font-black text-[#211915]">
+                    {option.name}
+                  </span>
+                  <span className="text-lg font-black text-[#211915]">
+                    {option.price}
+                    <span className="ml-1 text-xs font-bold text-[#66574d]">
+                      {option.cadence}
+                    </span>
+                  </span>
+                </div>
+                <p className="text-sm leading-5 text-[#5b4a40]">
+                  {option.description}
+                </p>
+                <p className="text-xs leading-5 text-[#66574d]">
+                  {option.caveat}
+                </p>
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
 
       {checkoutPayload && (
         <div className="mt-6 rounded-[1.5rem] border border-[#b8d99f] bg-[#f4ffe8] px-5 py-4 text-sm leading-6 text-[#355322]">

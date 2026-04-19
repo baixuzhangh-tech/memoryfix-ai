@@ -21,22 +21,20 @@ export const landingHero = {
   headlinePrefix: 'Bring the faces you miss back into ',
   headlineAccent: 'focus.',
   subhead:
-    'We restore your family’s oldest photos with AI precision and human craftsmanship — faithfully, within 24 hours.',
-  primaryCtaLabel: 'Restore my photo — $19',
-  secondaryCtaLabel: 'Try for free in your browser',
-  trustLine: 'Private · Human-reviewed · Email delivery in 24h',
-  // Real before/after pair from a customer scan of the Sofia Wallin family
-  // portrait. Verified by inspecting each file:
-  //   - old-photos/-B.jpg : the original damaged black-and-white scan the
-  //     customer sent us (heavy scratches, emulsion spots, an extra cdv
-  //     portrait pasted into the upper-left corner).
-  //   - new-photos/-A.png : our delivered restoration — same composition,
-  //     damage gone, hand-colorized, the pasted-on cdv removed.
-  // Folder names match intent: old-photos = customer originals,
-  // new-photos = our restored outputs. An earlier revision of this config
-  // had the two swapped, which made the hero demo the product backwards.
-  // If you replace these, also flip the `hasRealPair` flag on the matching
-  // gallery sample below so the CSS filter fallback is skipped.
+    'Try our AI restoration free in one minute — and, when a face must stay faithful, let a real retoucher finish it by hand within 24 hours.',
+  // Primary CTA leads into the AI HD preview-first funnel: the buyer
+  // uploads a photo, sees a watermarked result, and only pays $6.90 if
+  // they want the HD download. The secondary CTA is the premium
+  // human-retoucher path (our margin product). The tertiary link is
+  // the no-risk in-browser tool.
+  primaryCtaLabel: 'See my photo restored — free AI preview',
+  secondaryCtaLabel: 'Hire a human retoucher — $29.90',
+  tertiaryCtaLabel: 'Or try a free fix in your browser →',
+  trustLine:
+    'Private · Your photo is never used to train AI · Deleted within 30 days',
+  // Use a workflow-owned pair in the hero so the most visible marketing spot
+  // reflects our actual restoration pipeline rather than a third-party archive
+  // restoration reference.
   heroBeforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
   heroAfterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
 }
@@ -65,7 +63,15 @@ export const landingHowItWorks = [
 export interface GallerySample {
   afterSrc: string
   beforeSrc: string
+  caseStudyHref?: string
   caption: string
+  /**
+   * Honest labeling for acquisition pages:
+   * - product_case: before/after pair produced by our workflow
+   * - archive_reference: public-domain/open-access restoration example used as
+   *   an attributed tonal / damage-repair reference, not sold as our output
+   */
+  sourceKind?: 'archive_reference' | 'product_case'
   /**
    * When true, beforeSrc and afterSrc are a genuine before/after pair —
    * Gallery renders them as-is. When false (default), the two sources are
@@ -79,60 +85,129 @@ export interface GallerySample {
 export const landingGallery: GallerySample[] = [
   {
     id: 'sofia-wallin',
-    caption: 'Sofia Wallin, real restoration',
+    caption: 'Scratched Swedish family portrait',
     beforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
     afterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+    caseStudyHref:
+      '/case-studies/scratched-swedish-family-portrait-restoration',
     hasRealPair: true,
+    sourceKind: 'product_case',
   },
   {
     id: 'worthington-1910',
-    caption: 'Worthington family, ca. 1910',
-    beforeSrc: '/examples/old-photos/old-family-worthington-1910.png',
-    afterSrc: '/examples/old-photos/old-family-worthington-1910.png',
+    caption: 'Worthington family portrait, 1910',
+    beforeSrc: '/examples/old-photos/old-family-worthington-1910-B.png',
+    afterSrc: '/examples/new-photos/old-family-worthington-1910-A.png',
+    caseStudyHref: '/case-studies/worthington-family-portrait-1910-restoration',
+    hasRealPair: true,
+    sourceKind: 'product_case',
   },
   {
-    id: 'rawson-daughter',
-    caption: 'Rawson daughter',
-    beforeSrc: '/examples/old-photos/old-family-rawson-daughter.jpg',
-    afterSrc: '/examples/old-photos/old-family-rawson-daughter.jpg',
+    id: 'woolf-1902',
+    caption: 'Virginia Woolf, photographed 1902',
+    beforeSrc: '/examples/old-photos/pair-woolf-1902-before.jpg',
+    afterSrc: '/examples/new-photos/pair-woolf-1902-after.jpg',
+    hasRealPair: true,
+    sourceKind: 'archive_reference',
   },
   {
-    id: 'kaarlo-vesala',
-    caption: 'Kaarlo Vesala portrait',
-    beforeSrc: '/examples/old-photos/old-family-kaarlo-vesala.jpg',
-    afterSrc: '/examples/old-photos/old-family-kaarlo-vesala.jpg',
+    id: 'cameron-met',
+    caption: 'Portrait by Julia Margaret Cameron, 19th c.',
+    beforeSrc: '/examples/old-photos/pair-cameron-met-before.jpg',
+    afterSrc: '/examples/new-photos/pair-cameron-met-after.jpg',
+    hasRealPair: true,
+    sourceKind: 'archive_reference',
   },
   {
-    id: 'abigail-campbell',
-    caption: 'Abigail Campbell, tin-type',
-    beforeSrc: '/examples/old-photos/old-family-abigail-campbell.jpg',
-    afterSrc: '/examples/old-photos/old-family-abigail-campbell.jpg',
+    id: 'nielsen-1908',
+    caption: 'Composer Carl Nielsen, c. 1908',
+    beforeSrc: '/examples/old-photos/pair-nielsen-1908-before.jpg',
+    afterSrc: '/examples/new-photos/pair-nielsen-1908-after.jpg',
+    hasRealPair: true,
+    sourceKind: 'archive_reference',
   },
   {
-    id: 'gatekeeper-china',
-    caption: 'Gatekeeper, rural China',
-    beforeSrc: '/examples/old-photos/old-family-gatekeeper-china.jpg',
-    afterSrc: '/examples/old-photos/old-family-gatekeeper-china.jpg',
+    id: 'li-fu-lee',
+    caption: 'Li Fu Lee at MIT radio lab, 1925',
+    beforeSrc: '/examples/old-photos/pair-li-fu-lee-before.jpg',
+    afterSrc: '/examples/new-photos/pair-li-fu-lee-after.jpg',
+    hasRealPair: true,
+    sourceKind: 'archive_reference',
+  },
+]
+
+export interface LandingPricingTier {
+  id: 'free_local' | 'ai_hd' | 'human'
+  name: string
+  price: string
+  priceCadence: string
+  description: string
+  features: string[]
+  ctaLabel: string
+  highlight?: string
+  caveat?: string
+}
+
+export const landingPricingTiers: LandingPricingTier[] = [
+  {
+    id: 'free_local',
+    name: 'Free Local Fix',
+    price: 'Free',
+    priceCadence: 'in your browser',
+    description:
+      'Open your photo directly in our browser-based editor. Nothing leaves your device — ideal for small touch-ups with zero risk.',
+    features: [
+      'Runs 100% locally in your browser',
+      'Your photo never leaves your device',
+      'Quick scratch, crop and color touch-ups',
+      'No account, no credit card, no upload',
+    ],
+    ctaLabel: 'Open the free editor',
+    highlight: 'Zero risk',
+  },
+  {
+    id: 'ai_hd',
+    name: 'AI HD Restore',
+    price: '$6.90',
+    priceCadence: 'per photo',
+    description:
+      'Upload, see a watermarked AI preview for free, and only pay if you love the result. HD download opens right inside the page.',
+    features: [
+      'Free watermarked preview — pay only if you love it',
+      'Color, clarity, scratch and stain repair',
+      'Instant in-page HD download after payment',
+      'Private encrypted storage, auto-deleted after 30 days',
+    ],
+    ctaLabel: 'Start free AI preview',
+    highlight: 'Fastest',
+    caveat:
+      'AI-only: human faces may shift slightly. For faithful faces, choose Human Retouch.',
+  },
+  {
+    id: 'human',
+    name: 'Human Retouch',
+    price: '$29.90',
+    priceCadence: 'per photo',
+    description:
+      'A real retoucher finishes the photo by hand — faces, skin, clothing and structure kept faithful to the original.',
+    features: [
+      'Professional retoucher reviews every pixel',
+      'Face-accurate — we will not let AI change who they are',
+      'One free revision included',
+      'Delivered within 24 hours',
+    ],
+    ctaLabel: 'Start Human Retouch — $29.90',
+    highlight: 'Face-accurate',
   },
 ]
 
 export const landingPricing = {
-  tagline: 'One photo, done right.',
-  planName: 'Human-assisted Restoration',
-  price: '$19',
-  priceCadence: 'per photo',
-  description:
-    'AI-powered restoration with a mandatory human quality check before delivery. We keep the structure and identity of your original image intact.',
-  features: [
-    'AI restoration + human review on every order',
-    'Private, encrypted storage — never reused for training',
-    'Faithful to the original: faces, clothing, background preserved',
-    'Email delivery within 24 hours',
-    'One revision included if the first pass misses the mark',
-  ],
-  primaryCtaLabel: 'Start my restoration',
+  tagline: 'Three ways to bring your photo back.',
+  subheading:
+    'Start free in your browser, try our AI with a watermark-free preview, or hand the photo to a real retoucher for full face accuracy.',
+  tiers: landingPricingTiers,
   footnote:
-    'No subscription. One-time payment via Paddle. VAT and taxes handled automatically.',
+    'No subscription. Paid orders are one-time payments via Paddle. VAT and taxes handled automatically.',
 }
 
 export const landingTestimonials = [

@@ -24,15 +24,21 @@ import {
   emailStepsList,
 } from './_lib/email-templates.js'
 import { runRestoreJob } from './_lib/ai-restore.js'
+import { autoDeliverAiHdJob } from './_lib/auto-deliver.js'
 import {
   getJob,
   getOrder,
   getOrderByCheckoutRef,
+  updateJob,
   getOrderByProviderOrderId,
   insertEvent,
   insertJob,
   updateOrder,
 } from './_lib/supabase.js'
+import {
+  isSupportedPriceId,
+  resolveTierFromPriceId,
+} from './_lib/product-tier.js'
 
 const defaultSiteUrl = 'https://artgen.site'
 
@@ -91,7 +97,10 @@ function getTransactionDetails(payload) {
     identifier: transaction.id,
     orderId: transaction.id,
     orderNumber: transaction.id,
-    productName: firstItem?.price?.name || firstItem?.price?.description || 'Human-assisted Restore',
+    productName:
+      firstItem?.price?.name ||
+      firstItem?.price?.description ||
+      'Human-assisted Restore',
     receiptUrl: transaction.checkout?.url || '',
     status: transaction.status,
     testMode: (process.env.PADDLE_ENVIRONMENT || 'production') === 'sandbox',
@@ -104,16 +113,23 @@ function isLocalRepairPackTransaction(transaction) {
   return customData.memoryfix_plan === 'local_repair_pack'
 }
 
-function shouldHandleTransaction({ transaction, configuredPriceId }) {
-  if (!transaction || transaction.status !== 'completed' || isLocalRepairPackTransaction(transaction)) {
+function shouldHandleTransaction({ transaction }) {
+  if (
+    !transaction ||
+    transaction.status !== 'completed' ||
+    isLocalRepairPackTransaction(transaction)
+  ) {
     return false
   }
 
-  if (!configuredPriceId) {
+  if (!transaction.priceId) {
+    // Without a priceId we cannot tell which tier the customer paid
+    // for, so fall through to the existing legacy handling (email a
+    // secure upload link) rather than silently dropping the event.
     return true
   }
 
-  return String(transaction.priceId) === String(configuredPriceId)
+  return isSupportedPriceId(transaction.priceId)
 }
 
 function mapJobStatusToOrderStatus(status) {
@@ -167,18 +183,28 @@ async function findLocalOrder(transaction) {
   return getOrderByProviderOrderId(String(transaction.orderId))
 }
 
-function buildLegacySecureUploadEmail({ uploadUrl, transaction, supportEmail }) {
+function buildLegacySecureUploadEmail({
+  uploadUrl,
+  transaction,
+  supportEmail,
+}) {
   const customerName = transaction.customerName || 'there'
   const orderNumber = transaction.orderNumber || 'your paid order'
 
   const bodyRows = [
     emailParagraph(
-      `Hi ${escapeHtml(customerName)}, thanks for purchasing ${escapeHtml(transaction.productName)}. Use the button below to upload the photo for your paid order.`
+      `Hi ${escapeHtml(customerName)}, thanks for purchasing ${escapeHtml(
+        transaction.productName
+      )}. Use the button below to upload the photo for your paid order.`
     ),
     emailCtaButton(uploadUrl, 'Upload Your Photo'),
     emailCtaFallback(uploadUrl, 'Click here to open the upload page'),
     emailInfoBox(
-      `This link is tied to your paid order and is intended only for your restoration upload.<br/>If the link does not open, contact <a href="mailto:${escapeHtml(supportEmail)}" style="color:#9b6b3c;text-decoration:underline">${escapeHtml(supportEmail)}</a>.`
+      `This link is tied to your paid order and is intended only for your restoration upload.<br/>If the link does not open, contact <a href="mailto:${escapeHtml(
+        supportEmail
+      )}" style="color:#9b6b3c;text-decoration:underline">${escapeHtml(
+        supportEmail
+      )}</a>.`
     ),
   ].join('')
 
@@ -213,7 +239,9 @@ function buildPaymentConfirmedEmail({
 
   const bodyRows = [
     emailParagraph(
-      `Hi ${escapeHtml(customerName)}, we received your payment and the photo you uploaded before checkout. Your restoration is now in our AI draft plus human review workflow.`
+      `Hi ${escapeHtml(
+        customerName
+      )}, we received your payment and the photo you uploaded before checkout. Your restoration is now in our AI draft plus human review workflow.`
     ),
     emailDetailBlock([
       ['Order', String(orderNumber)],
@@ -225,9 +253,7 @@ function buildPaymentConfirmedEmail({
       'A human reviews the before and after result before delivery.',
       'During beta, approved restores are usually delivered within 48 hours.',
     ]),
-    emailInfoBox(
-      'Your result will be sent to this checkout email address.'
-    ),
+    emailInfoBox('Your result will be sent to this checkout email address.'),
   ].join('')
 
   const html = emailShell({
@@ -268,7 +294,9 @@ function buildMerchantPaidOrderEmail({
       ['Status', currentJob.status],
     ]),
     emailNoteBox(
-      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(localOrder.notes || 'No extra notes provided.').replace(/\n/g, '<br/>')}`
+      `<strong style="color:#211915">Repair notes:</strong><br/>${escapeHtml(
+        localOrder.notes || 'No extra notes provided.'
+      ).replace(/\n/g, '<br/>')}`
     ),
     emailCtaButton(adminUrl, 'Open Admin Review'),
     emailCtaFallback(adminUrl, 'Open admin review page'),
@@ -396,7 +424,9 @@ async function handlePreuploadedPaidOrder({
     checkout_email: transaction.checkoutEmail,
     customer_name: transaction.customerName || '',
     expires_at: paidExpiresAt,
-    order_number: transaction.orderNumber ? String(transaction.orderNumber) : null,
+    order_number: transaction.orderNumber
+      ? String(transaction.orderNumber)
+      : null,
     payment_confirmed_at: new Date().toISOString(),
     payment_provider: 'paddle',
     payment_provider_order_id: String(transaction.orderId),
@@ -416,14 +446,65 @@ async function handlePreuploadedPaidOrder({
     const existingJob = await getJob(localOrder.job_id)
 
     if (existingJob) {
+      // Preview-first path (AI HD): the job was created at preview
+      // time with a placeholder email and no payment context. Now
+      // that the buyer has paid, copy the real checkout email and
+      // payment metadata onto the job so auto-delivery (and any
+      // future admin tooling) sees the correct recipient.
+      let currentJob = await updateJob(existingJob.id, {
+        checkout_email: transaction.checkoutEmail,
+        customer_name: transaction.customerName || existingJob.customer_name,
+        order_bound: true,
+        order_id: String(transaction.orderId),
+        order_number: transaction.orderNumber
+          ? String(transaction.orderNumber)
+          : existingJob.order_number,
+        product_name: transaction.productName,
+        receipt_url: transaction.receiptUrl || '',
+        test_mode: Boolean(transaction.testMode),
+      }).catch(() => existingJob)
+
+      const previewPaidTier = resolveTierFromPriceId(
+        transaction.priceId || localOrder.variant_id || ''
+      )
+
+      if (previewPaidTier === 'ai_hd' && currentJob.status === 'needs_review') {
+        const autoDeliveryResult = await autoDeliverAiHdJob({
+          job: currentJob,
+          resendApiKey,
+          fromEmail,
+          supportEmail,
+        }).catch(async error => {
+          await insertEvent(currentJob.id, 'ai_hd_auto_delivery_failed', {
+            error:
+              error instanceof Error
+                ? error.message
+                : 'AI HD auto-delivery failed.',
+            source: 'preview_unlock',
+          })
+          return null
+        })
+
+        if (autoDeliveryResult?.delivered && autoDeliveryResult.job) {
+          currentJob = autoDeliveryResult.job
+        }
+      }
+
       await updateOrder(localOrder.id, {
         ...paymentPatch,
-        status: mapJobStatusToOrderStatus(existingJob.status),
+        status: mapJobStatusToOrderStatus(currentJob.status),
       })
+
+      await insertEvent(currentJob.id, 'preview_paid_unlocked', {
+        local_order_id: localOrder.id,
+        payment_provider: 'paddle',
+        payment_provider_order_id: String(transaction.orderId),
+        tier: previewPaidTier,
+      }).catch(() => null)
 
       return {
         customerEmailSent: false,
-        job: existingJob,
+        job: currentJob,
         merchantEmailSent: false,
       }
     }
@@ -437,7 +518,9 @@ async function handlePreuploadedPaidOrder({
     notes: localOrder.notes || '',
     order_bound: true,
     order_id: String(transaction.orderId),
-    order_number: transaction.orderNumber ? String(transaction.orderNumber) : null,
+    order_number: transaction.orderNumber
+      ? String(transaction.orderNumber)
+      : null,
     original_file_name: localOrder.original_file_name,
     original_file_size: localOrder.original_file_size,
     original_file_type: localOrder.original_file_type,
@@ -475,6 +558,31 @@ async function handlePreuploadedPaidOrder({
       provider: currentJob.ai_provider,
       status: currentJob.status,
     })
+  }
+
+  const paidTier = resolveTierFromPriceId(
+    transaction.priceId || localOrder.variant_id || ''
+  )
+
+  if (paidTier === 'ai_hd' && currentJob.status === 'needs_review') {
+    const autoDeliveryResult = await autoDeliverAiHdJob({
+      job: currentJob,
+      resendApiKey,
+      fromEmail,
+      supportEmail,
+    }).catch(async error => {
+      await insertEvent(currentJob.id, 'ai_hd_auto_delivery_failed', {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'AI HD auto-delivery failed.',
+      })
+      return null
+    })
+
+    if (autoDeliveryResult?.delivered && autoDeliveryResult.job) {
+      currentJob = autoDeliveryResult.job
+    }
   }
 
   await updateOrder(localOrder.id, {
@@ -529,7 +637,9 @@ async function sendLegacySecureUploadLink({
       from: fromEmail,
       to: [transaction.checkoutEmail],
       reply_to: supportEmail,
-      subject: `Secure upload link for order ${transaction.orderNumber || transaction.orderId}`,
+      subject: `Secure upload link for order ${
+        transaction.orderNumber || transaction.orderId
+      }`,
       html: emailContent.html,
       text: emailContent.text,
     },
@@ -554,7 +664,6 @@ export default async function handler(req, res) {
   const supportEmail =
     process.env.HUMAN_RESTORE_SUPPORT_EMAIL || process.env.HUMAN_RESTORE_INBOX
   const siteUrl = process.env.SITE_URL || defaultSiteUrl
-  const configuredPriceId = process.env.PADDLE_HUMAN_RESTORE_PRICE_ID
 
   if (!webhookSecret) {
     json(res, 503, { error: 'Webhook integration is not configured.' })
@@ -587,7 +696,11 @@ export default async function handler(req, res) {
     const transaction = getTransactionDetails(payload)
 
     if (isLocalRepairPackTransaction(transaction)) {
-      json(res, 200, { ok: true, ignored: true, reason: 'Local repair pack handled client-side.' })
+      json(res, 200, {
+        ok: true,
+        ignored: true,
+        reason: 'Local repair pack handled client-side.',
+      })
       return
     }
 
@@ -599,13 +712,21 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!shouldHandleTransaction({ transaction, configuredPriceId })) {
-      json(res, 200, { ok: true, ignored: true, reason: 'Transaction not targeted.' })
+    if (!shouldHandleTransaction({ transaction })) {
+      json(res, 200, {
+        ok: true,
+        ignored: true,
+        reason: 'Transaction not targeted.',
+      })
       return
     }
 
     if (!transaction.checkoutEmail) {
-      json(res, 200, { ok: true, ignored: true, reason: 'No customer email found.' })
+      json(res, 200, {
+        ok: true,
+        ignored: true,
+        reason: 'No customer email found.',
+      })
       return
     }
 

@@ -18,6 +18,10 @@ import {
   validateHumanRestoreImageSafety,
   validateHumanRestoreSubmissionText,
 } from './_lib/content-policy.js'
+import {
+  getProductNameForTier,
+  resolvePriceIdForTier,
+} from './_lib/product-tier.js'
 
 export const config = {
   api: {
@@ -81,13 +85,15 @@ export default async function handler(req, res) {
     return
   }
 
-  const priceId = process.env.PADDLE_HUMAN_RESTORE_PRICE_ID || ''
-
   let localOrder = null
 
   try {
     const rawBody = await readRawBody(req)
     const { fields, file } = parseMultipartForm(rawBody, boundary)
+    const rawTier = String(fields.productTier || fields.tier || '').trim()
+    const productTier = rawTier === 'ai_hd' ? 'ai_hd' : 'human'
+    const priceId = resolvePriceIdForTier(productTier)
+    const productName = getProductNameForTier(productTier)
     const photoError = validatePhoto(file)
 
     if (photoError) {
@@ -147,7 +153,7 @@ export default async function handler(req, res) {
       original_file_type: file.contentType,
       original_storage_bucket: buckets.originals,
       original_storage_path: storagePath,
-      product_name: 'Human-assisted Restore',
+      product_name: productName,
       status: 'pending_payment',
       submission_reference: submissionReference,
       variant_id: priceId,

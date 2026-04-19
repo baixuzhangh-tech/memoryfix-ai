@@ -45,6 +45,33 @@
       ]
     },
     {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/ai-hd",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/examples/(.*)",
       "headers": [
         {
@@ -91,9 +118,26 @@
           "value": "unsafe-none"
         }
       ]
+    },
+    {
+      "source": "/ai-hd(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "unsafe-none"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "unsafe-none"
+        }
+      ]
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/admin/human-restore-job",
+      "destination": "/api/admin/human-restore-jobs"
+    },
     {
       "source": "/:path((?!api/).*)",
       "destination": "/index.html"

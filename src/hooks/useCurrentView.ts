@@ -1,11 +1,17 @@
 import { isLegalPage } from '../components/LegalPage'
 import {
   adminReviewPath,
+  aiHdPreviewPath,
+  caseStudiesIndexPath,
+  caseStudyPathPrefix,
   humanRestoreSecureUploadPath,
   humanRestoreSuccessPath,
   retoucherPortalPath,
 } from '../config/routes'
-import { resolveNewLandingFlag } from '../lib/featureFlag'
+import {
+  rememberNewLandingFlagEnabled,
+  resolveNewLandingFlag,
+} from '../lib/featureFlag'
 
 /**
  * All URL-derived values App.tsx used to compute inline on every render.
@@ -23,8 +29,12 @@ import { resolveNewLandingFlag } from '../lib/featureFlag'
 export type CurrentView = {
   currentPath: string
   currentSearchParams: URLSearchParams
+  caseStudySlug: string
   defaultCheckoutEmail: string
   isAdminReviewPage: boolean
+  isAiHdPreviewPage: boolean
+  isCaseStudiesIndexPage: boolean
+  isCaseStudyPage: boolean
   isHumanRestoreSecureUploadPage: boolean
   isHumanRestoreSuccessPage: boolean
   isLegalRoute: boolean
@@ -44,8 +54,19 @@ export type CurrentView = {
 export function useCurrentView(): CurrentView {
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
   const currentSearchParams = new URLSearchParams(window.location.search)
+  const caseStudySlug = currentPath.startsWith(caseStudyPathPrefix)
+    ? currentPath.slice(caseStudyPathPrefix.length).trim()
+    : ''
+  const explicitVersion = currentSearchParams.get('v')
+  let isNewLandingEnabled = resolveNewLandingFlag(currentSearchParams)
+
+  if (currentPath === '/' && explicitVersion !== '1' && !isNewLandingEnabled) {
+    rememberNewLandingFlagEnabled()
+    isNewLandingEnabled = true
+  }
 
   return {
+    caseStudySlug,
     currentPath,
     currentSearchParams,
     defaultCheckoutEmail:
@@ -54,11 +75,14 @@ export function useCurrentView(): CurrentView {
       currentSearchParams.get('email') ||
       '',
     isAdminReviewPage: currentPath === adminReviewPath,
+    isAiHdPreviewPage: currentPath === aiHdPreviewPath,
+    isCaseStudiesIndexPage: currentPath === caseStudiesIndexPath,
+    isCaseStudyPage: Boolean(caseStudySlug),
     isHumanRestoreSecureUploadPage:
       currentPath === humanRestoreSecureUploadPath,
     isHumanRestoreSuccessPage: currentPath === humanRestoreSuccessPath,
     isLegalRoute: isLegalPage(currentPath),
-    isNewLandingEnabled: resolveNewLandingFlag(currentSearchParams),
+    isNewLandingEnabled,
     isRetoucherPortalPage: currentPath === retoucherPortalPath,
     queryCheckoutRef: currentSearchParams.get('checkout_ref') || '',
     queryOrderId: currentSearchParams.get('order_id') || '',

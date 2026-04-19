@@ -14,8 +14,19 @@ export const paddleEnvironment =
   import.meta.env.VITE_PADDLE_ENVIRONMENT || 'production'
 export const paddleHumanRestorePriceId =
   import.meta.env.VITE_PADDLE_HUMAN_RESTORE_PRICE_ID || ''
+export const paddleHumanRestoreAiHdPriceId =
+  import.meta.env.VITE_PADDLE_HUMAN_RESTORE_AI_HD_PRICE_ID || ''
 export const paddleLocalPackPriceId =
   import.meta.env.VITE_PADDLE_LOCAL_PACK_PRICE_ID || ''
+
+export type HumanRestoreTier = 'ai_hd' | 'human'
+
+export function resolvePaddlePriceIdForTier(tier: HumanRestoreTier): string {
+  if (tier === 'ai_hd') {
+    return paddleHumanRestoreAiHdPriceId
+  }
+  return paddleHumanRestorePriceId
+}
 export const paddleScriptUrl = 'https://cdn.paddle.com/paddle/v2/paddle.js'
 
 /**

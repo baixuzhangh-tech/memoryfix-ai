@@ -14,6 +14,9 @@ export type HumanRestoreLocalOrder = {
   paymentConfirmedAt: string
   photoReceived: boolean
   productName: string
+  productTier?: 'ai_hd' | 'human'
+  hdDownloadUrl?: string
+  hdDownloadExpiresInSeconds?: number
   receiptUrl: string
   status: string
   submissionReference: string

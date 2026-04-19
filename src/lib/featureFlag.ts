@@ -25,6 +25,16 @@ function safeLocalStorage(): Storage | null {
   }
 }
 
+export function rememberNewLandingFlagEnabled(): void {
+  const storage = safeLocalStorage()
+
+  try {
+    storage?.setItem(STORAGE_KEY, STORAGE_VALUE_ENABLED)
+  } catch {
+    // Ignore storage failures; flag still works for the current page load.
+  }
+}
+
 /**
  * Read the current flag value, latching or clearing localStorage based
  * on the URL `v` parameter. Callers should pass a URLSearchParams built
@@ -35,11 +45,7 @@ export function resolveNewLandingFlag(searchParams: URLSearchParams): boolean {
   const storage = safeLocalStorage()
 
   if (urlValue === '2') {
-    try {
-      storage?.setItem(STORAGE_KEY, STORAGE_VALUE_ENABLED)
-    } catch {
-      // Ignore private-mode / quota failures — flag still works via URL.
-    }
+    rememberNewLandingFlagEnabled()
     return true
   }
 
