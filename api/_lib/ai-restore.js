@@ -742,7 +742,7 @@ function getReplicatePollingStrategy({ modelPreset, stageParams }) {
   // maxDuration budget, we can only afford ~10s of polling. If the model is
   // hot and the input is simple it will finish in time; otherwise we throw
   // and the pipeline falls through to the next restoration stage (CodeFormer).
-  const defaultMaxPolls = preset === 'old_photo_restoration' ? 1 : 12
+  const defaultMaxPolls = preset === 'old_photo_restoration' ? 1 : 18
   const defaultPollIntervalMs = 2000
 
   return {

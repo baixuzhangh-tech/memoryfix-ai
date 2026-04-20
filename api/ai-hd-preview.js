@@ -69,33 +69,6 @@ const allowedImageTypes = new Set([
 ])
 const placeholderPreviewEmail = 'preview-pending@artgen.site'
 
-/**
- * Best-effort background task scheduler for Vercel Node serverless.
- *
- * Prefers Vercel's documented request context (same mechanism used by
- * `@vercel/functions`'s `waitUntil`), which keeps the invocation alive
- * until the promise settles (up to maxDuration). If that hook is not
- * available (e.g. local dev, older runtime), we fall back to a plain
- * fire-and-forget so the main response is not blocked — the promise
- * will still run as long as the event loop is alive.
- */
-function scheduleBackgroundTask(promiseFactory) {
-  const promise = Promise.resolve().then(promiseFactory)
-  try {
-    const ctxSymbol = Symbol.for('@vercel/request-context')
-    const store = globalThis[ctxSymbol]
-    const ctx = typeof store?.get === 'function' ? store.get() : null
-    if (typeof ctx?.waitUntil === 'function') {
-      ctx.waitUntil(promise.catch(() => {}))
-      return promise
-    }
-  } catch {
-    // fall through to fire-and-forget
-  }
-  promise.catch(() => {})
-  return promise
-}
-
 function validatePhoto(file) {
   if (!file || file.fieldName !== 'photo') {
     return 'Please attach the photo you want restored.'
@@ -285,34 +258,29 @@ export default async function handler(req, res) {
     })
     previewConsumed = true
 
-    const backgroundJob = job
-    const backgroundOrderId = localOrder.id
-
-    // Run the AI pipeline OUT OF BAND. On Vercel Node runtime we hand
-    // the promise to the request-context `waitUntil` hook so the
-    // serverless invocation stays alive until it settles (up to
-    // maxDuration). The client gets its 202 immediately and polls
-    // /api/human-restore-order for preview readiness, avoiding the
-    // Vercel platform timeout → HTML-error-page failure mode that
-    // previously caused "fal was charged but the preview never
-    // surfaced on the frontend" for large uploads.
-    scheduleBackgroundTask(async () => {
-      try {
-        await runRestoreJob({
-          job: backgroundJob,
-          triggeredBy: 'ai_hd_preview',
-        })
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'AI run failed.'
-        await insertEvent(backgroundJob.id, 'ai_hd_preview_ai_failed', {
-          error: message,
-        }).catch(() => null)
-        await updateOrder(backgroundOrderId, { status: 'failed' }).catch(
-          () => null
-        )
-      }
-    })
+    // Run the AI pipeline SYNCHRONOUSLY before sending the response.
+    // Previously we used a scheduleBackgroundTask / waitUntil pattern,
+    // but waitUntil is not reliably available on all Vercel runtimes
+    // (requires @vercel/functions which is not installed). Without it
+    // Vercel kills the function as soon as the 202 response is sent,
+    // leaving the pipeline unexecuted and the job stuck in PROCESSING.
+    //
+    // By awaiting the pipeline here, the handler has not returned yet,
+    // so Vercel keeps the function alive for up to maxDuration (60s).
+    // The client's fetch() stays open during this time (~35-45s); the
+    // frontend shows a progress bar in the submit button.
+    try {
+      await runRestoreJob({
+        job,
+        triggeredBy: 'ai_hd_preview',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI run failed.'
+      await insertEvent(job.id, 'ai_hd_preview_ai_failed', {
+        error: message,
+      }).catch(() => null)
+      await updateOrder(localOrder.id, { status: 'failed' }).catch(() => null)
+    }
 
     json(res, 202, {
       ok: true,

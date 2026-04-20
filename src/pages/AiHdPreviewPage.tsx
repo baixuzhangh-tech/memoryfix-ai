@@ -236,6 +236,7 @@ export function AiHdPreviewPage({
   const processingState = state.kind === 'processing' ? state : null
   const [thumbnailUrl, setThumbnailUrl] = React.useState<string | null>(null)
   const [simulatedProgress, setSimulatedProgress] = React.useState(0)
+  const submittingStartRef = React.useRef<number>(0)
 
   React.useEffect(() => {
     if (!selectedFile) {
@@ -247,22 +248,28 @@ export function AiHdPreviewPage({
     return () => URL.revokeObjectURL(url)
   }, [selectedFile])
 
+  const isProgressActive =
+    state.kind === 'submitting' || state.kind === 'processing'
+
   React.useEffect(() => {
-    if (!processingState) {
+    if (!isProgressActive) {
       setSimulatedProgress(0)
       return undefined
     }
 
+    const startedAt =
+      processingState?.startedAt || submittingStartRef.current || Date.now()
+    const expectedMs = 45000
+
     const interval = setInterval(() => {
-      const elapsed = Date.now() - processingState.startedAt
-      const expectedMs = 40000
+      const elapsed = Date.now() - startedAt
       const t = Math.min(elapsed / expectedMs, 1)
       const eased = 1 - (1 - t) * (1 - t)
       setSimulatedProgress(Math.min(90, Math.round(eased * 90)))
     }, 300)
 
     return () => clearInterval(interval)
-  }, [processingState])
+  }, [isProgressActive, processingState])
 
   React.useEffect(() => {
     const savedSession = readPreviewSession()
@@ -451,6 +458,7 @@ export function AiHdPreviewPage({
       return
     }
 
+    submittingStartRef.current = Date.now()
     setState({ kind: 'submitting' })
 
     try {
@@ -733,19 +741,21 @@ export function AiHdPreviewPage({
                 </h2>
               </div>
 
-              {!isReady && state.kind !== 'processing' && (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-primary/20 bg-secondary/40 p-8 text-center">
-                  <p className="font-serif text-base text-foreground">
-                    Your watermarked preview will appear here.
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Generation usually takes 20–60 seconds depending on the AI
-                    provider load.
-                  </p>
-                </div>
-              )}
+              {!isReady &&
+                state.kind !== 'processing' &&
+                state.kind !== 'submitting' && (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-primary/20 bg-secondary/40 p-8 text-center">
+                    <p className="font-serif text-base text-foreground">
+                      Your watermarked preview will appear here.
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Generation usually takes 20–60 seconds depending on the AI
+                      provider load.
+                    </p>
+                  </div>
+                )}
 
-              {state.kind === 'processing' && (
+              {(state.kind === 'processing' || state.kind === 'submitting') && (
                 <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed border-primary/20 bg-secondary/40">
                   {thumbnailUrl && (
                     <img
