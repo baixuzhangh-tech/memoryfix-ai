@@ -34,8 +34,8 @@ export const landingHero = {
     'Private · Your photo is never used to train AI · Deleted within 30 days',
   // WWI soldier-and-girl couple — cropped to upper body so faces dominate
   // the 4/5 hero slider. Emotional resonance + dramatic damage recovery.
-  heroBeforeSrc: '/examples/old-photos/hero-soldier-couple-before.jpg',
-  heroAfterSrc: '/examples/new-photos/hero-soldier-couple-after.jpg',
+  heroBeforeSrc: '/examples/old-photos/A_soldier_with_a_girl-before.png',
+  heroAfterSrc: '/examples/new-photos/A_soldier_with_a_girl-after.png',
 }
 
 export const landingHowItWorks = [
