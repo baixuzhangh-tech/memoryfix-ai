@@ -32,11 +32,10 @@ export const landingHero = {
   tertiaryCtaLabel: 'Or try a free fix in your browser →',
   trustLine:
     'Private · Your photo is never used to train AI · Deleted within 30 days',
-  // Use a workflow-owned pair in the hero so the most visible marketing spot
-  // reflects our actual restoration pipeline rather than a third-party archive
-  // restoration reference.
-  heroBeforeSrc: '/examples/old-photos/old-family-scratched-sofia-wallin-B.jpg',
-  heroAfterSrc: '/examples/new-photos/old-family-scratched-sofia-wallin-A.png',
+  // WWI soldier-and-girl couple — cropped to upper body so faces dominate
+  // the 4/5 hero slider. Emotional resonance + dramatic damage recovery.
+  heroBeforeSrc: '/examples/old-photos/hero-soldier-couple-before.jpg',
+  heroAfterSrc: '/examples/new-photos/hero-soldier-couple-after.jpg',
 }
 
 export const landingHowItWorks = [
