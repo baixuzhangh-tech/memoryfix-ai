@@ -39,7 +39,7 @@ export function Hero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden bg-gradient-to-b from-[#faf6f0] via-background to-background pb-10 pt-10 md:pb-14 md:pt-16',
+        'relative overflow-hidden bg-gradient-to-b from-[#f0e6d6] via-[#faf6f0] to-background pb-10 pt-10 md:pb-14 md:pt-16',
         className
       )}
     >
@@ -117,12 +117,11 @@ export function Hero({
               className="aspect-[4/5] rounded-sm"
             />
           </div>
-          <p className="mt-4 flex items-center justify-center gap-2 text-center font-mono text-xs font-medium uppercase tracking-widest text-foreground/70">
-            <span aria-hidden>←</span>
-            Drag to compare
+          <p className="mt-3 text-center font-mono text-[11px] font-medium uppercase tracking-widest text-foreground/70">
+            <span aria-hidden>←</span> Drag to compare{' '}
             <span aria-hidden>→</span>
           </p>
-          <p className="mt-1.5 text-center text-[11px] leading-snug text-muted-foreground/70">
+          <p className="mt-1 text-center text-[11px] text-muted-foreground">
             AI preview — a human retoucher refines every face
           </p>
         </div>
