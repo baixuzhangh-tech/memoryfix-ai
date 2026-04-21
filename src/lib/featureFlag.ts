@@ -1,7 +1,7 @@
 /**
  * Sticky feature flag for the Phase 2 warm-humanist redesign.
  *
- * Pain point: Paddle's successUrl does not preserve arbitrary query
+ * Pain point: PayPal's redirect does not preserve arbitrary query
  * params like `?v=2`, so a buyer who opens `/?v=2`, pays, and is
  * redirected to `/human-restore/success?order_id=…&provider_order_id=…`
  * would previously land on the legacy Success page because the flag

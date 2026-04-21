@@ -125,7 +125,7 @@ export function consumeLocalRepairCredit(): {
 }
 
 /**
- * Grant one pack worth of paid credits. Called from the Paddle webhook
+ * Grant one pack worth of paid credits. Called from the PayPal capture
  * handler once a `local_repair_pack` order is confirmed.
  */
 export function addLocalRepairPackCredits() {

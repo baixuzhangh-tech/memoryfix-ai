@@ -33,7 +33,7 @@ export interface SiteFooterProps {
 /**
  * Shared footer for the Phase 2 warm-humanist landing (`?v=2`).
  *
- * Renders the legal links Paddle requires for payment compliance
+ * Renders the legal links PayPal requires for payment compliance
  * (Privacy / Terms / Acceptable Use / Delivery / Refund), a direct
  * Support mailto, an open-source acknowledgement for inpaint-web,
  * and a short copyright line. Design tokens mirror the rest of the

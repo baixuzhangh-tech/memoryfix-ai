@@ -53,7 +53,7 @@ export function SuccessPage({ errorMessage, order, status }: SuccessPageProps) {
   const aiHdDownload = useAiHdDownload(order)
 
   // True for the entire AI HD post-checkout waiting window — from the
-  // Paddle redirect (status=pending_payment, webhook still racing) all
+  // PayPal redirect (status=pending_payment, capture still racing) all
   // the way through paid / needs_review until the HD download link
   // actually surfaces. During this whole window we weaken the "Back to
   // home" CTA and attach a beforeunload guard so buyers don't walk away

@@ -1,5 +1,5 @@
 /**
- * Single source of truth for mapping Paddle priceIds <-> product tier.
+ * Single source of truth for mapping product tiers.
  *
  * Two tiers are supported:
  *   - `ai_hd`: $6.9 AI HD, auto-delivered as soon as the AI pipeline
@@ -7,8 +7,9 @@
  *   - `human`: $29.9 human-retouched, goes through the existing
  *     needs_review -> assigned -> delivered workflow.
  *
- * The tier is derived from the Paddle priceId on the order/job
- * (`variant_id` field) so we do not require a schema migration.
+ * With PayPal, tiers are stored directly by name in the `variant_id`
+ * field. Legacy records may still have Paddle priceIds — the resolver
+ * handles both formats transparently.
  */
 
 export const HUMAN_RESTORE_TIERS = Object.freeze(['ai_hd', 'human'])
@@ -49,7 +50,23 @@ export function resolveTierFromRecord(record) {
     return 'human'
   }
 
-  return resolveTierFromPriceId(record.variant_id || record.price_id || '')
+  const variantId = record.variant_id || record.price_id || ''
+
+  // New PayPal path: tier name stored directly
+  if (
+    variantId === 'ai_hd' ||
+    variantId === 'human' ||
+    variantId === 'local_repair_pack'
+  ) {
+    return variantId === 'local_repair_pack' ? 'human' : variantId
+  }
+
+  // Legacy Paddle path: resolve from priceId
+  return resolveTierFromPriceId(variantId)
+}
+
+export function isSupportedTier(tier) {
+  return tier === 'ai_hd' || tier === 'human' || tier === 'local_repair_pack'
 }
 
 export function isSupportedPriceId(priceId) {
@@ -59,6 +76,12 @@ export function isSupportedPriceId(priceId) {
     return false
   }
 
+  // Accept tier names directly (PayPal)
+  if (isSupportedTier(value)) {
+    return true
+  }
+
+  // Legacy Paddle priceId check
   const aiHd = getAiHdPriceId()
   const human = getHumanPriceId()
 

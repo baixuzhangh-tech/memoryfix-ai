@@ -22,7 +22,7 @@ declare global {
  * checkout_clicked, payment_confirmed.
  *
  * For `click_human_restore` we only alias to `checkout_clicked` when
- * the destination actually opens a Paddle surface — intermediate
+ * the destination actually opens a PayPal checkout — intermediate
  * clicks (routing to /ai-hd, pending onboarding notices, tier
  * upsells) are explicitly excluded to keep the goal count clean.
  */
@@ -40,6 +40,7 @@ function goalAliasFor(
     case 'click_human_restore': {
       const destination = properties?.destination
       if (
+        destination === 'paypal_checkout' ||
         destination === 'paddle_overlay' ||
         destination === 'paddle_hosted_fallback'
       ) {

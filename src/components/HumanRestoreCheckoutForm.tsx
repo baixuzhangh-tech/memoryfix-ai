@@ -5,7 +5,7 @@ import {
   humanRestorePolicySummary,
 } from '../contentPolicy'
 import { humanRestoreAiHdPrice, humanRestorePrice } from '../lib/localRepair'
-import type { HumanRestoreTier } from '../lib/paddle/env'
+import type { HumanRestoreTier } from '../lib/paypal/env'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string

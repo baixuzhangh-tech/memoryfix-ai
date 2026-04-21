@@ -21,7 +21,7 @@ export interface LandingPageProps {
  * serving 100% of traffic until we explicitly cut over. Two external
  * integration points from the existing app:
  *
- *   - onLaunchPaidCheckout: triggers the existing Paddle overlay via
+ *   - onLaunchPaidCheckout: triggers the existing PayPal checkout via
  *     handleLaunchHumanRestoreCheckout() in App.tsx.
  *   - onFileSelection: reuses the existing handleFileSelection() so
  *     "Try for free in your browser" loads the in-app Editor exactly

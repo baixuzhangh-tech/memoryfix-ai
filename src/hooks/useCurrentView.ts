@@ -40,12 +40,19 @@ export type CurrentView = {
   isLegalRoute: boolean
   /**
    * Phase 2 warm-humanist redesign opt-in. `?v=2` latches into
-   * localStorage (see `src/lib/featureFlag.ts`) so Paddle's
-   * successUrl, which strips custom query params, still lands the
+   * localStorage (see `src/lib/featureFlag.ts`) so PayPal's
+   * redirect, which strips custom query params, still lands the
    * buyer on the new pages. `?v=1` clears the latch.
    */
   isNewLandingEnabled: boolean
   isRetoucherPortalPage: boolean
+  /**
+   * PayPal redirect token — present when the buyer returns from PayPal
+   * approval. The success page must call capture with this value before
+   * the order status will flip from pending_payment to paid.
+   */
+  paypalOrderToken: string
+  paypalPayerId: string
   queryCheckoutRef: string
   queryOrderId: string
   secureUploadToken: string
@@ -84,8 +91,17 @@ export function useCurrentView(): CurrentView {
     isLegalRoute: isLegalPage(currentPath),
     isNewLandingEnabled,
     isRetoucherPortalPage: currentPath === retoucherPortalPath,
+    // PayPal redirect appends ?token=<PayPalOrderId>&PayerID=<id>.
+    // When PayerID is present the token is a PayPal order id, not a
+    // secure-upload token.
+    paypalOrderToken: currentSearchParams.has('PayerID')
+      ? currentSearchParams.get('token') || ''
+      : '',
+    paypalPayerId: currentSearchParams.get('PayerID') || '',
     queryCheckoutRef: currentSearchParams.get('checkout_ref') || '',
     queryOrderId: currentSearchParams.get('order_id') || '',
-    secureUploadToken: currentSearchParams.get('token') || '',
+    secureUploadToken: currentSearchParams.has('PayerID')
+      ? ''
+      : currentSearchParams.get('token') || '',
   }
 }

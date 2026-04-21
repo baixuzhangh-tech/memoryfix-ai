@@ -26,7 +26,7 @@ import SuccessPage from './pages/SuccessPage'
 import { useCurrentView } from './hooks/useCurrentView'
 import { useHumanRestoreOrder } from './hooks/useHumanRestoreOrder'
 import { usePageSeo } from './hooks/usePageSeo'
-import { usePaddle } from './hooks/usePaddle'
+import { usePayPal } from './hooks/usePayPal'
 import * as m from './paraglide/messages'
 import { resizeImageFile } from './utils'
 import Progress from './components/Progress'
@@ -51,6 +51,7 @@ import {
 import { maskEmailAddress } from './lib/email'
 import { looksLikeUuid } from './lib/uuid'
 import {
+  addLocalRepairPackCredits,
   clearPendingLocalRepairPackCheckout,
   consumeLocalRepairCredit,
   freeLocalRepairLimit,
@@ -63,12 +64,8 @@ import {
   rememberPendingLocalRepairPackCheckout,
   writeLocalRepairUsage,
 } from './lib/localRepair'
-import {
-  paddleHumanRestorePriceId,
-  paddleLocalPackPriceId,
-  resolvePaddlePriceIdForTier,
-} from './lib/paddle/env'
-import type { CheckoutLaunchResult, HumanRestoreTier } from './lib/paddle/env'
+import { isPayPalConfigured } from './lib/paypal/env'
+import type { CheckoutLaunchResult, HumanRestoreTier } from './lib/paypal/env'
 
 // Still referenced from the `paymentSetupNotice` modal below. The
 // legacy home page no longer needs it (it owns its own copy).
@@ -135,6 +132,7 @@ function App() {
     isLegalRoute,
     isNewLandingEnabled,
     isRetoucherPortalPage,
+    paypalOrderToken,
     queryCheckoutRef,
     queryOrderId,
     secureUploadToken,
@@ -151,11 +149,11 @@ function App() {
   const canStartLocalRepair =
     freeLocalRepairsRemaining > 0 || paidLocalRepairCreditsRemaining > 0
   const {
-    ensurePaddleReady,
+    ensurePayPalReady,
     isHumanRestorePaymentReady,
     isLocalPackPaymentReady,
-    isPaddleClientReady,
-  } = usePaddle({
+    isPayPalClientReady,
+  } = usePayPal({
     onLocalPackCheckoutCompleted: ({ nextUsage }) => {
       setLocalRepairUsage(nextUsage)
       setLocalPackCheckoutStatus('success')
@@ -311,6 +309,7 @@ function App() {
     isHumanRestoreSuccessPage,
     localHumanRestoreCheckoutRef,
     localHumanRestoreOrderId,
+    paypalOrderToken,
     secureUploadToken,
   })
 
@@ -370,34 +369,93 @@ function App() {
       return
     }
 
-    if (!(await ensurePaddleReady())) {
-      setLocalPackCheckoutStatus('error')
-      setLocalPackCheckoutError(
-        'Secure checkout could not load in this browser. Please refresh, disable checkout-blocking extensions, and try again.'
-      )
-      trackProductEvent('click_local_pack_checkout', {
-        destination: 'paddle_unavailable',
-      })
-      return
-    }
-
     rememberPendingLocalRepairPackCheckout()
     trackProductEvent('click_local_pack_checkout', {
       credits: localRepairPackCredits,
-      destination: 'paddle_overlay',
+      destination: 'paypal_checkout',
     })
-    window.Paddle?.Checkout.open({
-      items: [{ priceId: paddleLocalPackPriceId, quantity: 1 }],
-      customData: {
-        memoryfix_plan: 'local_repair_pack',
-        memoryfix_credits: String(localRepairPackCredits),
-      },
-      settings: {
-        displayMode: 'overlay',
-        theme: 'light',
-      },
-    })
-    setLocalPackCheckoutStatus('idle')
+
+    try {
+      const createRes = await fetch('/api/paypal-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', tier: 'local_repair_pack' }),
+      })
+      const createBody = await createRes.json().catch(() => null)
+
+      if (!createRes.ok || !createBody?.paypalOrderId) {
+        throw new Error(
+          createBody?.error || 'Could not create checkout session.'
+        )
+      }
+
+      if (createBody.approvalUrl) {
+        window.location.assign(createBody.approvalUrl)
+        return
+      }
+
+      // Fallback: render PayPal Buttons in a popup for the created order
+      const paypalReady = await ensurePayPalReady()
+      if (paypalReady && window.paypal?.Buttons) {
+        const container = document.createElement('div')
+        container.id = 'paypal-local-pack-btn'
+        document.body.appendChild(container)
+        window.paypal
+          .Buttons({
+            createOrder: async () => createBody.paypalOrderId,
+            onApprove: async data => {
+              const captureRes = await fetch('/api/paypal-checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 'capture',
+                  paypalOrderId: data.orderID,
+                  tier: 'local_repair_pack',
+                }),
+              })
+              const captureBody = await captureRes.json().catch(() => null)
+              if (captureRes.ok && captureBody?.ok) {
+                clearPendingLocalRepairPackCheckout()
+                const nextUsage = addLocalRepairPackCredits()
+                trackProductEvent('complete_local_repair_pack_checkout', {
+                  added_credits: localRepairPackCredits,
+                  paid_credits_remaining: nextUsage.paidCredits,
+                })
+                setLocalRepairUsage(nextUsage)
+                setLocalPackCheckoutStatus('success')
+                setLocalPackCheckoutError('')
+                setShowLocalRepairLimitModal(false)
+              }
+              container.remove()
+            },
+            onCancel: () => {
+              clearPendingLocalRepairPackCheckout()
+              setLocalPackCheckoutStatus('idle')
+              container.remove()
+            },
+            onError: () => {
+              setLocalPackCheckoutStatus('error')
+              setLocalPackCheckoutError(
+                'PayPal checkout encountered an error. Please try again.'
+              )
+              container.remove()
+            },
+          })
+          .render(container)
+        setLocalPackCheckoutStatus('idle')
+        return
+      }
+
+      throw new Error('PayPal checkout could not be initialized.')
+    } catch (error) {
+      clearPendingLocalRepairPackCheckout()
+      setLocalPackCheckoutStatus('error')
+      setLocalPackCheckoutError(
+        error instanceof Error
+          ? error.message
+          : 'Checkout could not open. Please retry.'
+      )
+    }
   }
 
   function handlePricingPlanAction(planKind: PricingPlanKind) {
@@ -444,7 +502,7 @@ function App() {
       setShowLocalRepairLimitModal(false)
       setPaymentSetupNotice('human-restore')
       trackProductEvent('click_human_restore', {
-        destination: 'paddle_onboarding_pending',
+        destination: 'paypal_onboarding_pending',
         tier,
       })
       return
@@ -452,7 +510,7 @@ function App() {
 
     // AI HD tier follows the preview-first flow: route the buyer to
     // /ai-hd where they upload a photo, see a watermarked preview,
-    // and only then unlock with Paddle. Bypass the pre-payment
+    // and only then unlock with PayPal. Bypass the pre-payment
     // CheckoutForm modal entirely so the two tiers feel distinct.
     if (tier === 'ai_hd') {
       trackProductEvent('click_human_restore', {
@@ -469,7 +527,7 @@ function App() {
   /**
    * Launcher used by /ai-hd after the watermarked preview is ready.
    * Reuses the existing handleHumanRestoreCheckoutCreated path so
-   * Paddle overlay / hosted-checkout fallback / analytics all stay
+   * PayPal checkout / redirect fallback / analytics all stay
    * identical across tiers — the only difference is that the order
    * already exists (created by /api/ai-hd-preview), so we skip the
    * pre-payment upload step entirely.
@@ -507,10 +565,8 @@ function App() {
   }): Promise<CheckoutLaunchResult> {
     const { checkoutRef, orderId } = payload
     const tier: HumanRestoreTier = payload.tier || pendingCheckoutTier
-    const tierPriceId = resolvePaddlePriceIdForTier(tier)
-    const shouldUseHostedRedirect = shouldPreferHostedCheckoutRedirect()
 
-    if (!tierPriceId) {
+    if (!isPayPalConfigured()) {
       const errorMessage =
         tier === 'ai_hd'
           ? 'AI HD checkout is not configured yet.'
@@ -523,95 +579,54 @@ function App() {
     rememberHumanRestorePendingCheckout({ checkoutRef, orderId })
     setCheckoutLaunchStatus('loading')
 
-    const successUrl = new URL(humanRestoreSuccessPath, window.location.origin)
-    successUrl.searchParams.set('order_id', orderId)
-    successUrl.searchParams.set('checkout_ref', checkoutRef)
-
-    const paddleReady = await ensurePaddleReady()
-
-    if (
-      !shouldUseHostedRedirect &&
-      paddleReady &&
-      window.Paddle?.Checkout?.open
-    ) {
-      trackProductEvent('click_human_restore', {
-        checkout_ref_created: Boolean(checkoutRef),
-        destination: 'paddle_overlay',
-        local_order_created: Boolean(orderId),
-      })
-
-      try {
-        window.Paddle.Checkout.open({
-          items: [{ priceId: tierPriceId, quantity: 1 }],
-          customData: {
-            checkout_ref: checkoutRef,
-            flow: 'human_restore_preupload',
-            human_restore_order_id: orderId,
-            human_restore_tier: tier,
-          },
-          settings: {
-            displayMode: 'overlay',
-            theme: 'light',
-          },
-        })
-        setCheckoutLaunchStatus('idle')
-        setCheckoutLaunchError('')
-        return { ok: true }
-      } catch {
-        // overlay failed, fall through to hosted checkout
-      }
-    }
-
     trackProductEvent('click_human_restore', {
       checkout_ref_created: Boolean(checkoutRef),
-      destination: 'paddle_hosted_fallback',
+      destination: 'paypal_checkout',
       local_order_created: Boolean(orderId),
     })
 
     try {
-      const fallbackResponse = await fetch('/api/paddle-create-checkout', {
+      const createRes = await fetch('/api/paypal-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          checkoutRef,
-          orderId,
-          priceId: tierPriceId,
-          successUrl: successUrl.toString(),
-          tier,
-        }),
+        body: JSON.stringify({ action: 'create', checkoutRef, orderId, tier }),
       })
-      const fallbackBody = (await fallbackResponse
-        .json()
-        .catch(() => null)) as {
-        checkoutUrl?: string
+      const createBody = (await createRes.json().catch(() => null)) as {
+        approvalUrl?: string
         error?: string
+        paypalOrderId?: string
       } | null
 
-      if (fallbackResponse.ok && fallbackBody?.checkoutUrl) {
-        if (shouldUseHostedRedirect) {
-          setCheckoutLaunchStatus('idle')
-          setCheckoutLaunchError('')
-          window.location.assign(fallbackBody.checkoutUrl)
-          return { ok: true }
-        }
+      if (!createRes.ok || !createBody?.paypalOrderId) {
+        throw new Error(
+          createBody?.error || 'Could not create checkout session.'
+        )
+      }
 
-        const checkoutWindow = window.open(fallbackBody.checkoutUrl, '_blank')
+      // Store PayPal order ID for capture after redirect back
+      try {
+        localStorage.setItem(
+          'pending_paypal_order',
+          JSON.stringify({
+            paypalOrderId: createBody.paypalOrderId,
+            localOrderId: orderId,
+            checkoutRef,
+            tier,
+            timestamp: Date.now(),
+          })
+        )
+      } catch {
+        // localStorage may be unavailable
+      }
 
-        if (checkoutWindow) {
-          setCheckoutLaunchStatus('idle')
-          setCheckoutLaunchError('')
-          return { ok: true }
-        }
-
+      if (createBody.approvalUrl) {
         setCheckoutLaunchStatus('idle')
         setCheckoutLaunchError('')
-        window.location.assign(fallbackBody.checkoutUrl)
+        window.location.assign(createBody.approvalUrl)
         return { ok: true }
       }
 
-      throw new Error(
-        fallbackBody?.error || 'Could not create checkout session.'
-      )
+      throw new Error('PayPal did not return an approval URL.')
     } catch (error) {
       const errorMessage =
         error instanceof Error

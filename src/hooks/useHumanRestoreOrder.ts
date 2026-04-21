@@ -52,6 +52,12 @@ export interface UseHumanRestoreOrderArgs {
   isHumanRestoreSuccessPage: boolean
   localHumanRestoreCheckoutRef: string
   localHumanRestoreOrderId: string
+  /**
+   * PayPal order token from the redirect URL (?token=<id>&PayerID=<id>).
+   * When present, the hook calls /api/paypal-checkout action=capture once
+   * before the primary order poll picks up the updated status.
+   */
+  paypalOrderToken: string
   secureUploadToken: string
 }
 
@@ -103,6 +109,7 @@ export function useHumanRestoreOrder({
   isHumanRestoreSuccessPage,
   localHumanRestoreCheckoutRef,
   localHumanRestoreOrderId,
+  paypalOrderToken,
   secureUploadToken,
 }: UseHumanRestoreOrderArgs): UseHumanRestoreOrderResult {
   const [humanRestoreOrder, setHumanRestoreOrder] =
@@ -121,9 +128,70 @@ export function useHumanRestoreOrder({
   const [inlineSecureOrderStatus, setInlineSecureOrderStatus] =
     useState<LoadStatus>('idle')
 
-  // 1. Primary order poll.
+  // 0. PayPal capture — runs once when the buyer lands back from PayPal.
+  //    The capture call updates the DB order to "paid"; the primary poll
+  //    (effect #1) waits for this to settle so the UI shows the loading
+  //    spinner ("Confirming your payment…") instead of prematurely
+  //    displaying "Waiting for payment".
+  const [paypalCaptureSettled, setPaypalCaptureSettled] = useState(
+    !paypalOrderToken
+  )
+
   useEffect(() => {
-    if (!isHumanRestoreSuccessPage || !hasLocalHumanRestoreOrder) {
+    if (!paypalOrderToken || !isHumanRestoreSuccessPage) {
+      setPaypalCaptureSettled(true)
+      return
+    }
+
+    let isActive = true
+
+    fetch('/api/paypal-checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'capture',
+        paypalOrderId: paypalOrderToken,
+        localOrderId: localHumanRestoreOrderId || undefined,
+        checkoutRef: localHumanRestoreCheckoutRef || undefined,
+      }),
+    })
+      .then(async res => {
+        const body = await res.json().catch(() => null)
+        if (!isActive) return
+
+        if (res.ok && body?.ok) {
+          trackProductEvent('complete_human_restore_checkout', {
+            capture_id: body.captureId,
+            provider: 'paypal',
+          })
+        }
+      })
+      .catch(() => {
+        // Capture failed — the webhook will reconcile.
+      })
+      .finally(() => {
+        if (isActive) setPaypalCaptureSettled(true)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [
+    paypalOrderToken,
+    isHumanRestoreSuccessPage,
+    localHumanRestoreOrderId,
+    localHumanRestoreCheckoutRef,
+  ])
+
+  // 1. Primary order poll — gated on paypalCaptureSettled so the UI
+  //    stays on the "Confirming your payment…" spinner until capture
+  //    has finished writing the paid status to the DB.
+  useEffect(() => {
+    if (
+      !isHumanRestoreSuccessPage ||
+      !hasLocalHumanRestoreOrder ||
+      !paypalCaptureSettled
+    ) {
       setHumanRestoreOrderStatus('idle')
       setHumanRestoreOrderError('')
       setHumanRestoreOrder(null)
@@ -228,6 +296,7 @@ export function useHumanRestoreOrder({
     isHumanRestoreSuccessPage,
     localHumanRestoreCheckoutRef,
     localHumanRestoreOrderId,
+    paypalCaptureSettled,
   ])
 
   // 2. Secure upload URL resolver.

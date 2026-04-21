@@ -12,7 +12,7 @@ import {
 } from '@/contentPolicy'
 import { resizeImageFile } from '@/utils'
 import { humanRestoreAiHdPrice, humanRestorePrice } from '@/lib/localRepair'
-import type { HumanRestoreTier } from '@/lib/paddle/env'
+import type { HumanRestoreTier } from '@/lib/paypal/env'
 
 type HumanRestoreCheckoutResponse = {
   checkoutRef?: string
@@ -75,7 +75,7 @@ function formatFileSize(size: number) {
  *
  * Rendered inside the existing Modal in App.tsx when `?v=2` is active.
  * All business logic (file validation, POST /api/human-restore-checkout,
- * onCheckoutCreated Paddle launch, retry path, analytics events) is
+ * onCheckoutCreated PayPal launch, retry path, analytics events) is
  * IDENTICAL to HumanRestoreCheckoutForm — only the presentation changed.
  * Props interface is kept compatible so App.tsx just swaps the component.
  *
