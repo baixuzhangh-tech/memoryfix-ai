@@ -96,7 +96,7 @@ export const landingGallery: GallerySample[] = [
     id: 'worthington-1910',
     caption: 'Worthington family portrait, 1910',
     beforeSrc: '/examples/old-photos/old-family-worthington-1910-B.png',
-    afterSrc: '/examples/new-photos/old-family-worthington-1910-A.png',
+    afterSrc: '/examples/new-photos/old-family-worthington-1910-A.jpg',
     caseStudyHref: '/case-studies/worthington-family-portrait-1910-restoration',
     hasRealPair: true,
     sourceKind: 'product_case',
@@ -110,28 +110,28 @@ export const landingGallery: GallerySample[] = [
     sourceKind: 'archive_reference',
   },
   {
-    id: 'cameron-met',
-    caption: 'Portrait by Julia Margaret Cameron, 19th c.',
-    beforeSrc: '/examples/old-photos/pair-cameron-met-before.jpg',
-    afterSrc: '/examples/new-photos/pair-cameron-met-after.jpg',
+    id: 'earle-coates',
+    caption: 'Poet Florence Earle Coates, c. 1900',
+    beforeSrc: '/examples/old-photos/pair-earle-coates-before.jpg',
+    afterSrc: '/examples/new-photos/pair-earle-coates-after.jpg',
     hasRealPair: true,
-    sourceKind: 'archive_reference',
+    sourceKind: 'product_case',
   },
   {
-    id: 'nielsen-1908',
-    caption: 'Composer Carl Nielsen, c. 1908',
-    beforeSrc: '/examples/old-photos/pair-nielsen-1908-before.jpg',
-    afterSrc: '/examples/new-photos/pair-nielsen-1908-after.jpg',
+    id: 'carver-1910',
+    caption: 'George Washington Carver, c. 1910',
+    beforeSrc: '/examples/old-photos/pair-carver-1910-before.jpg',
+    afterSrc: '/examples/new-photos/pair-carver-1910-after.jpg',
     hasRealPair: true,
-    sourceKind: 'archive_reference',
+    sourceKind: 'product_case',
   },
   {
-    id: 'li-fu-lee',
-    caption: 'Li Fu Lee at MIT radio lab, 1925',
-    beforeSrc: '/examples/old-photos/pair-li-fu-lee-before.jpg',
-    afterSrc: '/examples/new-photos/pair-li-fu-lee-after.jpg',
+    id: 'curtis-inupiat',
+    caption: 'Inupiat family, Edward S. Curtis, c. 1929',
+    beforeSrc: '/examples/old-photos/pair-curtis-inupiat-before.jpg',
+    afterSrc: '/examples/new-photos/pair-curtis-inupiat-after.jpg',
     hasRealPair: true,
-    sourceKind: 'archive_reference',
+    sourceKind: 'product_case',
   },
 ]
 
@@ -206,7 +206,7 @@ export const landingPricing = {
     'Start free in your browser, try our AI with a watermark-free preview, or hand the photo to a real retoucher for full face accuracy.',
   tiers: landingPricingTiers,
   footnote:
-    'No subscription. Paid orders are one-time payments via Paddle. VAT and taxes handled automatically.',
+    'No subscription. Paid orders are one-time payments via PayPal. VAT and taxes handled automatically.',
 }
 
 export const landingTestimonials = [

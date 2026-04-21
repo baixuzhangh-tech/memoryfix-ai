@@ -89,7 +89,7 @@ export const caseStudies: CaseStudy[] = [
     whyItMatters:
       'This is a strong search-intent case for customers who want to restore an old family portrait but are nervous about over-editing.',
     beforeSrc: '/examples/old-photos/old-family-worthington-1910-B.png',
-    afterSrc: '/examples/new-photos/old-family-worthington-1910-A.png',
+    afterSrc: '/examples/new-photos/old-family-worthington-1910-A.jpg',
     beforeAlt:
       'Before restoration: faded 1910 Worthington family portrait with low clarity and visible age wear.',
     afterAlt:
