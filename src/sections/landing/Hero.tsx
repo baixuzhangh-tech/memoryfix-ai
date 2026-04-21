@@ -39,7 +39,7 @@ export function Hero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden bg-background pb-10 pt-10 md:pb-14 md:pt-16',
+        'relative overflow-hidden bg-gradient-to-b from-[#faf6f0] via-background to-background pb-10 pt-10 md:pb-14 md:pt-16',
         className
       )}
     >
@@ -121,6 +121,9 @@ export function Hero({
             <span aria-hidden>←</span>
             Drag to compare
             <span aria-hidden>→</span>
+          </p>
+          <p className="mt-1.5 text-center text-[11px] leading-snug text-muted-foreground/70">
+            AI preview — a human retoucher refines every face
           </p>
         </div>
       </div>
